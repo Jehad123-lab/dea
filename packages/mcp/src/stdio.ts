@@ -25,10 +25,15 @@ if (argv[0] === 'investigate' && flag('--resume')) {
     console.error(`dea-mcp investigate: ${(e as Error).message}`);
     process.exit(1);
   }
+} else if (argv.includes('--http')) {
+  const { serveHttpFromArgs } = await import('./http.ts');
+  await serveHttpFromArgs(argv, 'dea-mcp');
 } else if (argv.includes('--help') || argv.includes('-h')) {
   console.error(`dea-mcp: DEA's MCP server (decode any website's stack, design, code and APIs, with evidence).
 
   dea-mcp                 serve on stdio (what AI apps start)
+  dea-mcp --http          serve over Streamable HTTP on 127.0.0.1:7341 with a bearer token
+     --port <n>  --host <addr>  --client <name>  --new-token
   dea-mcp --version`);
 } else if (argv.includes('--version') || argv.includes('-v')) {
   console.error('0.1.0');

@@ -261,6 +261,53 @@ program
   );
 
 program
+  .command('serve')
+  .description('serve DEA to AI apps: stdio by default, or over HTTP with --http (Streamable HTTP MCP, bearer token)')
+  .option('--http', 'serve over HTTP: DEA tools at /mcp, DEA Hub at /hub')
+  .option('--host <addr>', 'address to listen on (keep 127.0.0.1 unless you know why)', '127.0.0.1')
+  .option('--port <n>', 'port', '7341')
+  .option('--client <name>', 'who the token is for: DEA Hub uses this client’s permissions and history', 'remote')
+  .option('--new-token', 'make a new token for this client (the old one stops working)')
+  .option('--allowed-host <names...>', 'Host header names to accept when not on 127.0.0.1 (e.g. dea.example.com)')
+  .action((f: { http?: boolean; host: string; port: string; client: string; newToken?: boolean; allowedHost?: string[] }) =>
+    run(async () => {
+      if (!f.http) {
+        await import('../../mcp/src/stdio.ts');
+        return;
+      }
+      const { startHttp } = await import('../../mcp/src/http.ts');
+      await startHttp({ host: f.host, port: Number(f.port), client: f.client, newToken: f.newToken, prog: 'dea', allowedHosts: f.allowedHost });
+      await new Promise(() => {}); // until Ctrl+C
+    }),
+  );
+
+program
+  .command('token')
+  .description('tokens for dea serve --http: make one (shown once), list, or revoke')
+  .option('--client <name>', 'which client the token is for', 'remote')
+  .option('--list', 'list clients that have a token (hashes only)')
+  .option('--revoke', 'delete this client’s token')
+  .action((f: { client: string; list?: boolean; revoke?: boolean }) =>
+    run(async () => {
+      const { createToken, loadTokens, revokeToken, tokenFile } = await import('../../mcp/src/http.ts');
+      if (f.list) {
+        const t = await loadTokens();
+        process.stdout.write(
+          t.length ? `${t.map((x) => `${x.client.padEnd(16)} ${x.hint}  made ${x.created}`).join('\n')}\n` : 'No tokens yet. dea serve --http makes one.\n',
+        );
+        return;
+      }
+      if (f.revoke) {
+        process.stdout.write((await revokeToken(f.client)) ? `Revoked the token for "${f.client}".\n` : `"${f.client}" had no token.\n`);
+        return;
+      }
+      const tok = await createToken(f.client);
+      process.stdout.write(`${tok}\n`);
+      process.stderr.write(`New token for "${f.client}" (shown once; its hash is in ${tokenFile()}). The old one, if any, no longer works.\n`);
+    }),
+  );
+
+program
   .command('status')
   .description('where an investigation stands (steps, live or not, the report when done)')
   .argument('[run]', 'run id or a unique part of it', 'latest')
