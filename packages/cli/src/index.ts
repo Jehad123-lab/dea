@@ -8,15 +8,20 @@ import {
   type InspectOptions,
   type InspectResult,
   inspectSite,
+  investigateInBackground,
+  investigationStatus,
   listRuns,
+  planInvestigation,
   type RunDoc,
   readRun,
   renderReport,
   resolveRun,
+  runInvestigation,
+  type StepKind,
   stackSite,
 } from '@dea/core';
 import { Command, Option } from 'commander';
-import { registerHub } from './hub.ts';
+import { launchers, registerHub } from './hub.ts';
 import { registerSession } from './session.ts';
 
 const VERSION = '0.1.0';
@@ -175,6 +180,105 @@ common(
     process.stdout.write(`${r.apiMd}\nSpec: ${where(r)}/api/openapi.json\n`);
   }),
 );
+
+program
+  .command('investigate')
+  .description(
+    'investigate a site toward a goal: DEA plans the steps (stack, pages, design, code, api), runs them with checkpoints, and writes a proven report where every claim cites evidence',
+  )
+  .argument('[url]', 'site to investigate')
+  .option('-g, --goal <text>', 'what you want to know', 'Give me an overview of how this site is built and designed')
+  .option('--background', 'start it and return at once; check with dea status <run>')
+  .option('--resume <run>', 'continue an investigation from its checkpoint')
+  .option('--max-pages <n>', 'internal pages to read (read-only)', '5')
+  .option('--only <steps>', 'run exactly these steps: stack,pages,design,code,api')
+  .option('--then <app:tool>', 'after the report, send it through DEA Hub (e.g. notion:notion-create-pages); the client name is dea-brain')
+  .option(
+    '--then-args <json>',
+    'arguments for --then; {{report}}, {{title}}, {{url}} and {{run}} are filled in',
+    '{"title":"{{title}}","content":"{{report}}"}',
+  )
+  .option('--plan-only', 'print the plan and stop')
+  .option('--no-llm', 'never use a language model, even if DEA_LLM_* is set')
+  .addOption(new Option('-b, --browser <name>', 'browser to use').choices(['auto', 'chrome', 'msedge', 'chromium']).default('auto'))
+  .option('--headed', 'show the browser window')
+  .option('--home <dir>', 'where runs are saved')
+  .option('--json', 'print the checkpoint as JSON at the end')
+  .action(
+    (
+      url: string | undefined,
+      f: {
+        goal: string;
+        background?: boolean;
+        resume?: string;
+        maxPages: string;
+        only?: string;
+        then?: string;
+        thenArgs: string;
+        planOnly?: boolean;
+        llm: boolean;
+        browser: BrowserChoice;
+        headed?: boolean;
+        home?: string;
+        json?: boolean;
+      },
+    ) =>
+      run(async () => {
+        if (f.home) process.env.DEA_HOME = f.home;
+        const deliver = f.then
+          ? (() => {
+              const [app, ...rest] = f.then.split(':');
+              if (!app || !rest.length) throw new Error('--then must look like app:tool');
+              return { app, tool: rest.join(':'), args: JSON.parse(f.thenArgs) as Record<string, unknown> };
+            })()
+          : undefined;
+        const o = {
+          browser: f.browser,
+          headless: !f.headed,
+          maxPages: Number(f.maxPages),
+          only: f.only ? (f.only.split(',').map((s) => s.trim()) as StepKind[]) : undefined,
+          deliver,
+          llm: f.llm,
+          onProgress: f.json ? undefined : (s: string) => process.stderr.write(`  · ${s}\n`),
+        };
+        if (f.planOnly) {
+          const p = planInvestigation(url ?? '', f.goal, o);
+          process.stdout.write(`Plan (${p.by}): ${p.reasons.join('; ')}\n${p.steps.map((s) => `  ${s.id}  ${s.does}`).join('\n')}\n`);
+          return;
+        }
+        if (f.background) {
+          if (!url) throw new Error('Give a URL to investigate.');
+          const l = launchers();
+          const r = await investigateInBackground(url, f.goal, { ...o, launcher: [l.node, l.cli] });
+          process.stdout.write(`Started ${r.runId} in the background (process ${r.pid}).\nCheck: dea status ${r.runId}\n`);
+          return;
+        }
+        if (!url && !f.resume) throw new Error('Give a URL, or --resume <run>.');
+        const r = await runInvestigation(f.resume ? { resume: f.resume } : { url: url as string, goal: f.goal }, o);
+        if (f.json) return void process.stdout.write(`${JSON.stringify(r.checkpoint, null, 2)}\n`);
+        process.stdout.write(`\n${r.report}\nSaved: ${join(r.dir, 'report.md')}\n`);
+      }),
+  );
+
+program
+  .command('status')
+  .description('where an investigation stands (steps, live or not, the report when done)')
+  .argument('[run]', 'run id or a unique part of it', 'latest')
+  .option('--home <dir>', 'where runs are saved')
+  .action((ref: string, f: { home?: string }) =>
+    run(async () => {
+      if (f.home) process.env.DEA_HOME = f.home;
+      const id = ref === 'latest' ? (await listRuns(undefined, 50)).find((x) => x.kind === 'investigate')?.id : ref;
+      if (!id) throw new Error('No investigations yet.');
+      const s = await investigationStatus(id);
+      const mark = { todo: '·', doing: '▶', done: '✔', failed: '✖', skipped: '–' } as const;
+      process.stdout.write(
+        `${s.cp.runId}  ${s.cp.status}${s.alive === false ? ` (its process is gone: resume with dea investigate --resume ${s.cp.runId})` : ''}\nGoal: ${s.cp.goal}\n${s.cp.steps
+          .map((x) => `  ${mark[x.status]} ${x.id.padEnd(12)} ${x.status.padEnd(7)} ${(x.error ?? x.summary ?? '').slice(0, 110)}`)
+          .join('\n')}\n${s.report ? `\n${s.report}` : `\nLatest:\n${s.progress}\n`}`,
+      );
+    }),
+  );
 
 program
   .command('report')

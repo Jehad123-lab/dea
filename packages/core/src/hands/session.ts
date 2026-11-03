@@ -348,6 +348,46 @@ export class HandsSession {
     });
   }
 
+  /** A short outline of the current page for investigations: title, headings, description, internal links. Read-only. */
+  async outline(): Promise<ActionResult> {
+    return this.act('outline', 'read', {}, async () =>
+      this.page.evaluate(() => {
+        const clean = (s: string | null | undefined) => (s ?? '').replace(/\s+/g, ' ').trim();
+        const here = new URL(location.href);
+        const links = new Map<string, string>();
+        for (const a of Array.from(document.querySelectorAll('a[href]'))) {
+          try {
+            const u = new URL((a as HTMLAnchorElement).href, location.href);
+            if (u.origin !== here.origin || !/^https?:$/.test(u.protocol)) continue;
+            u.hash = '';
+            const key = u.toString();
+            if (key === here.toString().replace(/#.*$/, '') || links.has(key)) continue;
+            if (/\.(pdf|zip|png|jpe?g|webp|gif|svg|mp4|webm)$/i.test(u.pathname)) continue;
+            links.set(key, clean(a.textContent || a.getAttribute('aria-label')).slice(0, 80));
+          } catch {
+            /* ignore */
+          }
+        }
+        // biome-ignore lint/performance/useDomNodeTextContent: visible text is what a reader sees
+        const text = clean(document.body?.innerText).slice(0, 600);
+        return {
+          title: document.title,
+          description: clean(document.querySelector('meta[name="description"]')?.getAttribute('content')),
+          headings: Array.from(document.querySelectorAll('h1,h2,h3'))
+            .map((h) => `${h.tagName.toLowerCase()}: ${clean(h.textContent).slice(0, 100)}`)
+            .filter((h) => h.length > 4)
+            .slice(0, 14),
+          text,
+          words: clean(document.body?.textContent).split(' ').length,
+          forms: document.forms.length,
+          images: document.images.length,
+          canvases: document.querySelectorAll('canvas').length,
+          links: [...links].slice(0, 80).map(([url, label]) => ({ url, label })),
+        };
+      }),
+    );
+  }
+
   async screenshot(opts: { fullPage?: boolean } = {}): Promise<ActionResult> {
     return this.act('screenshot', 'read', { fullPage: Boolean(opts.fullPage) }, async () => {
       const name = `shots/${String(this.seq).padStart(4, '0')}-screenshot.png`;

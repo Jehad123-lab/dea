@@ -1,4 +1,16 @@
-export type { Brain, Checkpoint, InvestigationPlan } from './brain/types.ts';
+export {
+  type InvestigateOptions,
+  type InvestigateResult,
+  investigateInBackground,
+  investigationStatus,
+  prepareInvestigation,
+  readCheckpoint,
+  runInvestigation,
+  writeReport,
+} from './brain/investigate.ts';
+export { brainFromEnv, checkCitations } from './brain/llm.ts';
+export { goalTerms, planInvestigation } from './brain/planner.ts';
+export type { Brain, Checkpoint, Claim, EvidenceRef, InvestigationPlan, PlanStep, StepKind, StepState } from './brain/types.ts';
 export { type BrowserChoice, browserInfo, installObservers, launchBrowser, normalizeUrl, type OpenOptions, openSite, type Session } from './browser/open.ts';
 export { type ApiCall, buildOpenApi, inferSchema, isApiCall, isAssetUrl, isTelemetry, mergeSchema, templatePath } from './code/api.ts';
 export { type CodeDoc, type CodeOptions, type CodeResult, decodeCode } from './code/decode.ts';

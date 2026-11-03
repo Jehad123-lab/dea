@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   type ActionResult,
   deaHome,
@@ -8,6 +9,8 @@ import {
   dispatch,
   HandsSession,
   inspectSite,
+  investigateInBackground,
+  investigationStatus,
   listRuns,
   loadPolicy,
   MODES,
@@ -105,6 +108,64 @@ export function createServer(): McpServer {
         const r = await decodeCode(url, { browser, unpack: false, vulns: false }, 'api');
         const spec = await readFile(join(r.dir, 'api', 'openapi.json'), 'utf8');
         return { content: [text(`${DATA_NOTE}\n\n${clip(r.apiMd)}\n\nRun id: ${r.runId}`), text(clip(spec, 40_000))] };
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'investigate',
+    {
+      title: 'Investigate a website toward a goal',
+      description:
+        'Start a background investigation: DEA plans the steps from the goal (stack, internal pages read-only, design, code, APIs), runs them with checkpoints and writes a proven report where every claim cites evidence. Returns a run id at once; poll get_run_status. Opens pages but never types, submits or changes anything on the site.',
+      inputSchema: z.object({
+        url,
+        goal: z.string().min(3).describe('What you want to know, in plain words.'),
+        maxPages: z.number().int().min(1).max(20).optional().describe('Internal pages to read (default 5).'),
+        only: z
+          .array(z.enum(['stack', 'pages', 'design', 'code', 'api']))
+          .optional()
+          .describe('Run exactly these steps.'),
+        browser,
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ url, goal, maxPages, only, browser }) => {
+      try {
+        const cli = fileURLToPath(new URL('../../cli/bin/dea.mjs', import.meta.url));
+        const r = await investigateInBackground(url, goal, { maxPages, only, browser, launcher: [process.execPath, cli] });
+        const s = await investigationStatus(r.runId);
+        return {
+          content: [
+            text(
+              `Investigation started: ${r.runId}\nPlan (${s.cp.plan.by}): ${s.cp.plan.steps.map((x) => x.kind).join(' → ')}\nCall get_run_status with this run id to follow it; most take 1–5 minutes.`,
+            ),
+          ],
+        };
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'get_run_status',
+    {
+      title: 'Follow an investigation',
+      description: 'Where an investigation stands: each step and its result, whether it is still running, and the proven report once it is done.',
+      inputSchema: z.object({ run: z.string().describe('The run id investigate returned (or a unique part of it).') }),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ run }) => {
+      try {
+        const s = await investigationStatus(run);
+        const steps = s.cp.steps
+          .map((x) => `- ${x.id} ${x.status}${x.summary ? `: ${x.summary.slice(0, 200)}` : ''}${x.error ? ` (error: ${x.error})` : ''}`)
+          .join('\n');
+        const state = s.alive === false ? `stopped (its process ended; it can be resumed with: dea investigate --resume ${s.cp.runId})` : s.cp.status;
+        return { content: [text(`${s.cp.runId}: ${state}\nGoal: ${s.cp.goal}\n${steps}${s.report ? `\n\n${DATA_NOTE}\n\n${clip(s.report, 40_000)}` : ''}`)] };
       } catch (e) {
         return fail(e);
       }
@@ -367,6 +428,8 @@ export const TOOL_NAMES = [
   'decode_design',
   'decode_code',
   'decode_api',
+  'investigate',
+  'get_run_status',
   'inspect_site',
   'detect_stack',
   'report',
