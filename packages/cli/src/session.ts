@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
 import { openSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
-import { dirname, join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, relative } from 'node:path';
 import { type ActionResult, type BrowserChoice, deaHome, loadPolicy, MODES, type Mode, SessionClient } from '@dea/core';
 import { type Command, Option } from 'commander';
+import { launchers } from './paths.ts';
 
 type Out = (s: string) => void;
 const out: Out = (s) => process.stdout.write(`${s}\n`);
@@ -105,7 +105,7 @@ export function registerSession(program: Command, wrap: (fn: () => Promise<void>
         };
         await mkdir(home, { recursive: true });
         const log = openSync(join(home, 'session.log'), 'a');
-        const entry = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'dea-session.mjs');
+        const entry = launchers().session;
         const child = spawn(process.execPath, [entry, JSON.stringify(opts)], { detached: true, stdio: ['ignore', log, log], windowsHide: true });
         child.unref();
         const t0 = Date.now();

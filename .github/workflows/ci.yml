@@ -23,6 +23,10 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - name: Build (dist/, plain node)
+        run: pnpm build
+      - name: Pack both packages and run them from the tarballs (no publish)
+        run: node scripts/pack-smoke.mjs
 
   smoke:
     name: Real browser smoke test
@@ -60,6 +64,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      - name: Build and run the packed tarballs
+        run: |
+          pnpm build
+          node scripts/pack-smoke.mjs
       - name: dea stack in Microsoft Edge (preinstalled on the runner)
         shell: pwsh
         run: |

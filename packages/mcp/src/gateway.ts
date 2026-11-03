@@ -5,7 +5,7 @@ import { Server } from '@modelcontextprotocol/server';
  * DEA Hub as an MCP server for one AI client: every connected app's tools, filtered by that client's permissions,
  * named "<app>__<tool>". The client talks only to DEA; DEA holds the logins and logs every call.
  */
-export function createGateway(client: string, hub = new Hub()): Server {
+export function createGateway(client: string, hub = new Hub(), o: { closeHub?: boolean } = {}): Server {
   const server = new Server({ name: 'dea-hub', version: '0.1.0' }, { capabilities: { tools: { listChanged: true } }, instructions: GATEWAY_NOTE(client) });
 
   server.setRequestHandler('tools/list', async () => {
@@ -31,9 +31,11 @@ export function createGateway(client: string, hub = new Hub()): Server {
     return r as any;
   });
 
-  server.onclose = () => {
-    void hub.close();
-  };
+  // over HTTP every request gets its own short-lived server around one shared hub: only the owner closes the hub
+  if (o.closeHub !== false)
+    server.onclose = () => {
+      void hub.close();
+    };
   return server;
 }
 

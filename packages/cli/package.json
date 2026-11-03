@@ -1,15 +1,62 @@
 {
-  "name": "@dea/cli",
+  "name": "dea-cli",
   "version": "0.1.0",
-  "private": true,
-  "type": "module",
+  "description": "DEA: decode any website and prove it. Stack, design, motion, shaders, code and APIs, every fact labelled Verified, Inferred or Unknown. CLI + MCP server for humans and AI agents.",
+  "author": "Jehad Uddin",
   "license": "MIT",
+  "homepage": "https://github.com/Jehad123-lab/dea#readme",
+  "bugs": {
+    "url": "https://github.com/Jehad123-lab/dea/issues"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jehad123-lab/dea.git",
+    "directory": "packages/cli"
+  },
+  "type": "module",
   "bin": {
-    "dea": "./bin/dea.mjs"
+    "dea": "./dist/index.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown"
   },
   "dependencies": {
-    "@dea/core": "workspace:*",
+    "@babel/generator": "^7.29.12",
+    "@babel/parser": "^7.29.12",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "^2.4.0",
     "commander": "^15.0.0",
-    "dea-mcp": "workspace:*"
+    "culori": "^4.0.2",
+    "playwright": "1.64.1",
+    "source-map-js": "^1.2.2",
+    "webcrack": "2.16.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@dea/core": "workspace:*"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "cli",
+    "reverse-engineering",
+    "design",
+    "webgl",
+    "three.js",
+    "gsap",
+    "playwright",
+    "openapi",
+    "ai-agents"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

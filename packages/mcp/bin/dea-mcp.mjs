@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Runs the TypeScript source directly (no build step yet). Phase 4 ships a bundled build instead.
+// Development launcher (runs the TypeScript source with tsx). Installed packages run dist/stdio.mjs instead.
 import { register } from 'tsx/esm/api';
 
 register();

@@ -44,8 +44,26 @@ const clip = (s: string, n = 24_000) => (s.length > n ? `${s.slice(0, n)}\n\n[cu
  * DEA's tools. The decode tools are read-only. browse / interact / submit are DEA's hands and ask the policy first.
  * Registered in a fixed order so the tool list never shuffles between versions.
  */
-export function createServer(): McpServer {
+export interface ServerOptions {
+  /** the command that continues a background investigation: [node, script]; "investigate --resume <id>" is appended */
+  launcher?: string[];
+  /** state kept between server instances (HTTP makes one instance per request): the open browser for the hands tools */
+  state?: ServerState;
+}
+export interface ServerState {
+  hands: HandsSession | null;
+}
+export const newServerState = (): ServerState => ({ hands: null });
+
+/** From a checkout: the dev launcher next to this source. From a built package: the script this process started as. */
+export function defaultLauncher(): string[] {
+  if (import.meta.url.endsWith('.ts')) return [process.execPath, fileURLToPath(new URL('../bin/dea-mcp.mjs', import.meta.url))];
+  return [process.execPath, process.argv[1] ?? ''];
+}
+
+export function createServer(opts: ServerOptions = {}): McpServer {
   const server = new McpServer({ name: 'dea', version: VERSION });
+  const state = opts.state ?? newServerState();
 
   server.registerTool(
     'decode_design',
@@ -134,8 +152,7 @@ export function createServer(): McpServer {
     },
     async ({ url, goal, maxPages, only, browser }) => {
       try {
-        const cli = fileURLToPath(new URL('../../cli/bin/dea.mjs', import.meta.url));
-        const r = await investigateInBackground(url, goal, { maxPages, only, browser, launcher: [process.execPath, cli] });
+        const r = await investigateInBackground(url, goal, { maxPages, only, browser, launcher: opts.launcher ?? defaultLauncher() });
         const s = await investigationStatus(r.runId);
         return {
           content: [
@@ -282,13 +299,12 @@ export function createServer(): McpServer {
   // Hands. One browser per server, opened on first use. The policy comes from DEA_HOME/policy.json
   // (or DEA_MODE set by the person in the MCP client config); a tool call can never loosen it.
 
-  let hands: HandsSession | null = null;
   const getHands = async (browserChoice?: 'auto' | 'chrome' | 'msedge' | 'chromium') => {
-    if (hands) return hands;
+    if (state.hands) return state.hands;
     const envMode = process.env.DEA_MODE as Mode | undefined;
     const policy = loadPolicy(deaHome(), { mode: envMode && MODES.includes(envMode) ? envMode : undefined });
-    hands = await HandsSession.start({ policy, browser: browserChoice, headless: process.env.DEA_HEADED !== '1' });
-    return hands;
+    state.hands = await HandsSession.start({ policy, browser: browserChoice, headless: process.env.DEA_HEADED !== '1' });
+    return state.hands;
   };
   const answer = async (r: ActionResult) => {
     const head =
@@ -349,9 +365,9 @@ export function createServer(): McpServer {
     async (a) => {
       try {
         if (a.action === 'close') {
-          if (!hands) return { content: [text('No browser session is open.')] };
-          const r = await hands.close();
-          hands = null;
+          if (!state.hands) return { content: [text('No browser session is open.')] };
+          const r = await state.hands.close();
+          state.hands = null;
           return { content: [text(`Closed. ${r.actions} actions logged in run ${r.runId}. Read it with the report tool.`)] };
         }
         const s = await getHands(a.browser);

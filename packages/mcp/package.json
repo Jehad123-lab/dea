@@ -1,22 +1,65 @@
 {
   "name": "dea-mcp",
   "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "license": "MIT",
-  "description": "DEA MCP server: decode any website's stack and design, with evidence.",
+  "description": "DEA MCP server: decode any website's stack, design, code and APIs with evidence, plus DEA Hub. stdio or Streamable HTTP with a bearer token.",
   "author": "Jehad Uddin",
-  "bin": {
-    "dea-mcp": "./bin/dea-mcp.mjs"
+  "license": "MIT",
+  "homepage": "https://github.com/Jehad123-lab/dea#readme",
+  "bugs": {
+    "url": "https://github.com/Jehad123-lab/dea/issues"
   },
-  "dependencies": {
-    "@dea/core": "workspace:*",
-    "@modelcontextprotocol/server": "^2.4.0",
-    "zod": "^4.6.7",
-    "@modelcontextprotocol/client": "^2.4.0"
+  "engines": {
+    "node": ">=22.12"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jehad123-lab/dea.git",
+    "directory": "packages/mcp"
+  },
+  "mcpName": "io.github.Jehad123-lab/dea",
+  "type": "module",
+  "bin": {
+    "dea-mcp": "./dist/stdio.mjs"
   },
   "exports": {
-    ".": "./src/server.ts",
-    "./gateway": "./src/gateway-stdio.ts"
+    ".": "./dist/index.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "@babel/generator": "^7.29.12",
+    "@babel/parser": "^7.29.12",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "culori": "^4.0.2",
+    "playwright": "1.64.1",
+    "source-map-js": "^1.2.2",
+    "webcrack": "2.16.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@dea/core": "workspace:*"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "reverse-engineering",
+    "design",
+    "webgl",
+    "three.js",
+    "gsap",
+    "playwright",
+    "openapi",
+    "ai-agents"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

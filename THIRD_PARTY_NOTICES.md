@@ -1,7 +1,8 @@
 # Third-party notices
 
 DEA is MIT licensed (see `LICENSE`). It depends on the open-source packages below. Their licences
-apply to them; nothing from them is copied into DEA's own source.
+apply to them; nothing from them is copied into DEA's own source. The built packages (`dea-cli`, `dea-mcp`)
+bundle only DEA's own code; every package below is installed from npm as a normal dependency.
 
 ## Runtime dependencies
 
@@ -25,6 +26,7 @@ apply to them; nothing from them is copied into DEA's own source.
 | ----------------------------------------- | ----------------- |
 | typescript                                | Apache-2.0        |
 | tsx                                       | MIT               |
+| tsdown (build: bundles DEA into dist/)    | MIT               |
 | vitest                                    | MIT               |
 | @biomejs/biome                            | MIT OR Apache-2.0 |
 | @types/node, @types/culori                | MIT               |

@@ -1,8 +1,7 @@
 import { spawn } from 'node:child_process';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import {
   CATALOG,
   checkName,
@@ -21,6 +20,7 @@ import {
   updateHub,
 } from '@dea/core';
 import type { Command } from 'commander';
+import { launchers } from './paths.ts';
 
 const out = (s: string) => process.stdout.write(`${s}\n`);
 
@@ -348,7 +348,7 @@ export function registerHub(program: Command, run: (fn: () => Promise<void>) => 
     .requiredOption('--client <name>', 'which AI client this is: its permissions apply')
     .action(async (f: { client: string }) => {
       checkName('Client', f.client);
-      const { serveGateway } = await import('dea-mcp/gateway');
+      const { serveGateway } = await import('../../mcp/src/gateway-stdio.ts');
       await serveGateway(f.client);
     });
 
@@ -403,13 +403,9 @@ export function clientTarget(client: string, o: { project?: boolean; home?: stri
   }
 }
 
-/** The commands an AI app runs to start DEA: node + this checkout's launchers (absolute, so any folder works). */
-export function launchers(): { node: string; mcp: string; cli: string } {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return { node: process.execPath, mcp: resolve(here, '../../mcp/bin/dea-mcp.mjs'), cli: resolve(here, '../bin/dea.mjs') };
-}
+type Launchers = Pick<ReturnType<typeof launchers>, 'node' | 'mcp' | 'cli'>;
 
-export function entriesFor(client: string, o: { hub?: boolean; l?: ReturnType<typeof launchers> } = {}): Record<string, { command: string; args: string[] }> {
+export function entriesFor(client: string, o: { hub?: boolean; l?: Launchers } = {}): Record<string, { command: string; args: string[] }> {
   const l = o.l ?? launchers();
   const name = client === 'claude-desktop' ? 'claude' : client;
   const e: Record<string, { command: string; args: string[] }> = { dea: { command: l.node, args: [l.mcp] } };
@@ -420,7 +416,7 @@ export function entriesFor(client: string, o: { hub?: boolean; l?: ReturnType<ty
 /** Merge DEA's entries into the client's config file, keeping everything else; backs the old file up first. */
 export async function installClient(
   client: string,
-  o: { hub?: boolean; project?: boolean; dryRun?: boolean; target?: ClientTarget; l?: ReturnType<typeof launchers> } = {},
+  o: { hub?: boolean; project?: boolean; dryRun?: boolean; target?: ClientTarget; l?: Launchers } = {},
 ): Promise<string> {
   const t = o.target ?? clientTarget(client, { project: o.project });
   const entries = entriesFor(client, { hub: o.hub, l: o.l });
@@ -453,4 +449,4 @@ export async function installClient(
   return `Added ${Object.keys(entries).join(' and ')} to ${t.file}${before !== null ? ` (old file kept as ${t.file}.dea-backup)` : ''}.\nRestart ${client} to load it.${o.hub ? ` Hub access for ${client}: read-only on every app until you run  dea hub allow ${client} <app> full` : ''}`;
 }
 
-export { hubHome };
+export { hubHome, launchers };

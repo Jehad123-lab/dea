@@ -15,11 +15,14 @@
     "format": "biome format --write .",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "test:e2e": "vitest run --mode e2e"
+    "test:e2e": "vitest run --mode e2e",
+    "build": "pnpm --filter dea-cli --filter dea-mcp run build",
+    "pack:smoke": "pnpm build && node scripts/pack-smoke.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.4",
     "@types/node": "^26.6.6",
+    "tsdown": "^0.23.4",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
