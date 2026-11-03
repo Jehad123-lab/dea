@@ -333,6 +333,11 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
   let diff: ExtractResult['diff'] = null;
   let layout: HeroLayout | null = null;
   let standin: Standin | null = null;
+  const rgbHex = (c: string | null | undefined): string | null => {
+    const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/.exec(c ?? '');
+    if (!m || (m[4] !== undefined && Number(m[4]) < 0.5)) return null;
+    return `#${[m[1], m[2], m[3]].map((n) => Number(n).toString(16).padStart(2, '0')).join('')}`;
+  };
   const lum = (hex: string) => {
     const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
     if (!m) return 0;
@@ -378,7 +383,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
         opts.reference
           ? await Promise.all([readLayout(browser, url, vp, opts.section ?? null, 8000, true), readLayout(browser, url, vp, opts.section ?? null, 8000, false)])
           : [ref.layout]
-      ).filter((l): l is HeroLayout => Boolean(l?.boxes.length));
+      ).filter((l): l is HeroLayout => Boolean(l?.boxes.length || l?.canvas || l?.background));
       say('rendering the rebuild and comparing it with the original first screen');
       const server = await serveDir(out);
       const cmp = await browser.newPage();
@@ -413,7 +418,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
           let pickScore = await render(params);
           for (const l of layoutCandidates) {
             await put('preview/index.html', previewHtml(mods, threeVersion, heroHtml(l)));
-            const sc = await render(params);
+            const sc = await render({ ...params, background: rgbHex(l.background) ?? params.background });
             if (sc > pickScore) {
               pickScore = sc;
               pick = l;
@@ -421,6 +426,8 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
           }
           layout = pick;
           if (layout) {
+            // ✔ the page's own background, read from the live page
+            params = { ...params, background: rgbHex(layout.background) ?? params.background };
             await put('layout.json', `${JSON.stringify(layout, null, 2)}\n`);
             const pf = projectFiles(target, { mods, title, site: url, threeVersion, hasMotion, heading, layout });
             for (const f of Object.keys(pf)) await put(f, pf[f]);

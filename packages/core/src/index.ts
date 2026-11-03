@@ -84,6 +84,7 @@ export {
   projectFiles,
   type ShaderModule,
   type Standin,
+  sceneCss,
   shaderModule,
   shaderName,
   type Target,

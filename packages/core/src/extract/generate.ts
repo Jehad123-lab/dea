@@ -436,6 +436,10 @@ export interface HeroLayout {
     textAlign: string;
     opacity: number;
   }>;
+  /** ✔ where the site's WebGL canvas sits on the first screen (its box, and the rounded corners of the box that clips it) */
+  canvas?: { x: number; y: number; w: number; h: number; radius: string } | null;
+  /** ✔ the page's own background colour (body, else html) */
+  background?: string | null;
 }
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -484,10 +488,13 @@ export function heroJsx(l: HeroLayout): string {
   return `// The first screen's text, placed where the site placed it (read from the live page at ${l.viewport.width}×${l.viewport.height}).
 // ✔ text, fonts, sizes, weights, colours and positions. ≈ units: viewport-relative absolute placement, not the site's own flex/grid.
 const items = ${JSON.stringify(items, null, 2)};
+// ✔ where the site's canvas sat and the page background
+const sceneCss = ${JSON.stringify(sceneCss(l, '.dea-scene'))};
 
 export default function Hero() {
   return (
     <section style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
+      {sceneCss && <style>{sceneCss}</style>}
       {items.map((it, i) => {
         const Tag = it.tag;
         return (
@@ -502,9 +509,27 @@ export default function Hero() {
 `;
 }
 
+/** CSS that puts the WebGL canvas where the site had it and paints the page background (both read from the live page). */
+export function sceneCss(l: HeroLayout, selector = '#scene'): string {
+  const vw = (px: number) => `${r2((px / l.viewport.width) * 100)}vw`;
+  const vh = (px: number) => `${r2((px / l.viewport.height) * 100)}vh`;
+  const out: string[] = [];
+  if (l.background) out.push(`html, body { background: ${l.background}; }`);
+  const c = l.canvas;
+  if (c && (c.w < l.viewport.width * 0.98 || c.h < l.viewport.height * 0.98 || (c.radius && c.radius !== '0px')))
+    out.push(
+      `${selector} { inset: auto !important; left: ${vw(c.x)} !important; top: ${vh(c.y)} !important; width: ${vw(c.w)} !important; height: ${vh(c.h)} !important; border-radius: ${c.radius || '0px'}; overflow: hidden; }`,
+      `${selector} canvas { width: 100% !important; height: 100% !important; display: block; }`,
+    );
+  return out.join('\n');
+}
+
 /** The same hero as plain HTML, for the vanilla project and the preview. */
 export function heroHtml(l: HeroLayout): string {
-  return `<section class="dea-hero" style="position: relative; width: 100vw; height: 100vh; overflow: hidden">\n${heroStyles(l)
+  const css = sceneCss(l);
+  return `${css ? `<style>\n${css}\n</style>\n` : ''}<section class="dea-hero" style="position: relative; width: 100vw; height: 100vh; overflow: hidden">\n${heroStyles(
+    l,
+  )
     .map((it) => `  <${it.tag} style="${escHtml(cssText(it.style)).replace(/"/g, '&quot;')}">${escHtml(it.text)}</${it.tag}>`)
     .join('\n')}\n</section>`;
 }
@@ -575,15 +600,15 @@ export function projectFiles(
     files['main.js'] =
       `import './tokens/tokens.css';\nimport './motion/keyframes.css';\nimport { mountScene } from './scene.js';\n${o.hasMotion ? "import { buildMotion } from './motion/timeline.js';\n" : ''}\nmountScene(document.getElementById('scene'));\n${o.hasMotion ? 'buildMotion();\n' : ''}`;
     files['index.html'] =
-      `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="utf-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1" />\n    <title>${o.title} (rebuilt with DEA)</title>\n    <style>html, body { margin: 0; } #scene { position: fixed; inset: 0; z-index: -1; } h1 { font-size: var(--dea-hero-size, 64px); margin: 30vh 8vw 0; }</style>\n  </head>\n  <body>\n    <div id="scene"></div>\n    ${o.layout?.boxes.length ? heroHtml(o.layout).replace(/\n/g, '\n    ') : `<h1>${o.heading}</h1>`}\n    <script type="module" src="./main.js"></script>\n  </body>\n</html>\n`;
+      `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="utf-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1" />\n    <title>${o.title} (rebuilt with DEA)</title>\n    <style>html, body { margin: 0; } #scene { position: fixed; inset: 0; z-index: -1; } h1 { font-size: var(--dea-hero-size, 64px); margin: 30vh 8vw 0; }</style>\n  </head>\n  <body>\n    <div id="scene"></div>\n    ${o.layout ? heroHtml(o.layout).replace(/\n/g, '\n    ') : `<h1>${o.heading}</h1>`}\n    <script type="module" src="./main.js"></script>\n  </body>\n</html>\n`;
     files['package.json'] =
       `${JSON.stringify({ name: 'dea-extract', private: true, type: 'module', scripts: { dev: 'vite', build: 'vite build' }, dependencies: { three, gsap: '^3.12.5' }, devDependencies: { vite: '^6.0.0' } }, null, 2)}\n`;
   } else if (target === 'react') {
     files['src/Scene.jsx'] =
-      `// The site's main shader program in react-three-fiber.\nimport { Canvas, useFrame, useThree } from '@react-three/fiber';\nimport { useMemo } from 'react';\n${m ? `import { createMaterial, update } from '../${m.file}';` : ''}\n\nconst pointer = { x: 0, y: 0 };\nif (typeof window !== 'undefined') window.addEventListener('pointermove', (e) => { pointer.x = e.clientX; pointer.y = e.clientY; });\n\nfunction ShaderMesh() {\n  const material = useMemo(() => ${m ? 'createMaterial()' : 'null'}, []);\n  const size = useThree((s) => s.size);\n  useFrame(({ clock }) => {\n    if (!material) return;\n    // the drivers DEA saw on the site: clock, scroll, pointer, viewport\n    ${m ? 'update(material, { time: clock.getElapsedTime(), scrollY: window.scrollY, pointer, width: size.width, height: size.height });' : ''}\n  });\n  if (!material) return null;\n  return ${m?.points ? '<points material={material}><planeGeometry args={[2, 2, 127, 127]} /></points>' : '<mesh material={material}><planeGeometry args={[2, 2]} /></mesh>'};\n}\n\n${o.standin ? `import * as THREE from 'three';\nimport { createParticles } from '../standins/particles.js';\n\n// ≈ technique stand-in (not the site's code)\nfunction Particles() {\n  const points = useMemo(() => createParticles(THREE, ${JSON.stringify({ spread: o.standin.spread, x: o.standin.x, y: o.standin.y, color: o.standin.color })}), []);\n  return <primitive object={points} />;\n}\n\n` : ''}export default function Scene() {\n  return (\n    <Canvas ${m?.fullscreen ? 'orthographic camera={{ left: -1, right: 1, top: 1, bottom: -1, near: 0, far: 1 }}' : 'camera={{ position: [0, 0, 3], fov: 45 }}'} style={{ position: 'fixed', inset: 0, zIndex: -1 }}>\n      <ShaderMesh />\n${o.standin ? '      <Particles />\n' : ''}    </Canvas>\n  );\n}\n`;
+      `// The site's main shader program in react-three-fiber.\nimport { Canvas, useFrame, useThree } from '@react-three/fiber';\nimport { useMemo } from 'react';\n${m ? `import { createMaterial, update } from '../${m.file}';` : ''}\n\nconst pointer = { x: 0, y: 0 };\nif (typeof window !== 'undefined') window.addEventListener('pointermove', (e) => { pointer.x = e.clientX; pointer.y = e.clientY; });\n\nfunction ShaderMesh() {\n  const material = useMemo(() => ${m ? 'createMaterial()' : 'null'}, []);\n  const size = useThree((s) => s.size);\n  useFrame(({ clock }) => {\n    if (!material) return;\n    // the drivers DEA saw on the site: clock, scroll, pointer, viewport\n    ${m ? 'update(material, { time: clock.getElapsedTime(), scrollY: window.scrollY, pointer, width: size.width, height: size.height });' : ''}\n  });\n  if (!material) return null;\n  return ${m?.points ? '<points material={material}><planeGeometry args={[2, 2, 127, 127]} /></points>' : '<mesh material={material}><planeGeometry args={[2, 2]} /></mesh>'};\n}\n\n${o.standin ? `import * as THREE from 'three';\nimport { createParticles } from '../standins/particles.js';\n\n// ≈ technique stand-in (not the site's code)\nfunction Particles() {\n  const points = useMemo(() => createParticles(THREE, ${JSON.stringify({ spread: o.standin.spread, x: o.standin.x, y: o.standin.y, color: o.standin.color })}), []);\n  return <primitive object={points} />;\n}\n\n` : ''}export default function Scene() {\n  return (\n    <Canvas ${m?.fullscreen ? 'orthographic camera={{ left: -1, right: 1, top: 1, bottom: -1, near: 0, far: 1 }}' : 'camera={{ position: [0, 0, 3], fov: 45 }}'} className="dea-scene" style={{ position: 'fixed', inset: 0, zIndex: -1 }}>\n      <ShaderMesh />\n${o.standin ? '      <Particles />\n' : ''}    </Canvas>\n  );\n}\n`;
     files['src/App.jsx'] =
-      `import { useEffect } from 'react';\nimport Scene from './Scene.jsx';\n${o.layout?.boxes.length ? "import Hero from './Hero.jsx';\n" : ''}import '../tokens/tokens.css';\nimport '../motion/keyframes.css';\n${o.hasMotion ? "import { buildMotion } from '../motion/timeline.js';\n" : ''}\nexport default function App() {\n  ${o.hasMotion ? 'useEffect(() => { const tls = buildMotion(); return () => tls.forEach((t) => t.kill()); }, []);' : ''}\n  return (\n    <>\n      <Scene />\n      ${o.layout?.boxes.length ? '<Hero />' : `<h1 style={{ fontSize: 'var(--dea-hero-size, 64px)', margin: '30vh 8vw 0' }}>${o.heading}</h1>`}\n    </>\n  );\n}\n`;
-    if (o.layout?.boxes.length) files['src/Hero.jsx'] = heroJsx(o.layout);
+      `import { useEffect } from 'react';\nimport Scene from './Scene.jsx';\n${o.layout ? "import Hero from './Hero.jsx';\n" : ''}import '../tokens/tokens.css';\nimport '../motion/keyframes.css';\n${o.hasMotion ? "import { buildMotion } from '../motion/timeline.js';\n" : ''}\nexport default function App() {\n  ${o.hasMotion ? 'useEffect(() => { const tls = buildMotion(); return () => tls.forEach((t) => t.kill()); }, []);' : ''}\n  return (\n    <>\n      <Scene />\n      ${o.layout ? '<Hero />' : `<h1 style={{ fontSize: 'var(--dea-hero-size, 64px)', margin: '30vh 8vw 0' }}>${o.heading}</h1>`}\n    </>\n  );\n}\n`;
+    if (o.layout) files['src/Hero.jsx'] = heroJsx(o.layout);
     files['src/main.jsx'] =
       `import { createRoot } from 'react-dom/client';\nimport App from './App.jsx';\n\ncreateRoot(document.getElementById('root')).render(<App />);\n`;
     files['index.html'] =

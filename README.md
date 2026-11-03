@@ -77,6 +77,8 @@ pnpm dea inspect https://threejs.org/examples/webgl_animation_keyframes.html
 No Chrome or Edge on the machine? `pnpm --filter @dea/core exec playwright install chromium`
 (on Linux add `--with-deps`).
 
+Real reports from these commands are in [`examples/`](examples/).
+
 ## Commands
 
 | Command | What it does |
@@ -271,7 +273,7 @@ tokens: tokens.css, tailwind.preset.js, tokens.json · motion: 0 GSAP timelines/
 uniform drivers from the live trace: uST ← a clock: +0.0125 per second (wall time here); uTime ← a clock …
 techniques: gpgpu, mipmap-bloom, smaa, blue-noise, heightmap, ripple-sim, dissolve, points
 build: npm run build passed (7 s)
-visual diff: __SCORE__
+visual diff: 73.2% → 88.1% after analysis → 88.1% after research (searches found no new values to try)
 open gaps: 3 (see "Gap → path to result" in the report)
 ```
 

@@ -28,6 +28,7 @@ import {
   researchLoop,
   researchTechniques,
   type SearchProvider,
+  sceneCss,
   shaderModule,
   shaderName,
   type TraceDoc,
@@ -466,5 +467,22 @@ describe('research loop: only evidence about this site counts', () => {
     expect(r.params.background).toBe('#0e100f');
     expect(r.best).toBe(0.95);
     expect(r.citations[0].url).toBe('https://blog.example/x-test');
+  });
+});
+
+describe('extract: canvas placement and page background', () => {
+  it('puts the canvas where the site had it, with its rounded corners, and paints the page background', () => {
+    const l = {
+      viewport: { width: 1000, height: 500 },
+      boxes: [],
+      canvas: { x: 100, y: 50, w: 800, h: 400, radius: '24px' },
+      background: 'rgb(240, 241, 250)',
+    };
+    const css = sceneCss(l);
+    expect(css).toContain('html, body { background: rgb(240, 241, 250); }');
+    expect(css).toContain('left: 10vw !important; top: 10vh !important; width: 80vw !important; height: 80vh !important; border-radius: 24px');
+    expect(heroHtml(l)).toContain('<style>');
+    expect(sceneCss({ ...l, canvas: { x: 0, y: 0, w: 1000, h: 500, radius: '0px' }, background: null })).toBe('');
+    expect(heroJsx(l)).toContain('.dea-scene');
   });
 });

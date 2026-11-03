@@ -280,7 +280,27 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
   };
   walk(root);
   if (!out.length) { skip = false; walk(root); }
-  return { viewport: { width: W, height: H }, boxes: out };
+  let canvas = null;
+  for (const c of root.querySelectorAll('canvas')) {
+    const r = c.getBoundingClientRect();
+    const vis = Math.max(0, Math.min(r.right, W) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, H) - Math.max(r.top, 0));
+    if (vis < W * H * 0.05 || getComputedStyle(c).visibility === 'hidden') continue;
+    if (canvas && vis <= canvas.vis) continue;
+    let radius = getComputedStyle(c).borderRadius;
+    for (let p = c.parentElement, i = 0; p && i < 5 && (!radius || radius === '0px'); p = p.parentElement, i++) {
+      const cs = getComputedStyle(p);
+      if (cs.borderRadius && cs.borderRadius !== '0px' && cs.overflow !== 'visible') {
+        radius = cs.borderRadius;
+        const pr = p.getBoundingClientRect();
+        canvas = { x: pr.left, y: pr.top, w: pr.width, h: pr.height, radius, vis };
+      }
+    }
+    if (!canvas || canvas.vis !== vis) canvas = { x: r.left, y: r.top, w: r.width, h: r.height, radius: radius || '0px', vis };
+  }
+  if (canvas) delete canvas.vis;
+  const bgOf = (el) => { const b = el && getComputedStyle(el).backgroundColor; return b && b !== 'rgba(0, 0, 0, 0)' && b !== 'transparent' ? b : null; };
+  const background = bgOf(document.body) || bgOf(document.documentElement);
+  return { viewport: { width: W, height: H }, boxes: out, canvas, background };
 })()`;
 
 /** Open the page just to read the first screen's text layout (used when you bring your own reference screenshot). */
@@ -291,13 +311,23 @@ export async function readLayout(
   section: string | null = null,
   waitMs = 8000,
   gpuMask = false,
-): Promise<{ viewport: { width: number; height: number }; boxes: LayoutBox[] } | null> {
+): Promise<{
+  viewport: { width: number; height: number };
+  boxes: LayoutBox[];
+  canvas?: { x: number; y: number; w: number; h: number; radius: string } | null;
+  background?: string | null;
+} | null> {
   // without the GPU mask a site on a machine without a GPU often takes a fast, static path (and sometimes another layout);
   // with it, the site runs its WebGL path as on a real GPU, slowly. Extract reads both and keeps the one that matches.
   const context = await browser.newContext({ viewport });
   if (gpuMask) await installObservers(context, true);
   const page = await context.newPage();
-  type L = { viewport: { width: number; height: number }; boxes: LayoutBox[] };
+  type L = {
+    viewport: { width: number; height: number };
+    boxes: LayoutBox[];
+    canvas?: { x: number; y: number; w: number; h: number; radius: string } | null;
+    background?: string | null;
+  };
   let best: L | null = null;
   const read = async () => {
     if (section) await page.evaluate(`document.querySelector(${JSON.stringify(section)})?.scrollIntoView({ block: 'start' })`).catch(() => {});
@@ -335,7 +365,17 @@ export async function referenceShot(
   viewport: { width: number; height: number },
   ms = 20_000,
   section: string | null = null,
-): Promise<{ png: string; atMs: number; loader: boolean; layout: { viewport: { width: number; height: number }; boxes: LayoutBox[] } | null }> {
+): Promise<{
+  png: string;
+  atMs: number;
+  loader: boolean;
+  layout: {
+    viewport: { width: number; height: number };
+    boxes: LayoutBox[];
+    canvas?: { x: number; y: number; w: number; h: number; radius: string } | null;
+    background?: string | null;
+  } | null;
+}> {
   // the same observers and GPU answer DEA's decoders use, so the site shows its real 3D on a GPU-less machine
   const context = await browser.newContext({ viewport });
   await installObservers(context, true);
