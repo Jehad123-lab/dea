@@ -408,7 +408,7 @@ function designFacts(d: Design): Fact[] {
   const sc = d.scroll;
   f.push({
     key: 'design.scroll',
-    claim: `Scrolling is ${sc.mode}${sc.mode.startsWith('smooth') && sc.settleMs ? ` (one wheel tick eases out over ~${sc.settleMs}ms${m.js.lenis.present ? ', Lenis' : ''})` : ''}; the page is ${sc.screens} screens tall${sc.fixed.length ? `, with ${sc.fixed.length} fixed/sticky layers` : ''}.`,
+    claim: `Scrolling is ${sc.mode}${sc.mode.startsWith('smooth') && sc.settleMs ? ` (one wheel tick eases out over ~${sc.settleMs}ms${m.js.lenis.present ? ', Lenis' : ''})` : ''}; the page is ${sc.screens} screen${sc.screens === 1 ? '' : 's'} tall${sc.fixed.length ? `, with ${sc.fixed.length} fixed/sticky layers` : ''}.`,
     value: { mode: sc.mode, settleMs: sc.settleMs, screens: sc.screens },
     label: sc.mode === 'native' || sc.mode === 'does not scroll' ? 'Verified' : m.js.lenis.present ? 'Verified' : 'Inferred',
     evidence: [{ source: 'sampling', pointer: 'scrollY per frame after one wheel tick', excerpt: `${sc.intermediateFrames} in-between positions` }],
@@ -537,7 +537,11 @@ export function designSummary(d: DesignDoc): string {
     lines.push(
       `Type sizes: ${d.typography.scale.sizes.join(' / ')} px${d.typography.scale.consistent && d.typography.scale.ratio ? ` (~${d.typography.scale.ratio} ratio)` : ''}`,
     );
-  if (d.color.background)
+  const cov = d.color.coverage;
+  const covered = cov ? cov.canvas + cov.video : 0;
+  if (covered >= 0.5)
+    lines.push(`First screen: ${Math.round(covered * 100)}% ${cov.canvas >= cov.video ? 'WebGL canvas' : 'video'}; HTML text ${d.color.text?.hex ?? '?'}`);
+  else if (d.color.background)
     lines.push(
       `Colours: ${d.color.scheme} scheme, bg ${d.color.background.hex}, text ${d.color.text?.hex ?? '?'}${
         d.color.accents.length
@@ -555,11 +559,17 @@ export function designSummary(d: DesignDoc): string {
         .map((c) => c.hex)
         .join(' ')}`,
     );
-  const easings = [...new Set([...d.motion.css.observed.easings, ...d.motion.css.declared.easings].map((e) => e.name).filter(Boolean))];
-  lines.push(
-    `Motion: ${d.motion.css.observed.count} CSS animations seen${easings.length ? `, easing ${easings.slice(0, 3).join(', ')}` : ''}${d.motion.js.gsap.version ? `; GSAP ${d.motion.js.gsap.version} moves ${d.motion.js.gsap.animatedElements} elements` : ''}`,
+  const easings = [...new Set([...d.motion.css.observed.easings, ...d.motion.css.declared.easings].map((e) => e.name).filter(Boolean))].sort(
+    (a, b) => Number(a === 'ease') - Number(b === 'ease'),
   );
-  lines.push(`Scroll: ${d.scroll.mode}, ${d.scroll.screens} screens`);
+  const g = d.motion.js.gsap;
+  const gsapNote = g.version
+    ? g.animatedElements
+      ? `; GSAP ${g.version} moves ${g.animatedElements} elements`
+      : `; GSAP ${g.version} loaded (animates JS values, not HTML elements)`
+    : '';
+  lines.push(`Motion: ${d.motion.css.observed.count} CSS animations seen${easings.length ? `, easing ${easings.slice(0, 3).join(', ')}` : ''}${gsapNote}`);
+  lines.push(`Scroll: ${d.scroll.mode}${d.scroll.mode.startsWith('unknown') ? '' : `, ${d.scroll.screens} screen${d.scroll.screens === 1 ? '' : 's'}`}`);
   const sh = d.webgl.shaders;
   if (sh.shaderCount)
     lines.push(

@@ -49,7 +49,7 @@ export function renderDesignMd(d: DesignDoc, run: RunDoc): string {
   push(
     `- Motion: ${d.motion.js.gsap.version ? `GSAP ${d.motion.js.gsap.version}` : 'no GSAP'}${d.motion.css.observed.count ? `, ${d.motion.css.observed.count} CSS animations` : ''}${easeNames.length ? `, easing ${easeNames.slice(0, 2).join(' / ')}` : ''}.`,
   );
-  push(`- Scroll: ${d.scroll.mode}${d.motion.js.lenis.present ? ' (Lenis)' : ''}, ${d.scroll.screens} screens tall.`);
+  push(`- Scroll: ${d.scroll.mode}${d.motion.js.lenis.present ? ' (Lenis)' : ''}, ${d.scroll.screens} screen${d.scroll.screens === 1 ? '' : 's'} tall.`);
   const sh = d.webgl.shaders;
   const engine = d.stack.find((s) => /three|pixi|babylon|spline|unicorn|webgl/i.test(s.name));
   if (sh.shaderCount || engine)
@@ -250,9 +250,9 @@ export function renderDesignMd(d: DesignDoc, run: RunDoc): string {
   push('## Scroll', '');
   const s = d.scroll;
   push(
-    `- ${s.mode === 'native' || s.mode === 'does not scroll' ? V : I} ${s.mode[0].toUpperCase()}${s.mode.slice(1)}.${s.mode.startsWith('smooth') && s.settleMs ? ` One wheel tick glides for ~${s.settleMs}ms through ${s.intermediateFrames} in-between positions.` : ''}${s.mode.startsWith('custom') ? ' Why: the wheel changed the picture but the page’s scroll position stayed at 0.' : ''}`,
+    `- ${s.mode.startsWith('unknown') ? 'Unknown:' : s.mode === 'native' || s.mode === 'does not scroll' ? V : I} ${s.mode[0].toUpperCase()}${s.mode.slice(1)}.${s.mode.startsWith('smooth') && s.settleMs ? ` One wheel tick glides for ~${s.settleMs}ms through ${s.intermediateFrames} in-between positions.` : ''}${s.mode.startsWith('custom') ? ' Why: the wheel changed the picture but the page’s scroll position stayed at 0.' : ''}`,
   );
-  push(`- ${V} Page height ${s.documentHeight}px = ${s.screens} screens of ${s.viewportHeight}px.`);
+  push(`- ${V} Page height ${s.documentHeight}px = ${s.screens} screen${s.screens === 1 ? '' : 's'} of ${s.viewportHeight}px.`);
   if (s.fixed.length) push(`- ${V} Fixed / sticky layers: ${s.fixed.join(', ')}.`);
   if (s.hero.moves) push(`- ${V} The first screen animates on its own (mean pixel change ${s.hero.change} between frames ${s.hero.files.join(', ')}).`);
   const shots = s.steps.filter((x) => x.file);
@@ -274,7 +274,7 @@ export function renderDesignMd(d: DesignDoc, run: RunDoc): string {
       );
     for (const r of d.webgl.three.renderers.slice(0, 2))
       push(
-        `- ${V} three.js ${r.kind}: tone mapping ${r.toneMapping}${r.exposure !== null ? `, exposure ${r.exposure}` : ''}, output ${r.colorSpace}, pixel ratio ${r.pixelRatio}, shadows ${r.shadows}, antialias ${r.antialias}; ${r.geometries} geometries and ${r.textures} textures in GPU memory. Its last render call drew ${r.calls} draw calls / ${r.triangles?.toLocaleString('en-US')} triangles${r.points ? ` / ${r.points.toLocaleString('en-US')} points` : ''}${(r.calls ?? 0) <= 2 ? ' — a full-screen pass, so the scene is drawn off-screen first and finished with post-processing (renderer tone mapping can read "none" because an effect does it)' : ''}.`,
+        `- ${V} three.js ${r.kind}: tone mapping ${r.toneMapping}${r.exposure !== null ? `, exposure ${r.exposure}` : ''}, output ${r.colorSpace}, pixel ratio ${r.pixelRatio}, shadows ${r.shadows}, antialias ${r.antialias}; ${r.geometries} geometries and ${r.textures} textures in GPU memory. Its last render call drew ${r.calls} draw call${r.calls === 1 ? '' : 's'} / ${r.triangles?.toLocaleString('en-US')} triangles${r.points ? ` / ${r.points.toLocaleString('en-US')} points` : ''}${(r.calls ?? 0) <= 2 ? ' — a full-screen pass, so the scene is drawn off-screen first and finished with post-processing (renderer tone mapping can read "none" because an effect does it)' : ''}.`,
       );
     for (const scn of d.webgl.three.scenes.slice(0, 3)) {
       push(

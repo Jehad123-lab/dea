@@ -16,7 +16,12 @@ export interface ScrollStep {
 }
 
 export interface ScrollResult {
-  mode: 'native' | 'smooth (JavaScript)' | 'custom (wheel drives the scene, page does not scroll)' | 'does not scroll';
+  mode:
+    | 'native'
+    | 'smooth (JavaScript)'
+    | 'custom (wheel drives the scene, page does not scroll)'
+    | 'does not scroll'
+    | 'unknown (not sampled: this machine rendered too slowly)';
   settleMs: number | null;
   intermediateFrames: number;
   documentHeight: number;
@@ -189,7 +194,8 @@ export async function sampleScroll(page: Page, writer: RunWriter, opts: { steps?
   const moved = steps.some((s) => s.scrollY > 0);
   const visual = scrollPx.slice(1).some((p) => (p.diff ?? 0) > 3);
   let mode: ScrollResult['mode'];
-  if (!moved && visual) mode = 'custom (wheel drives the scene, page does not scroll)';
+  if (steps.length < 2) mode = 'unknown (not sampled: this machine rendered too slowly)';
+  else if (!moved && visual) mode = 'custom (wheel drives the scene, page does not scroll)';
   else if (!moved) mode = 'does not scroll';
   else if (settleMs !== null && settleMs > 160 && intermediate >= 4) mode = 'smooth (JavaScript)';
   else mode = 'native';

@@ -20,11 +20,11 @@ $ pnpm dea design https://jehaduddin.vercel.app
 
 Design decode: https://jehaduddin.vercel.app/
 Fonts: Timeless Sans Grotesk 300/400/700 (self-hosted, 100%)
-Type sizes: 13 / 16 / 24 / 32 / 54 px
+Type sizes: 13 / 16 / 24 / 32 px
 Colours: dark scheme, bg #000000, text #e9e7e1
-On screen: #000000 #060607 #26252a #35363a #44464a
-Motion: 82 CSS animations seen, easing expo out, custom ease-out; GSAP 3.15.0
-Scroll: custom (wheel drives the scene, page does not scroll)
+On screen: #000000 #010101 #26252a #35363a #16161b
+Motion: 93 CSS animations seen, easing custom ease-out (fast start, long soft landing), expo out, ease-in-out; GSAP 3.15.0 loaded (animates JS values, not HTML elements)
+Scroll: custom (wheel drives the scene, page does not scroll), 1 screen
 WebGL: 120 shaders, 38 custom (noise (simplex/perlin), fractal noise (fbm), curl noise, instancing, blur)
 ```
 

@@ -15,7 +15,7 @@
     "format": "biome format --write .",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "test:e2e": "DEA_E2E=1 vitest run"
+    "test:e2e": "vitest run --mode e2e"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.4",
