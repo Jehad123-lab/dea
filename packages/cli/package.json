@@ -1,0 +1,14 @@
+{
+  "name": "@dea/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "dea": "./src/index.ts"
+  },
+  "dependencies": {
+    "@dea/core": "workspace:*",
+    "commander": "^15.0.0"
+  }
+}

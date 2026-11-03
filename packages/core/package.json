@@ -1,0 +1,17 @@
+{
+  "name": "@dea/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "culori": "^4.0.2",
+    "playwright": "1.64.1"
+  },
+  "devDependencies": {
+    "@types/culori": "^4.0.1"
+  }
+}

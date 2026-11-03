@@ -1,0 +1,27 @@
+{
+  "name": "dea",
+  "private": true,
+  "type": "module",
+  "description": "Decode anything on the web: an evidence-first CLI and MCP server for AI agents and humans.",
+  "author": "Jehad Uddin",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dea": "tsx packages/cli/src/index.ts",
+    "mcp": "tsx packages/mcp/src/stdio.ts",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:e2e": "DEA_E2E=1 vitest run"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.4",
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
