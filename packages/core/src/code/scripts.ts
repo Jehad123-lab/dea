@@ -53,6 +53,24 @@ const LIBS: Array<[string, RegExp]> = [
 ];
 
 /** Fetch every parsed script's source through CDP and label what is inside. */
+/** Scripts served by well-known third parties (tags, captchas, widgets): never the site's own code. */
+const THIRD_PARTY: Array<[string, RegExp]> = [
+  ['Google Tag', /googletagmanager\.com|google-analytics\.com|gtag\/js/],
+  ['Cloudflare Turnstile', /challenges\.cloudflare\.com/],
+  ['Cloudflare challenge', /\/cdn-cgi\/challenge-platform\//],
+  ['reCAPTCHA', /google\.com\/recaptcha|gstatic\.com\/recaptcha/],
+  ['hCaptcha', /hcaptcha\.com/],
+  ['Vercel Analytics', /\/_vercel\/(insights|speed-insights)\//],
+  ['Sentry', /browser\.sentry-cdn\.com|js\.sentry-cdn\.com/],
+  ['Meta Pixel', /connect\.facebook\.net/],
+  ['Hotjar', /static\.hotjar\.com/],
+  ['Microsoft Clarity', /clarity\.ms/],
+  ['HubSpot', /js\.hs-scripts\.com|js\.hsforms\.net/],
+  ['Intercom', /widget\.intercom\.io/],
+  ['Stripe.js', /js\.stripe\.com/],
+  ['YouTube embed', /youtube\.com\/(iframe_api|s\/player)/],
+];
+
 export async function readScripts(
   cdp: CDPSession,
   seen: Map<string, Omit<ScriptRecord, 'source' | 'libs' | 'role'>>,
@@ -79,19 +97,23 @@ export async function readScripts(
       /(^|[-_.~])(three|react|react-dom|r3f|drei|post|postprocessing|vendors?|framework|polyfills?|lodash|gsap|motion|lenis|jquery|swiper|chunk-vendors|commons)([-_.~]|$)/.test(
         base,
       );
+    const third = THIRD_PARTY.find(([, re]) => re.test(s.url));
+    if (third && !libs.includes(third[0])) libs.push(third[0]);
     const role: ScriptRecord['role'] = inline
       ? 'inline'
-      : vendorName && (libs.length || /polyfill|vendor|framework|commons/.test(base))
+      : third
         ? 'vendor'
-        : /webpack-runtime|webpack\/runtime|__webpack_require__\.p\s*=/.test(source) && source.length < 30_000
-          ? 'runtime'
-          : libs.length && !appSignals
-            ? 'vendor'
-            : libs.length && source.length > 300_000
-              ? 'mixed'
-              : libs.length >= 2 && /three\.js|React/.test(libs.join()) && !/(classList|querySelector)/.test(source)
-                ? 'vendor'
-                : 'app';
+        : vendorName && (libs.length || /polyfill|vendor|framework|commons/.test(base))
+          ? 'vendor'
+          : /webpack-runtime|webpack\/runtime|__webpack_require__\.p\s*=/.test(source) && source.length < 30_000
+            ? 'runtime'
+            : libs.length && !appSignals
+              ? 'vendor'
+              : libs.length && source.length > 300_000
+                ? 'mixed'
+                : libs.length >= 2 && /three\.js|React/.test(libs.join()) && !/(classList|querySelector)/.test(source)
+                  ? 'vendor'
+                  : 'app';
     out.push({ ...s, inline, bytes: source.length, hash: s.hash || createHash('sha1').update(source).digest('hex'), source, libs, role });
   }
   return out;
