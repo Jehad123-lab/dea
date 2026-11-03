@@ -57,3 +57,18 @@ export interface RunMeta {
   files: Record<string, string>;
   warnings: string[];
 }
+
+/**
+ * Live progress for UIs (e.g. a future DEA Studio): subscribe with `onEvent` on any command's options,
+ * or iterate `streamRun(...)`. Events are plain JSON so they can cross a WebSocket or SSE unchanged.
+ */
+export type DeaEvent =
+  | { type: 'run.started'; runId: string; kind: RunMeta['kind']; url: string; dir: string; at: string }
+  | { type: 'step'; runId: string; step: string; at: string }
+  | { type: 'frame'; runId: string; file: string; mime: 'image/jpeg' | 'image/png'; data?: string; at: string }
+  | { type: 'fact'; runId: string; fact: Fact }
+  | { type: 'warning'; runId: string; message: string }
+  | { type: 'run.finished'; runId: string; dir: string; summary: string; at: string }
+  | { type: 'run.failed'; runId: string | null; error: string; at: string };
+
+export type EventSink = (event: DeaEvent) => void;

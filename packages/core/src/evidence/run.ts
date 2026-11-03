@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import type { RunMeta } from '../types.ts';
+import type { EventSink, RunMeta } from '../types.ts';
 import { redactText } from './secrets.ts';
 
 /** Where runs live. `DEA_HOME` overrides; default is ./.dea in the current folder. */
@@ -42,9 +42,21 @@ export class RunWriter {
   readonly dir: string;
   readonly files: Record<string, string> = {};
 
-  constructor(id: string, root = runsDir()) {
+  /** live events for UIs; frames carry base64 data only when `frameData` is true */
+  readonly emit: EventSink;
+  readonly frameData: boolean;
+
+  constructor(id: string, root = runsDir(), emit?: EventSink, opts: { frameData?: boolean } = {}) {
     this.id = id;
     this.dir = join(root, id);
+    this.emit = (e) => {
+      try {
+        emit?.(e);
+      } catch {
+        /* a listener's error never breaks a run */
+      }
+    };
+    this.frameData = opts.frameData ?? false;
   }
 
   async init(): Promise<this> {
@@ -58,7 +70,9 @@ export class RunWriter {
   }
 
   async progress(line: string): Promise<void> {
-    await appendFile(this.path('progress.md'), `- ${new Date().toISOString()} ${redactText(line)}\n`);
+    const at = new Date().toISOString();
+    await appendFile(this.path('progress.md'), `- ${at} ${redactText(line)}\n`);
+    this.emit({ type: 'step', runId: this.id, step: redactText(line), at });
   }
 
   async json(name: string, data: unknown, role = name): Promise<string> {
@@ -82,6 +96,16 @@ export class RunWriter {
     await mkdir(join(p, '..'), { recursive: true });
     await writeFile(p, data);
     this.files[role] = name;
+    if (/\.(jpe?g|png)$/i.test(name)) {
+      this.emit({
+        type: 'frame',
+        runId: this.id,
+        file: name,
+        mime: /png$/i.test(name) ? 'image/png' : 'image/jpeg',
+        ...(this.frameData ? { data: Buffer.from(data).toString('base64') } : {}),
+        at: new Date().toISOString(),
+      });
+    }
     return p;
   }
 }

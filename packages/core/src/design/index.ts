@@ -146,8 +146,14 @@ async function buildDesign(session: Session, writer: RunWriter, watch: Animation
       0.035,
       8,
     );
-  const palette = groupColors(styles.colors, 0.035, 16);
-  const roles = colorRoles(palette, kinds);
+  // the palette counts what elements paint; 'visible' samples (what is on top of the first screen) only pick the background
+  const palette = groupColors(
+    styles.colors.filter((c) => c.kind !== 'visible'),
+    0.035,
+    16,
+  );
+  const visibleBg = styles.coverage.dom >= 0.2 ? kinds('visible') : [];
+  const roles = colorRoles(palette, (k) => (k === 'background' && visibleBg.length ? visibleBg : kinds(k)));
   const screenSamples = scroll.frames.flatMap((f) => f.buckets.map(([r, g, b, n]) => ({ css: `rgb(${r}, ${g}, ${b})`, weight: n, kind: 'screen' })));
   const screen = groupColors(screenSamples, 0.05, 10);
   const colorVars = Object.entries({ ...css.customProps, ...styles.rootVars })
@@ -504,7 +510,9 @@ export async function decodeDesign(url: string, opts: DesignOptions = {}): Promi
   res.run.meta.files = { ...res.writer.files, run: 'run.json', progress: 'progress.md' };
   await res.writer.text('report.md', renderReport(res.run), 'report');
   await res.writer.json('run.json', res.run, 'run');
-  return { ...res, design: d, designMd: md, summary: designSummary(out as unknown as DesignDoc) };
+  const summary = designSummary(out as unknown as DesignDoc);
+  res.writer.emit({ type: 'run.finished', runId: res.runId, dir: res.dir, summary, at: new Date().toISOString() });
+  return { ...res, design: d, designMd: md, summary };
 }
 
 export type DesignDoc = Omit<Design, 'raw'> & {

@@ -22,7 +22,12 @@ export async function readJsMotion(page: Page, sampleMs = 1500): Promise<JsMotio
   return page.evaluate(async (ms) => {
     const w = window as any;
     const sel = (el: any): string => {
-      if (!el?.tagName) return typeof el === 'object' ? 'object' : String(el);
+      if (!el?.tagName)
+        return typeof el === 'function'
+          ? 'function'
+          : el && typeof el === 'object'
+            ? String(el.constructor?.name ?? 'object').slice(0, 40)
+            : String(el).slice(0, 40);
       const id = el.id ? `#${el.id}` : '';
       const cls = Array.from(el.classList ?? [])
         .slice(0, 2)

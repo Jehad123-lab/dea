@@ -2,7 +2,7 @@ import { type OpenOptions, openSite, type Session } from '../browser/open.ts';
 import { shaderFacts, summarizeShaders } from '../design/shaders.ts';
 import { newRunId, RunWriter, runsDir } from '../evidence/run.ts';
 import { renderReport } from '../report.ts';
-import type { Fact, RunMeta } from '../types.ts';
+import type { EventSink, Fact, RunMeta } from '../types.ts';
 import { finishHar, fmtBytes, type NetworkSummary } from './network.ts';
 import { type PageSnapshot, pageTree, takeSnapshot } from './snapshot.ts';
 import { detectStack, type StackHit, stackFacts } from './stack.ts';
@@ -14,6 +14,10 @@ export interface InspectOptions extends OpenOptions {
   tree?: boolean;
   /** called once per step, for CLIs that show progress */
   onProgress?: (step: string) => void;
+  /** live events (steps, screenshot frames, facts, warnings, finish) for UIs */
+  onEvent?: EventSink;
+  /** include base64 image data in frame events (default false: events carry the file name only) */
+  frameData?: boolean;
 }
 
 export interface RunDoc {
@@ -46,12 +50,32 @@ export interface InspectResult {
 export type DuringHook = (session: Session, writer: RunWriter) => Promise<{ facts?: Fact[]; design?: unknown } | undefined>;
 
 export async function collect(url: string, kind: RunMeta['kind'], opts: InspectOptions = {}, during?: DuringHook): Promise<InspectResult> {
-  const say = opts.onProgress ?? (() => {});
   const startedAt = new Date().toISOString();
-  const writer = await new RunWriter(newRunId(url), opts.runsRoot ?? runsDir()).init();
+  const writer = await new RunWriter(newRunId(url), opts.runsRoot ?? runsDir(), opts.onEvent, { frameData: opts.frameData }).init();
+  const say = (step: string) => {
+    opts.onProgress?.(step);
+    void writer.progress(step);
+  };
+  writer.emit({ type: 'run.started', runId: writer.id, kind, url, dir: writer.dir, at: startedAt });
+  try {
+    return await collectInto(writer, url, kind, opts, say, startedAt, during);
+  } catch (e) {
+    writer.emit({ type: 'run.failed', runId: writer.id, error: (e as Error).message, at: new Date().toISOString() });
+    throw e;
+  }
+}
+
+async function collectInto(
+  writer: RunWriter,
+  url: string,
+  kind: RunMeta['kind'],
+  opts: InspectOptions,
+  say: (step: string) => void,
+  startedAt: string,
+  during?: DuringHook,
+): Promise<InspectResult> {
   const rawHar = writer.path('network.raw.har');
   say(`opening ${url}`);
-  await writer.progress(`opening ${url}`);
   const session = await openSite(url, { ...opts, harPath: rawHar });
   const viewport = session.page.viewportSize() ?? { width: 1440, height: 900 };
   let snap: PageSnapshot;
@@ -61,7 +85,6 @@ export async function collect(url: string, kind: RunMeta['kind'], opts: InspectO
     if (during) extra = await during(session, writer);
     say('reading the page');
     snap = await takeSnapshot(session.page);
-    await writer.progress(`page read: ${snap.title}`);
     if (opts.tree !== false) {
       const tree = await pageTree(session.page).catch((e) => `# page tree unavailable: ${(e as Error).message}`);
       await writer.text('page.aria.yaml', tree, 'pageTree');
@@ -73,7 +96,7 @@ export async function collect(url: string, kind: RunMeta['kind'], opts: InspectO
   say('cleaning the network log');
   const { summary: network, entries } = await finishHar(rawHar, writer.path('network.har'), snap.url);
   writer.files.har = 'network.har';
-  await writer.progress(`network: ${network.requests} requests, ${fmtBytes(network.bytes)}, ${network.redactions} secrets redacted`);
+  say(`network: ${network.requests} requests, ${fmtBytes(network.bytes)}, ${network.redactions} secrets redacted`);
 
   const stack = detectStack({
     probes: snap.probes,
@@ -171,9 +194,12 @@ export async function collect(url: string, kind: RunMeta['kind'], opts: InspectO
   await writer.text('report.md', renderReport(run), 'report');
   meta.files = { ...writer.files, run: 'run.json', progress: 'progress.md' };
   await writer.json('run.json', run, 'run');
-  await writer.progress('done');
+  for (const fact of facts) writer.emit({ type: 'fact', runId: writer.id, fact });
+  for (const message of meta.warnings) writer.emit({ type: 'warning', runId: writer.id, message });
   say('done');
-  return { runId: writer.id, dir: writer.dir, run, writer, summary: summarize(run) };
+  const summary = summarize(run);
+  if (kind !== 'design') writer.emit({ type: 'run.finished', runId: writer.id, dir: writer.dir, summary, at: new Date().toISOString() });
+  return { runId: writer.id, dir: writer.dir, run, writer, summary };
 }
 
 /** Phase 1: open a site and save what it sees. */

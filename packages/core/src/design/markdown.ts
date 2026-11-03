@@ -30,7 +30,15 @@ export function renderDesignMd(d: DesignDoc, run: RunDoc): string {
           : ''
       }${d.typography.scale.base ? `, body ${d.typography.scale.base}px` : ''}.`,
     );
-  if (d.color.background)
+  const cov = d.color.coverage;
+  if (cov && cov.canvas + cov.video >= 0.5 && d.color.screen.length)
+    push(
+      `- Colour: the first screen is ${Math.round((cov.canvas + cov.video) * 100)}% ${cov.canvas >= cov.video ? 'WebGL canvas' : 'video'}, showing ${d.color.screen
+        .slice(0, 3)
+        .map((c) => `${c.hex} ${c.name}`)
+        .join(', ')}; the HTML layer on top uses ${d.color.text?.hex ?? '?'} text${d.color.accents[0] ? ` and ${d.color.accents[0].hex} accents` : ''}.`,
+    );
+  else if (d.color.background)
     push(
       `- Colour: ${d.color.scheme} — ${d.color.background.hex} background, ${d.color.text?.hex ?? '?'} text${d.color.accents[0] ? `, accent ${d.color.accents[0].hex} (${d.color.accents[0].name})` : ''}.`,
     );
@@ -110,7 +118,10 @@ export function renderDesignMd(d: DesignDoc, run: RunDoc): string {
       .map(([k, v]) => `${k === 'dom' ? 'HTML backgrounds' : k} ${Math.round(v * 100)}%`);
     if (parts.length) push(`- ${V} The first screen is painted by: ${parts.join(', ')} (160 points checked with elementsFromPoint).`);
   }
-  if (c.background) push(`- ${V} Background **${c.background.hex}** (${c.background.name}), ${pct(c.background.share)} of painted colour.`);
+  if (c.background)
+    push(
+      `- ${V} ${c.coverage && c.coverage.canvas + c.coverage.video >= 0.5 ? 'HTML background (mostly hidden under the canvas/video)' : 'Background'} **${c.background.hex}** (${c.background.name}), ${pct(c.background.share)} of painted colour.`,
+    );
   if (c.text)
     push(
       `- ${V} Text **${c.text.hex}** (${c.text.name})${c.bodyContrast ? `, contrast ${c.bodyContrast}:1 on the background (${c.bodyContrast >= 7 ? 'AAA' : c.bodyContrast >= 4.5 ? 'AA' : c.bodyContrast >= 3 ? 'AA for large text only' : 'below AA'})` : ''}.`,
@@ -179,7 +190,11 @@ export function renderDesignMd(d: DesignDoc, run: RunDoc): string {
     if (dc.keyframes.length) push(`  Keyframes: ${dc.keyframes.slice(0, 12).join(', ')}.`);
   }
   const g = m.js.gsap;
-  if (g.version || g.animatedElements) {
+  if (g.version && !g.animatedElements && !g.tweens.length) {
+    push(
+      `- ${I} GSAP ${g.version} is loaded, but no page element carries GSAP’s \`_gsap\` cache. Why: GSAP leaves that cache on every DOM element it animates, so here it most likely animates JavaScript values (three.js objects, uniforms, a timeline the scroll drives) rather than HTML.${g.global ? '' : ' Unknown: its eases, because GSAP is bundled.'}`,
+    );
+  } else if (g.version || g.animatedElements) {
     push(
       `- ${V} GSAP ${g.version ?? '(version unknown)'} has animated ${g.animatedElements} elements so far${
         Object.keys(g.animatedProps).length
@@ -213,6 +228,11 @@ export function renderDesignMd(d: DesignDoc, run: RunDoc): string {
     push(
       `- ${V} Lenis smooth scroll${m.js.lenis.version ? ` ${m.js.lenis.version}` : ''}${m.js.lenis.options ? `, options ${JSON.stringify(m.js.lenis.options)}` : ''}.`,
     );
+  if (m.js.idle.frames < 10)
+    push(
+      `- Unknown: JavaScript-driven HTML motion. Only ${m.js.idle.frames} frames came in during the ${m.js.idle.sampledMs}ms watch (the page renders slowly here), too few to tell.`,
+    );
+  else if (!m.js.idle.jsDriven.length) push(`- ${V} No HTML element moved from JavaScript while the page sat idle (${m.js.idle.frames} frames watched).`);
   if (m.js.idle.jsDriven.length)
     push(
       `- ${I} Moving from JavaScript every frame (no CSS animation on them): ${m.js.idle.jsDriven
@@ -254,7 +274,7 @@ export function renderDesignMd(d: DesignDoc, run: RunDoc): string {
       );
     for (const r of d.webgl.three.renderers.slice(0, 2))
       push(
-        `- ${V} three.js ${r.kind}: tone mapping ${r.toneMapping}${r.exposure !== null ? `, exposure ${r.exposure}` : ''}, output ${r.colorSpace}, pixel ratio ${r.pixelRatio}, shadows ${r.shadows}, antialias ${r.antialias}; last frame ${r.calls} draw calls, ${r.triangles?.toLocaleString('en-US')} triangles${r.points ? `, ${r.points.toLocaleString('en-US')} points` : ''}; ${r.geometries} geometries, ${r.textures} textures in memory.`,
+        `- ${V} three.js ${r.kind}: tone mapping ${r.toneMapping}${r.exposure !== null ? `, exposure ${r.exposure}` : ''}, output ${r.colorSpace}, pixel ratio ${r.pixelRatio}, shadows ${r.shadows}, antialias ${r.antialias}; ${r.geometries} geometries and ${r.textures} textures in GPU memory. Its last render call drew ${r.calls} draw calls / ${r.triangles?.toLocaleString('en-US')} triangles${r.points ? ` / ${r.points.toLocaleString('en-US')} points` : ''}${(r.calls ?? 0) <= 2 ? ' — a full-screen pass, so the scene is drawn off-screen first and finished with post-processing (renderer tone mapping can read "none" because an effect does it)' : ''}.`,
       );
     for (const scn of d.webgl.three.scenes.slice(0, 3)) {
       push(
@@ -335,7 +355,7 @@ export function renderDesignMd(d: DesignDoc, run: RunDoc): string {
   if (s.mode.startsWith('custom')) recipe.push('Let the wheel drive a scene timeline instead of scrolling the document.');
   if (sh.customPrograms)
     recipe.push(
-      `Write custom GLSL as three.js ShaderMaterials${sh.techniquesCustom.length ? ` using ${sh.techniquesCustom.slice(0, 3).join(', ')}` : ''}${sh.interactivity.length ? `, ${sh.interactivity.join(', ')}` : ''}.`,
+      `Write custom GLSL as three.js ShaderMaterials${sh.techniquesCustom.length ? ` using ${sh.techniquesCustom.slice(0, 3).join(', ')}` : ''}${sh.interactivity.length ? ` that ${sh.interactivity.join(' and ')}` : ''}.`,
     );
   if (sh.origins.postprocessing.length) recipe.push('Finish with a post-processing stack (bloom/SMAA-style passes).');
   for (const r of recipe) push(`- ${I} ${r}`);
