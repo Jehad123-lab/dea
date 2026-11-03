@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   type ActionResult,
   deaHome,
+  decodeCode,
   decodeDesign,
   dispatch,
   HandsSession,
@@ -56,6 +57,54 @@ export function createServer(): McpServer {
       try {
         const r = await decodeDesign(url, { browser, scrollSteps });
         return { content: [text(`${r.summary}\n\nRun id: ${r.runId}\n\n${DATA_NOTE}\n\n${clip(r.designMd)}`)] };
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'decode_code',
+    {
+      title: 'Decode how a website’s code works',
+      description:
+        'Reverse-engineer a website’s front-end code: every script, its bundler, public source maps (original files) or unpacked bundles, GSAP tweens with durations/eases and the code that builds them, three.js materials with each shader uniform explained, event listeners mapped to code, the APIs/CMS feeding each section, known-vulnerable libraries, and a rebuild sketch. Returns explain.md, an expert teardown where every claim is labelled Verified, Inferred or Unknown. Read-only; takes 1–4 min.',
+      inputSchema: z.object({
+        url,
+        browser,
+        unpack: z.boolean().optional().describe('Unpack bundles that have no source map (default true).'),
+        vulns: z.boolean().optional().describe('Check libraries against the retire.js data (default true).'),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    },
+    async ({ url, browser, unpack, vulns }) => {
+      try {
+        const r = await decodeCode(url, { browser, unpack, vulns });
+        return {
+          content: [
+            text(`${r.summary}\n\nRun id: ${r.runId} (report tool: which "code" or "api" for the details)\n\n${DATA_NOTE}\n\n${clip(r.explainMd, 40_000)}`),
+          ],
+        };
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'decode_api',
+    {
+      title: 'Map the API a website uses',
+      description:
+        'Watch a website load and scroll in a real browser and write the API it talks to as an OpenAPI 3.1 spec: endpoints, methods, path and query parameters, example request/response shapes, the code that makes each call, and which auth kind is used (never the values). Analytics calls are listed apart. Read-only.',
+      inputSchema: z.object({ url, browser }),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    },
+    async ({ url, browser }) => {
+      try {
+        const r = await decodeCode(url, { browser, unpack: false, vulns: false }, 'api');
+        const spec = await readFile(join(r.dir, 'api', 'openapi.json'), 'utf8');
+        return { content: [text(`${DATA_NOTE}\n\n${clip(r.apiMd)}\n\nRun id: ${r.runId}`), text(clip(spec, 40_000))] };
       } catch (e) {
         return fail(e);
       }
@@ -122,20 +171,27 @@ export function createServer(): McpServer {
     'report',
     {
       title: 'Read a saved report',
-      description: 'Read the report of a saved run: report.md (stack, network, page, WebGL) or design.md (the design decode). Use run "latest" for the newest.',
+      description:
+        'Read a saved run: report.md (stack, network, page, WebGL), design.md (design decode), explain.md (code teardown), code.md, api.md, or run.json. Use run "latest" for the newest.',
       inputSchema: z.object({
         run: z.string().default('latest').describe('Run id, a unique part of it, or "latest".'),
-        which: z.enum(['report', 'design', 'json']).default('report').describe('report.md, design.md, or run.json'),
+        which: z
+          .enum(['report', 'design', 'explain', 'code', 'api', 'json'])
+          .default('report')
+          .describe('report.md, design.md, explain.md, code.md, api.md, or run.json'),
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ run, which }) => {
       try {
         const dir = await resolveRun(run ?? 'latest');
-        if (which === 'design') {
-          const md = await readFile(join(dir, 'design.md'), 'utf8').catch(() => null);
-          if (!md) return fail(new Error('That run has no design decode; call decode_design first.'));
-          return { content: [text(`${DATA_NOTE}\n\n${clip(md)}`)] };
+        if (which === 'design' || which === 'explain' || which === 'code' || which === 'api') {
+          const md = await readFile(join(dir, `${which}.md`), 'utf8').catch(() => null);
+          if (!md)
+            return fail(
+              new Error(`That run has no ${which}.md; call ${which === 'design' ? 'decode_design' : which === 'api' ? 'decode_api' : 'decode_code'} first.`),
+            );
+          return { content: [text(`${DATA_NOTE}\n\n${clip(md, 40_000)}`)] };
         }
         const doc = await readRun<RunDoc>(dir);
         if (which === 'json') return { content: [text(clip(JSON.stringify(doc)))] };
@@ -307,4 +363,15 @@ export function createServer(): McpServer {
 }
 
 /** Tool names in their fixed order (checked by tests). */
-export const TOOL_NAMES = ['decode_design', 'inspect_site', 'detect_stack', 'report', 'list_runs', 'browse', 'interact', 'submit'] as const;
+export const TOOL_NAMES = [
+  'decode_design',
+  'decode_code',
+  'decode_api',
+  'inspect_site',
+  'detect_stack',
+  'report',
+  'list_runs',
+  'browse',
+  'interact',
+  'submit',
+] as const;

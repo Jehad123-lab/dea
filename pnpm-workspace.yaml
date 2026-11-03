@@ -2,3 +2,5 @@ packages:
   - "packages/*"
 allowBuilds:
   esbuild: true
+  # isolated-vm (used by webcrack) ships prebuilt binaries for Windows, macOS and Linux; its install script is not needed
+  isolated-vm: false

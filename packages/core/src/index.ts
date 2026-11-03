@@ -1,6 +1,16 @@
 export type { Brain, Checkpoint, InvestigationPlan } from './brain/types.ts';
 export { type BrowserChoice, browserInfo, installObservers, launchBrowser, normalizeUrl, type OpenOptions, openSite, type Session } from './browser/open.ts';
+export { type ApiCall, buildOpenApi, inferSchema, isApiCall, isAssetUrl, isTelemetry, mergeSchema, templatePath } from './code/api.ts';
+export { type CodeDoc, type CodeOptions, type CodeResult, decodeCode } from './code/decode.ts';
+export { CodeIndex, type Excerpt } from './code/excerpt.ts';
+export { linkData } from './code/explain.ts';
+export { CODE_INIT_SCRIPT } from './code/hooks.ts';
+export { parseStack } from './code/runtime.ts';
+export { detectBundler, type ScriptRecord, safeSourcePath, sourceMapRef } from './code/scripts.ts';
 export type { ApiEndpoint, ScriptSource } from './code/types.ts';
+export { explainPrograms, uniformMeaning } from './code/uniforms.ts';
+export { unpack } from './code/unpack.ts';
+export { checkScripts, cmpVersion } from './code/vulns.ts';
 export { colorName, contrast, groupColors } from './design/colors.ts';
 export { easingName } from './design/css.ts';
 export { type DesignDoc, type DesignOptions, type DesignResult, decodeDesign, designSummary } from './design/index.ts';

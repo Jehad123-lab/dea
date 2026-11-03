@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
   type BrowserChoice,
+  decodeCode,
   decodeDesign,
   type InspectOptions,
   type InspectResult,
@@ -119,20 +120,88 @@ common(
   }),
 );
 
+common(
+  program
+    .command('code')
+    .description(
+      'how the code works: scripts, source maps, unpacked bundles, GSAP tweens with call sites, shaders, listeners, APIs, known-vulnerable libraries',
+    )
+    .argument('<url>', 'site to decode')
+    .option('--no-unpack', 'do not unpack bundles that have no source map')
+    .option('--no-probe-maps', 'do not try <file>.map when a script names no source map')
+    .option('--no-vulns', 'skip the known-vulnerability check (it downloads the retire.js data once a day)')
+    .option('--max-unpack <kb>', 'skip unpacking bundles bigger than this', '1500')
+    .option('--steps <n>', 'how many wheel steps to scroll while watching', '24'),
+).action((url: string, flags: CommonFlags & { unpack: boolean; probeMaps: boolean; vulns: boolean; maxUnpack: string; steps: string }) =>
+  run(async () => {
+    const r = await decodeCode(url, {
+      ...options(flags),
+      unpack: flags.unpack,
+      probeMaps: flags.probeMaps,
+      vulns: flags.vulns,
+      maxUnpackBytes: Number(flags.maxUnpack) * 1024,
+      scrollSteps: Number(flags.steps),
+    });
+    if (flags.json) return void process.stdout.write(`${JSON.stringify({ runId: r.runId, dir: r.dir, code: r.code }, null, 2)}\n`);
+    process.stdout.write(
+      `\n${r.summary}\n\nThe teardown: ${where(r)}/explain.md   (dea report ${r.runId} --explain)\nCode details: ${where(r)}/code.md   API: ${where(r)}/api.md, api/openapi.json\n`,
+    );
+  }),
+);
+
+common(
+  program
+    .command('explain')
+    .description('an expert teardown of how a site works, section by section, with real code excerpts (runs dea code and prints explain.md)')
+    .argument('<url>', 'site to explain'),
+).action((url: string, flags: CommonFlags) =>
+  run(async () => {
+    const r = await decodeCode(url, options(flags));
+    if (flags.json) return void process.stdout.write(`${JSON.stringify({ runId: r.runId, dir: r.dir, explain: r.explainMd }, null, 2)}\n`);
+    process.stdout.write(`${r.explainMd}\n\nSaved: ${where(r)}/explain.md\n`);
+  }),
+);
+
+common(
+  program
+    .command('api')
+    .description('the API a site talks to, as an OpenAPI 3.1 spec (endpoints, methods, params, example shapes; auth kinds only, never values)')
+    .argument('<url>', 'site to watch'),
+).action((url: string, flags: CommonFlags) =>
+  run(async () => {
+    const r = await decodeCode(url, { ...options(flags), unpack: false, vulns: false }, 'api');
+    if (flags.json) return void process.stdout.write(`${JSON.stringify(JSON.parse(await readFile(join(r.dir, 'api', 'openapi.json'), 'utf8')), null, 2)}\n`);
+    process.stdout.write(`${r.apiMd}\nSpec: ${where(r)}/api/openapi.json\n`);
+  }),
+);
+
 program
   .command('report')
   .description('print the report for a run (default: the latest)')
   .argument('[run]', 'run id, a unique part of it, or "latest"', 'latest')
   .option('--design', 'print design.md instead of report.md')
+  .option('--explain', 'print explain.md (from dea code / dea explain)')
+  .option('--code', 'print code.md')
+  .option('--api', 'print api.md')
   .option('--json', 'print run.json')
   .option('--home <dir>', 'where runs are saved')
-  .action((ref: string, flags: { design?: boolean; json?: boolean; home?: string }) =>
+  .action((ref: string, flags: { design?: boolean; explain?: boolean; code?: boolean; api?: boolean; json?: boolean; home?: string }) =>
     run(async () => {
       if (flags.home) process.env.DEA_HOME = flags.home;
       const dir = await resolveRun(ref);
       const doc = await readRun<RunDoc>(dir);
       if (flags.json) return void process.stdout.write(`${JSON.stringify(doc, null, 2)}\n`);
-      if (!['inspect', 'stack', 'design'].includes(doc.meta.kind) && !flags.design) {
+      for (const [flag, name] of [
+        [flags.explain, 'explain.md'],
+        [flags.code, 'code.md'],
+        [flags.api, 'api.md'],
+      ] as const) {
+        if (!flag) continue;
+        const md = await readFile(join(dir, name), 'utf8').catch(() => null);
+        if (!md) throw new Error(`This run has no ${name}. Run "dea code <url>".`);
+        return void process.stdout.write(md);
+      }
+      if (!['inspect', 'stack', 'design', 'code', 'api'].includes(doc.meta.kind) && !flags.design) {
         return void process.stdout.write(await readFile(join(dir, 'report.md'), 'utf8').catch(() => 'This run has no report yet (still running?).\n'));
       }
       if (flags.design) {

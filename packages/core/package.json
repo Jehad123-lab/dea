@@ -8,10 +8,16 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@babel/generator": "^7.29.12",
+    "@babel/parser": "^7.29.12",
+    "@modelcontextprotocol/client": "2.4.0",
     "culori": "^4.0.2",
-    "playwright": "1.64.1"
+    "playwright": "1.64.1",
+    "source-map-js": "^1.2.2",
+    "webcrack": "2.16.0"
   },
   "devDependencies": {
+    "@types/babel__generator": "^7.27.0",
     "@types/culori": "^4.0.1"
   }
 }

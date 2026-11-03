@@ -25,7 +25,7 @@ export interface ShaderInfo {
   compiledAtMs: number;
 }
 
-const THREE_BUILTIN_UNIFORMS = new Set(
+export const THREE_BUILTIN_UNIFORMS = new Set(
   'modelMatrix modelViewMatrix projectionMatrix viewMatrix normalMatrix cameraPosition isOrthographic toneMappingExposure logDepthBufFC cameraNear cameraFar boneTexture bindMatrix bindMatrixInverse morphTargetBaseInfluence morphTargetInfluences morphTargetsTexture morphTargetsTextureSize diffuse opacity emissive roughness metalness map alphaMap envMap envMapIntensity envMapRotation flipEnvMap reflectivity ior refractionRatio lightMap lightMapIntensity aoMap aoMapIntensity normalMap normalScale bumpMap bumpScale displacementMap displacementScale displacementBias emissiveMap roughnessMap metalnessMap specularMap ambientLightColor lightProbe directionalLights pointLights spotLights hemisphereLights rectAreaLights directionalShadowMap pointShadowMap spotShadowMap fogColor fogNear fogFar fogDensity mapTransform alphaMapTransform normalMapTransform uvTransform alphaTest clearcoat clearcoatRoughness sheen sheenColor sheenRoughness transmission thickness attenuationDistance attenuationColor specularIntensity specularColor dithering size scale rotation center pointLightShadows spotLightShadows directionalLightShadows spotLightMatrix directionalShadowMatrix pointShadowMatrix shadowMap shadowBias shadowRadius matcap gradientMap'.split(
     ' ',
   ),

@@ -34,6 +34,7 @@ export interface RunDoc {
   };
   facts: Fact[];
   design?: unknown;
+  [extra: string]: unknown;
 }
 
 export interface InspectResult {
@@ -47,7 +48,7 @@ export interface InspectResult {
 }
 
 /** Hook for richer commands (design) to work while the page is still open. */
-export type DuringHook = (session: Session, writer: RunWriter) => Promise<{ facts?: Fact[]; design?: unknown } | undefined>;
+export type DuringHook = (session: Session, writer: RunWriter) => Promise<{ facts?: Fact[]; design?: unknown; data?: Record<string, unknown> } | undefined>;
 
 export async function collect(url: string, kind: RunMeta['kind'], opts: InspectOptions = {}, during?: DuringHook): Promise<InspectResult> {
   const startedAt = new Date().toISOString();
@@ -79,7 +80,7 @@ async function collectInto(
   const session = await openSite(url, { ...opts, harPath: rawHar });
   const viewport = session.page.viewportSize() ?? { width: 1440, height: 900 };
   let snap: PageSnapshot;
-  let extra: { facts?: Fact[]; design?: unknown } | undefined;
+  let extra: { facts?: Fact[]; design?: unknown; data?: Record<string, unknown> } | undefined;
   const warnings = [...session.warnings];
   try {
     if (during) extra = await during(session, writer);
@@ -177,6 +178,7 @@ async function collectInto(
     webgl: { ...shaders, contexts: dea.contexts, rafCalls: dea.rafCalls, rafSources: dea.rafSources, renderer: dea.renderer, gpuMasked: dea.gpuMasked },
     facts,
     ...(extra?.design ? { design: extra.design } : {}),
+    ...(extra?.data ?? {}),
   };
   // the plan's original quick-look file, kept for compatibility
   await writer.json(
@@ -198,7 +200,8 @@ async function collectInto(
   for (const message of meta.warnings) writer.emit({ type: 'warning', runId: writer.id, message });
   say('done');
   const summary = summarize(run);
-  if (kind !== 'design') writer.emit({ type: 'run.finished', runId: writer.id, dir: writer.dir, summary, at: new Date().toISOString() });
+  if (kind !== 'design' && kind !== 'code' && kind !== 'api')
+    writer.emit({ type: 'run.finished', runId: writer.id, dir: writer.dir, summary, at: new Date().toISOString() });
   return { runId: writer.id, dir: writer.dir, run, writer, summary };
 }
 
