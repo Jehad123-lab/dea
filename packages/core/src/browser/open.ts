@@ -13,6 +13,8 @@ export interface OpenOptions {
   harPath?: string;
   /** navigation timeout */
   timeoutMs?: number;
+  /** runs after observers are installed and before navigation (e.g. start CDP listeners) */
+  beforeGoto?: (page: Page, cdp: CDPSession) => Promise<void>;
   /** extra settle time after load, for WebGL and intro animations */
   settleMs?: number;
   /**
@@ -39,11 +41,12 @@ const ARGS = [
   '--enable-unsafe-swiftshader',
   '--autoplay-policy=no-user-gesture-required',
   '--hide-scrollbars',
+  // Chrome's own wheel smoothing would look like a smooth-scroll library; turn it off so any easing DEA sees is the site's
+  '--disable-smooth-scrolling',
 ];
 
 async function launch(choice: BrowserChoice, headless: boolean): Promise<{ browser: Browser; channel: string }> {
-  const order: Array<'chrome' | 'msedge' | 'chromium'> =
-    choice === 'auto' ? ['chrome', 'msedge', 'chromium'] : [choice];
+  const order: Array<'chrome' | 'msedge' | 'chromium'> = choice === 'auto' ? ['chrome', 'msedge', 'chromium'] : [choice];
   const errors: string[] = [];
   for (const channel of order) {
     try {
@@ -57,9 +60,7 @@ async function launch(choice: BrowserChoice, headless: boolean): Promise<{ brows
       errors.push(`${channel}: ${(e as Error).message.split('\n')[0]}`);
     }
   }
-  throw new Error(
-    `Could not start a browser.\n${errors.join('\n')}\nInstall Chrome or Edge, or run: npx playwright install chromium`,
-  );
+  throw new Error(`Could not start a browser.\n${errors.join('\n')}\nInstall Chrome or Edge, or run: npx playwright install chromium`);
 }
 
 /** Open a URL in a real browser with DEA's observers installed. */
@@ -81,6 +82,7 @@ export async function openSite(url: string, opts: OpenOptions = {}): Promise<Ses
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
   page.setDefaultTimeout(opts.timeoutMs ?? 45_000);
+  if (opts.beforeGoto) await opts.beforeGoto(page, cdp);
 
   let response: Response | null = null;
   try {

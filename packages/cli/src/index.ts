@@ -3,14 +3,15 @@ import { readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
   type BrowserChoice,
+  decodeDesign,
   type InspectOptions,
   type InspectResult,
   inspectSite,
   listRuns,
+  type RunDoc,
   readRun,
   renderReport,
   resolveRun,
-  type RunDoc,
   stackSite,
 } from '@dea/core';
 import { Command, Option } from 'commander';
@@ -24,6 +25,7 @@ interface CommonFlags {
   timeout: string;
   home?: string;
   gpuMask: boolean;
+  viewport: string;
 }
 
 function common(cmd: Command): Command {
@@ -33,6 +35,7 @@ function common(cmd: Command): Command {
     .option('--json', 'print JSON instead of text')
     .option('--timeout <seconds>', 'page load timeout', '45')
     .option('--home <dir>', 'where runs are saved (default ./.dea, or $DEA_HOME)')
+    .option('--viewport <WxH>', 'browser window size', '1440x900')
     .option('--no-gpu-mask', 'do not present a GPU name to the page when WebGL runs in software');
 }
 
@@ -43,8 +46,15 @@ function options(flags: CommonFlags): InspectOptions {
     headless: !flags.headed,
     timeoutMs: Number(flags.timeout) * 1000,
     gpuMask: flags.gpuMask,
+    viewport: parseViewport(flags.viewport),
     onProgress: flags.json ? undefined : (s) => process.stderr.write(`  · ${s}\n`),
   };
+}
+
+function parseViewport(v: string): { width: number; height: number } {
+  const m = /^(\d{3,4})x(\d{3,4})$/i.exec(v.trim());
+  if (!m) throw new Error(`--viewport must look like 1440x900, got "${v}"`);
+  return { width: Number(m[1]), height: Number(m[2]) };
 }
 
 function where(r: InspectResult): string {
@@ -89,6 +99,23 @@ common(program.command('stack').description('what a site is built with, and the 
       out.push('', `Evidence saved in ${where(r)}`);
       process.stdout.write(`${out.join('\n')}\n`);
     }),
+);
+
+common(
+  program
+    .command('design')
+    .description('decode fonts, colours, type scale, motion, scroll and WebGL shaders')
+    .argument('<url>', 'site to decode')
+    .option('--steps <n>', 'how many scroll steps to sample', '7'),
+).action((url: string, flags: CommonFlags & { steps: string }) =>
+  run(async () => {
+    const r = await decodeDesign(url, { ...options(flags), scrollSteps: Number(flags.steps) });
+    if (flags.json)
+      return void process.stdout.write(
+        `${JSON.stringify({ runId: r.runId, dir: r.dir, facts: r.run.facts.filter((f) => f.key.startsWith('design.')) }, null, 2)}\n`,
+      );
+    process.stdout.write(`\n${r.summary}\n\nFull decode: ${where(r)}/design.md  (dea report ${r.runId} --design)\n`);
+  }),
 );
 
 program

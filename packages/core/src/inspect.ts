@@ -1,7 +1,7 @@
-import { chromium } from 'playwright';
-import { mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { chromium } from 'playwright';
 export async function inspectSite(url: string) {
   const runId = randomUUID();
   const dir = join('.dea', 'runs', runId);
@@ -27,10 +27,10 @@ export async function inspectSite(url: string) {
   await page.waitForTimeout(3000); // let WebGL and animations start
   const facts = await page.evaluate(() => ({
     title: document.title,
-    three: (window as any).__THREE__ ?? null,   // three.js revision
+    three: (window as any).__THREE__ ?? null, // three.js revision
     gsap: (window as any).gsap?.version ?? null, // GSAP version, if it's global
-    fonts: [...document.fonts].map(f => `${f.family} ${f.weight} ${f.style}`),
-    scripts: [...document.scripts].map(s => s.src).filter(Boolean),
+    fonts: [...document.fonts].map((f) => `${f.family} ${f.weight} ${f.style}`),
+    scripts: [...document.scripts].map((s) => s.src).filter(Boolean),
     shaderCount: ((window as any).__DEA_SHADERS__ ?? []).length,
   }));
   const shaders = await page.evaluate(() => (window as any).__DEA_SHADERS__ ?? []);

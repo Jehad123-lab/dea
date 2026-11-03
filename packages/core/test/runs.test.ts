@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { isRunId, listRuns, newRunId, resolveRun, RunWriter } from '../src/evidence/run.ts';
+import { isRunId, listRuns, newRunId, RunWriter, resolveRun } from '../src/evidence/run.ts';
 
 const root = await mkdtemp(join(tmpdir(), 'dea-runs-'));
 afterAll(() => rm(root, { recursive: true, force: true }));

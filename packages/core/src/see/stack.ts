@@ -81,7 +81,12 @@ const RULES: Array<{ id: string; name: string; category: Category; rule: Rule }>
         return verified(`r${rev.replace(/^r/, '')}`, ev);
       }
       const u = urlMatch(s, /three(?:@|\/)(?:0\.)?(\d{2,3})(?:\.\d+)?|three(?:\.module)?(?:\.min)?\.js/i);
-      if (u) return inferred(u.m[1] ? `r${u.m[1]}` : null, [{ source: 'script-url', pointer: u.url }], 'a script is named like three.js, but window.__THREE__ was not set');
+      if (u)
+        return inferred(
+          u.m[1] ? `r${u.m[1]}` : null,
+          [{ source: 'script-url', pointer: u.url }],
+          'a script is named like three.js, but window.__THREE__ was not set',
+        );
       return null;
     },
   },
@@ -136,7 +141,8 @@ const RULES: Array<{ id: string; name: string; category: Category; rule: Rule }>
     category: 'smooth scroll',
     rule: (s) => {
       if (s.probes.locomotive) return verified(null, [{ source: 'global', pointer: 'window.LocomotiveScroll' }]);
-      if (/has-scroll-smooth|has-scroll-init/.test(s.htmlClass)) return verified(null, [{ source: 'dom', pointer: '<html class>', excerpt: s.htmlClass.slice(0, 120) }]);
+      if (/has-scroll-smooth|has-scroll-init/.test(s.htmlClass))
+        return verified(null, [{ source: 'dom', pointer: '<html class>', excerpt: s.htmlClass.slice(0, 120) }]);
       return null;
     },
   },
@@ -147,11 +153,14 @@ const RULES: Array<{ id: string; name: string; category: Category; rule: Rule }>
     rule: (s) => {
       const r = (s.reactRenderers ?? []).find((x) => x.version);
       if (r?.version) {
-        return verified(r.version, [{ source: 'global', pointer: '__REACT_DEVTOOLS_GLOBAL_HOOK__.inject()', excerpt: `${r.packageName ?? 'react-dom'} ${r.version}` }]);
+        return verified(r.version, [
+          { source: 'global', pointer: '__REACT_DEVTOOLS_GLOBAL_HOOK__.inject()', excerpt: `${r.packageName ?? 'react-dom'} ${r.version}` },
+        ]);
       }
       const g = str(s.probes.react);
       if (g) return verified(g, [{ source: 'global', pointer: 'window.React.version', excerpt: g }]);
-      if (s.probes.reactFiber) return verified(null, [{ source: 'dom', pointer: 'element.__reactFiber$… / __reactContainer$…', excerpt: 'React internal keys on DOM nodes' }]);
+      if (s.probes.reactFiber)
+        return verified(null, [{ source: 'dom', pointer: 'element.__reactFiber$… / __reactContainer$…', excerpt: 'React internal keys on DOM nodes' }]);
       return null;
     },
   },
@@ -167,7 +176,8 @@ const RULES: Array<{ id: string; name: string; category: Category; rule: Rule }>
       if (s.probes.nextAppRouter) ev.push({ source: 'global', pointer: 'self.__next_f (App Router)' });
       const h = s.documentHeaders['x-powered-by'];
       if (h && /next\.js/i.test(h)) ev.push({ source: 'header', pointer: 'x-powered-by', excerpt: h });
-      for (const k of ['x-nextjs-cache', 'x-nextjs-prerender']) if (s.documentHeaders[k]) ev.push({ source: 'header', pointer: k, excerpt: s.documentHeaders[k] });
+      for (const k of ['x-nextjs-cache', 'x-nextjs-prerender'])
+        if (s.documentHeaders[k]) ev.push({ source: 'header', pointer: k, excerpt: s.documentHeaders[k] });
       if (ev.length) return verified(v && v !== 'present' ? v : null, ev);
       const u = urlMatch(s, /\/_next\/static\//);
       if (u) return inferred(null, [{ source: 'script-url', pointer: u.url }], 'assets are served from /_next/static/, the Next.js build folder');
@@ -256,7 +266,8 @@ const RULES: Array<{ id: string; name: string; category: Category; rule: Rule }>
     category: 'cms',
     rule: (s) => {
       const gen = s.meta.generator ?? '';
-      if (/wordpress/i.test(gen)) return verified(gen.match(/(\d+\.\d+(\.\d+)?)/)?.[1] ?? null, [{ source: 'meta', pointer: 'meta[name=generator]', excerpt: gen }]);
+      if (/wordpress/i.test(gen))
+        return verified(gen.match(/(\d+\.\d+(\.\d+)?)/)?.[1] ?? null, [{ source: 'meta', pointer: 'meta[name=generator]', excerpt: gen }]);
       if (s.probes.wordpress) return inferred(null, [{ source: 'dom', pointer: 'link/script under /wp-content/' }], 'files live under /wp-content/');
       return null;
     },
@@ -349,7 +360,11 @@ const RULES: Array<{ id: string; name: string; category: Category; rule: Rule }>
     rule: (s) => {
       const n = Number(s.probes.utilityClassHits ?? 0);
       return n >= 40
-        ? inferred(null, [{ source: 'dom', pointer: 'class attributes', excerpt: `${n} utility classes like flex, px-4, text-sm` }], 'many elements use Tailwind-style utility class names')
+        ? inferred(
+            null,
+            [{ source: 'dom', pointer: 'class attributes', excerpt: `${n} utility classes like flex, px-4, text-sm` }],
+            'many elements use Tailwind-style utility class names',
+          )
         : null;
     },
   },
@@ -397,7 +412,8 @@ const RULES: Array<{ id: string; name: string; category: Category; rule: Rule }>
     id: 'github-pages',
     name: 'GitHub Pages',
     category: 'hosting',
-    rule: (s) => (/github\.com/i.test(s.documentHeaders.server ?? '') ? verified(null, [{ source: 'header', pointer: 'server', excerpt: s.documentHeaders.server }]) : null),
+    rule: (s) =>
+      /github\.com/i.test(s.documentHeaders.server ?? '') ? verified(null, [{ source: 'header', pointer: 'server', excerpt: s.documentHeaders.server }]) : null,
   },
   {
     id: 'sanity',

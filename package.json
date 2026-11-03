@@ -23,5 +23,20 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
-  }
+  },
+  "packageManager": "pnpm@12.16.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jehad123-lab/dea"
+  },
+  "keywords": [
+    "mcp",
+    "playwright",
+    "design",
+    "webgl",
+    "three.js",
+    "gsap",
+    "reverse-engineering",
+    "cli"
+  ]
 }

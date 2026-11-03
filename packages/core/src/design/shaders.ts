@@ -64,8 +64,10 @@ const INTERACTIVE: Array<[string, RegExp]> = [
 ];
 
 /** three.js programs it builds for itself, and common addons; not the site author's own GLSL */
-const THREE_INTERNAL = /^(PMREM\w*|SphericalGaussianBlur|EquirectangularToCubeUV|CubemapToCubeUV|BackgroundMaterial|BackgroundCubeMaterial|DepthMaterial|DistanceRGBA|ShadowMaterial|VSMPass|vsm\w*)$/i;
-const THREE_ADDON = /^(SkyShader|Water\w*|Reflector\w*|Refractor\w*|CopyShader|OutputShader|LuminosityHighPassShader|UnrealBloom\w*|FXAAShader|SMAA\w*|Bokeh\w*|FilmShader|RGBShiftShader|VignetteShader|GammaCorrectionShader|AfterimageShader|DotScreenShader|HalftoneShader|SAOShader|SSAOShader|GTAOShader|OutlinePass\w*|BlendShader|ConvolutionShader|FocusShader|HorizontalBlurShader|VerticalBlurShader|TriangleBlurShader|Lensflare\w*|SobelOperatorShader|ToonShader\w*|Volume\w*|ColorCorrectionShader|ACESFilmicToneMappingShader|ExposureShader|BrightnessContrastShader|HueSaturationShader|KaleidoShader|MirrorShader|PixelShader|BleachBypassShader|SepiaShader|TechnicolorShader|FreiChenShader|ColorifyShader)$/i;
+const THREE_INTERNAL =
+  /^(PMREM\w*|SphericalGaussianBlur|EquirectangularToCubeUV|CubemapToCubeUV|BackgroundMaterial|BackgroundCubeMaterial|DepthMaterial|DistanceRGBA|ShadowMaterial|VSMPass|vsm\w*)$/i;
+const THREE_ADDON =
+  /^(SkyShader|Water\w*|Reflector\w*|Refractor\w*|CopyShader|OutputShader|LuminosityHighPassShader|UnrealBloom\w*|FXAAShader|SMAA\w*|Bokeh\w*|FilmShader|RGBShiftShader|VignetteShader|GammaCorrectionShader|AfterimageShader|DotScreenShader|HalftoneShader|SAOShader|SSAOShader|GTAOShader|OutlinePass\w*|BlendShader|ConvolutionShader|FocusShader|HorizontalBlurShader|VerticalBlurShader|TriangleBlurShader|Lensflare\w*|SobelOperatorShader|ToonShader\w*|Volume\w*|ColorCorrectionShader|ACESFilmicToneMappingShader|ExposureShader|BrightnessContrastShader|HueSaturationShader|KaleidoShader|MirrorShader|PixelShader|BleachBypassShader|SepiaShader|TechnicolorShader|FreiChenShader|ColorifyShader)$/i;
 
 /**
  * Drop lines inside #ifdef/#ifndef blocks whose macro is not defined, so that
@@ -95,7 +97,8 @@ export function activeSource(src: string): string {
 }
 
 /** materials from the pmndrs "postprocessing" library (EffectComposer, bloom, SMAA, ...) */
-const PMNDRS_POSTPROCESSING = /^(LuminanceMaterial|AdaptiveLuminanceMaterial|DownsamplingMaterial|UpsamplingMaterial|EffectMaterial|EdgeDetectionMaterial|SMAAWeightsMaterial|CopyMaterial|ConvolutionMaterial|KawaseBlurMaterial|BoxBlurMaterial|GaussianBlurMaterial|TiltShiftBlurMaterial|DepthDownsamplingMaterial|DepthComparisonMaterial|DepthCopyMaterial|DepthMaskMaterial|OutlineMaterial|SSAOMaterial|BokehMaterial|CircleOfConfusionMaterial|GodRaysMaterial|MipmapBlurMaterial|ToneMappingMaterial)$/;
+const PMNDRS_POSTPROCESSING =
+  /^(LuminanceMaterial|AdaptiveLuminanceMaterial|DownsamplingMaterial|UpsamplingMaterial|EffectMaterial|EdgeDetectionMaterial|SMAAWeightsMaterial|CopyMaterial|ConvolutionMaterial|KawaseBlurMaterial|BoxBlurMaterial|GaussianBlurMaterial|TiltShiftBlurMaterial|DepthDownsamplingMaterial|DepthComparisonMaterial|DepthCopyMaterial|DepthMaskMaterial|OutlineMaterial|SSAOMaterial|BokehMaterial|CircleOfConfusionMaterial|GodRaysMaterial|MipmapBlurMaterial|ToneMappingMaterial)$/;
 
 export type ShaderOrigin = 'custom' | 'three-builtin-material' | 'three-internal' | 'three-addon' | 'postprocessing-lib' | 'unknown';
 
@@ -111,8 +114,7 @@ export function parseShader(s: RawShader, i: number): ShaderInfo {
     else if (threeName && PMNDRS_POSTPROCESSING.test(threeName)) origin = 'postprocessing-lib';
     else if (threeName && THREE_ADDON.test(threeName)) origin = 'three-addon';
     else origin = 'custom';
-  }
-  else if (!/#define SHADER_TYPE/.test(s.source)) origin = 'unknown';
+  } else if (!/#define SHADER_TYPE/.test(s.source)) origin = 'unknown';
   const custom = origin === 'custom' ? true : origin === 'unknown' ? null : false;
   const techniques = TECHNIQUES.filter(([, re]) => re.test(src)).map(([n]) => n);
   return {
@@ -175,14 +177,26 @@ export type ShaderSummary = ReturnType<typeof summarizeShaders>;
 
 export function shaderFacts(
   sum: ShaderSummary,
-  contexts: Array<{ id: string; type: string; width: number; height: number; cssWidth?: number | null; cssHeight?: number | null; pixelRatio?: number | null; position?: string | null }>,
+  contexts: Array<{
+    id: string;
+    type: string;
+    width: number;
+    height: number;
+    cssWidth?: number | null;
+    cssHeight?: number | null;
+    pixelRatio?: number | null;
+    position?: string | null;
+  }>,
 ): Fact[] {
   const facts: Fact[] = [];
   if (contexts.length) {
     facts.push({
       key: 'webgl.contexts',
       claim: `${contexts.length} ${contexts.length === 1 ? 'canvas uses' : 'canvases use'} ${[...new Set(contexts.map((c) => c.type))].join('/')}: ${contexts
-        .map((c) => `${c.width}×${c.height} px${c.cssWidth ? ` drawn into ${c.cssWidth}×${c.cssHeight} CSS px${c.pixelRatio ? ` (pixel ratio ${c.pixelRatio})` : ''}` : ''}${c.position === 'fixed' ? ', fixed behind/over the page' : ''}`)
+        .map(
+          (c) =>
+            `${c.width}×${c.height} px${c.cssWidth ? ` drawn into ${c.cssWidth}×${c.cssHeight} CSS px${c.pixelRatio ? ` (pixel ratio ${c.pixelRatio})` : ''}` : ''}${c.position === 'fixed' ? ', fixed behind/over the page' : ''}`,
+        )
         .join('; ')}.`,
       value: contexts,
       label: 'Verified',
@@ -255,7 +269,11 @@ export function shaderFacts(
         evidence: sum.programs
           .filter((p) => p.techniques.length)
           .slice(0, 6)
-          .map((p) => ({ source: 'shader' as const, pointer: `shader ${p.id} (${p.type}${p.threeType ? `, ${p.threeType}` : ''})`, excerpt: p.techniques.join(', ') })),
+          .map((p) => ({
+            source: 'shader' as const,
+            pointer: `shader ${p.id} (${p.type}${p.threeType ? `, ${p.threeType}` : ''})`,
+            excerpt: p.techniques.join(', '),
+          })),
         why: 'matched by function and keyword names in the shader source; names can mislead',
       });
     }

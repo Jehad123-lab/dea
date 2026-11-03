@@ -15,7 +15,10 @@ export function runsDir(): string {
 
 function slugHost(url: string): string {
   try {
-    return new URL(url).hostname.replace(/^www\./, '').replace(/[^a-z0-9]+/gi, '-').slice(0, 40);
+    return new URL(url).hostname
+      .replace(/^www\./, '')
+      .replace(/[^a-z0-9]+/gi, '-')
+      .slice(0, 40);
   } catch {
     return 'site';
   }

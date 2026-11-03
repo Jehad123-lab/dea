@@ -69,7 +69,12 @@ export function renderReport(run: RunDoc): string {
   }
   if (n.hosts.length) {
     out.push('');
-    out.push(`Hosts: ${n.hosts.slice(0, 10).map((h) => `${h.host} (${h.count}${h.firstParty ? ', first party' : ''})`).join(', ')}`);
+    out.push(
+      `Hosts: ${n.hosts
+        .slice(0, 10)
+        .map((h) => `${h.host} (${h.count}${h.firstParty ? ', first party' : ''})`)
+        .join(', ')}`,
+    );
   }
   const hdr = Object.entries(n.documentHeaders).filter(([k]) => k !== 'content-security-policy');
   if (hdr.length) {
@@ -81,7 +86,9 @@ export function renderReport(run: RunDoc): string {
   out.push('## Page');
   out.push('');
   const p = run.page;
-  out.push(`- Language: ${p.lang || 'not set'}; ${p.counts.elements} elements, ${p.counts.images} images, ${p.counts.videos} videos, ${p.counts.canvases} canvases, ${p.counts.links} links, page height ${p.counts.documentHeight}px.`);
+  out.push(
+    `- Language: ${p.lang || 'not set'}; ${p.counts.elements} elements, ${p.counts.images} images, ${p.counts.videos} videos, ${p.counts.canvases} canvases, ${p.counts.links} links, page height ${p.counts.documentHeight}px.`,
+  );
   if (p.meta.description) out.push(`- Description: ${p.meta.description}`);
   if (p.meta.generator) out.push(`- Generator: ${p.meta.generator}`);
   const loaded = [...new Set(p.fonts.filter((f) => f.status === 'loaded').map((f) => f.family))];

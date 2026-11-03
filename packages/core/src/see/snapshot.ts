@@ -90,7 +90,8 @@ export async function takeSnapshot(page: Page): Promise<PageSnapshot> {
       if (reactFiber && (vue3App || vue2)) break;
     }
     let utilityClassHits = 0;
-    const util = /^(flex|grid|hidden|block|inline-flex|items-center|justify-between|gap-\d+|p[xytrbl]?-\d+|m[xytrbl]?-\d+|text-(xs|sm|base|lg|xl|\dxl)|w-full|h-full|rounded(-\w+)?|bg-[a-z]+-\d{2,3}|font-(bold|medium|semibold))$/;
+    const util =
+      /^(flex|grid|hidden|block|inline-flex|items-center|justify-between|gap-\d+|p[xytrbl]?-\d+|m[xytrbl]?-\d+|text-(xs|sm|base|lg|xl|\dxl)|w-full|h-full|rounded(-\w+)?|bg-[a-z]+-\d{2,3}|font-(bold|medium|semibold))$/;
     for (const el of sampleEls.slice(0, 1500)) for (const c of Array.from(el.classList)) if (util.test(c)) utilityClassHits++;
 
     const probes: Record<string, unknown> = {
@@ -119,7 +120,11 @@ export async function takeSnapshot(page: Page): Promise<PageSnapshot> {
       webflowPage: document.documentElement.getAttribute('data-wf-page'),
       webflowGlobal: safe(() => (w.Webflow ? 'present' : null)),
       framerBadge: q('#__framer-badge-container') > 0,
-      framerGlobals: safe(() => Object.keys(w).filter((k) => /^__framer/i.test(k)).slice(0, 5)),
+      framerGlobals: safe(() =>
+        Object.keys(w)
+          .filter((k) => /^__framer/i.test(k))
+          .slice(0, 5),
+      ),
       framerDataAttrs: q('[data-framer-name],[data-framer-component-type]'),
       shopify: safe(() => (w.Shopify ? 'present' : null)),
       jquery: safe(() => w.jQuery?.fn?.jquery ?? null),
@@ -147,7 +152,10 @@ export async function takeSnapshot(page: Page): Promise<PageSnapshot> {
       inlineScripts: {
         count: inline.length,
         bytes: inline.reduce((n, s) => n + (s.textContent?.length ?? 0), 0),
-        samples: inline.map((s) => (s.textContent ?? '').trim().slice(0, 160)).filter(Boolean).slice(0, 8),
+        samples: inline
+          .map((s) => (s.textContent ?? '').trim().slice(0, 160))
+          .filter(Boolean)
+          .slice(0, 8),
       },
       stylesheets: Array.from(document.querySelectorAll('link[rel~="stylesheet"]')).map((l) => (l as HTMLLinkElement).href),
       htmlClass: document.documentElement.className.toString().slice(0, 300),
@@ -163,6 +171,7 @@ export async function takeSnapshot(page: Page): Promise<PageSnapshot> {
         links: q('a[href]'),
         buttons: q('button,[role=button]'),
         forms: q('form'),
+        // biome-ignore lint/performance/useDomNodeTextContent: visible text is what we want to count
         textChars: document.body?.innerText?.length ?? 0,
         documentHeight: document.documentElement.scrollHeight,
       },
@@ -195,7 +204,7 @@ export async function takeSnapshot(page: Page): Promise<PageSnapshot> {
             height: el?.height ?? c.height,
             cssWidth: r ? Math.round(r.width) : null,
             cssHeight: r ? Math.round(r.height) : null,
-            pixelRatio: el && r && r.width ? Math.round((el.width / r.width) * 100) / 100 : null,
+            pixelRatio: el && r?.width ? Math.round((el.width / r.width) * 100) / 100 : null,
             position: cs?.position ?? null,
             zIndex: cs?.zIndex ?? null,
             pointerEvents: cs?.pointerEvents ?? null,

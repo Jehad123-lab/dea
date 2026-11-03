@@ -1,8 +1,8 @@
 import { type OpenOptions, openSite, type Session } from '../browser/open.ts';
+import { shaderFacts, summarizeShaders } from '../design/shaders.ts';
 import { newRunId, RunWriter, runsDir } from '../evidence/run.ts';
 import { renderReport } from '../report.ts';
 import type { Fact, RunMeta } from '../types.ts';
-import { shaderFacts, summarizeShaders } from '../design/shaders.ts';
 import { finishHar, fmtBytes, type NetworkSummary } from './network.ts';
 import { type PageSnapshot, pageTree, takeSnapshot } from './snapshot.ts';
 import { detectStack, type StackHit, stackFacts } from './stack.ts';
@@ -36,12 +36,14 @@ export interface InspectResult {
   runId: string;
   dir: string;
   run: RunDoc;
+  /** the run folder writer, for commands that add files after collection */
+  writer: RunWriter;
   /** short plain-text summary, good for terminals and AI tools */
   summary: string;
 }
 
 /** Hook for richer commands (design) to work while the page is still open. */
-export type DuringHook = (session: Session, writer: RunWriter, snapshot: PageSnapshot) => Promise<{ facts?: Fact[]; design?: unknown } | undefined>;
+export type DuringHook = (session: Session, writer: RunWriter) => Promise<{ facts?: Fact[]; design?: unknown } | undefined>;
 
 export async function collect(url: string, kind: RunMeta['kind'], opts: InspectOptions = {}, during?: DuringHook): Promise<InspectResult> {
   const say = opts.onProgress ?? (() => {});
@@ -56,14 +58,14 @@ export async function collect(url: string, kind: RunMeta['kind'], opts: InspectO
   let extra: { facts?: Fact[]; design?: unknown } | undefined;
   const warnings = [...session.warnings];
   try {
+    if (during) extra = await during(session, writer);
     say('reading the page');
     snap = await takeSnapshot(session.page);
-    await writer.progress(`page loaded: ${snap.title}`);
+    await writer.progress(`page read: ${snap.title}`);
     if (opts.tree !== false) {
       const tree = await pageTree(session.page).catch((e) => `# page tree unavailable: ${(e as Error).message}`);
       await writer.text('page.aria.yaml', tree, 'pageTree');
     }
-    if (during) extra = await during(session, writer, snap);
   } finally {
     say('closing the browser');
     await session.close();
@@ -137,7 +139,9 @@ export async function collect(url: string, kind: RunMeta['kind'], opts: InspectO
     warnings: [
       ...warnings,
       ...(dea.gpuMasked
-        ? [`This machine renders WebGL in software (${dea.renderer}). DEA told the page a common GPU name so it would show its full 3D instead of a fallback. Run with --no-gpu-mask to see what a GPU-less visitor gets.`]
+        ? [
+            `This machine renders WebGL in software (${dea.renderer}). DEA told the page a common GPU name so it would show its full 3D instead of a fallback. Run with --no-gpu-mask to see what a GPU-less visitor gets.`,
+          ]
         : []),
       ...dea.errors.map((e) => `observer: ${e}`),
     ],
@@ -169,7 +173,7 @@ export async function collect(url: string, kind: RunMeta['kind'], opts: InspectO
   await writer.json('run.json', run, 'run');
   await writer.progress('done');
   say('done');
-  return { runId: writer.id, dir: writer.dir, run, summary: summarize(run) };
+  return { runId: writer.id, dir: writer.dir, run, writer, summary: summarize(run) };
 }
 
 /** Phase 1: open a site and save what it sees. */
@@ -194,7 +198,9 @@ export function summarize(run: RunDoc): string {
     lines.push('Stack: nothing DEA knows was found (plain HTML/CSS, or a bundled app with no markers).');
   }
   lines.push('');
-  lines.push(`Network: ${run.network.requests} requests, ${fmtBytes(run.network.bytes)}${run.network.redactions ? `, ${run.network.redactions} secrets redacted` : ''}`);
+  lines.push(
+    `Network: ${run.network.requests} requests, ${fmtBytes(run.network.bytes)}${run.network.redactions ? `, ${run.network.redactions} secrets redacted` : ''}`,
+  );
   if (run.webgl.contexts.length || run.webgl.programs.length) {
     lines.push(`WebGL: ${run.webgl.contexts.length} canvas context(s), ${run.webgl.shaderCount} shaders, ${run.webgl.programs.length} unique programs`);
   }
