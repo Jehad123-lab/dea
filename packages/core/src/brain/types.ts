@@ -1,7 +1,7 @@
 import type { Fact, Label } from '../types.ts';
 
 /** What an investigation step does. Each kind runs one of DEA's own tools. */
-export type StepKind = 'stack' | 'design' | 'code' | 'api' | 'pages' | 'hub';
+export type StepKind = 'stack' | 'design' | 'code' | 'api' | 'pages' | 'motion' | 'assets' | 'hub';
 
 export interface PlanStep {
   id: string;

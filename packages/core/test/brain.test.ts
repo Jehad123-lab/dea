@@ -8,7 +8,7 @@ describe('brain: planner', () => {
   it('reads the goal for the questions it asks', () => {
     const p = planInvestigation('https://x.dev', 'Which fonts and easing does it use, and what API feeds the projects?');
     expect(p.by).toBe('rules');
-    expect(p.steps.map((s) => s.kind)).toEqual(['stack', 'design', 'api']);
+    expect(p.steps.map((s) => s.kind)).toEqual(['stack', 'design', 'motion', 'api']);
     expect(p.reasons.join(' ')).toMatch(/fonts/);
   });
 

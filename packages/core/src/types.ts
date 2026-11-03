@@ -45,7 +45,7 @@ export interface BrowserInfo {
 export interface RunMeta {
   schema: 'dea.run/1';
   id: string;
-  kind: 'inspect' | 'stack' | 'design' | 'session' | 'investigate' | 'code' | 'api';
+  kind: 'inspect' | 'stack' | 'design' | 'session' | 'investigate' | 'code' | 'api' | 'assets' | 'motion';
   url: string;
   finalUrl: string;
   title: string;

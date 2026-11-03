@@ -57,7 +57,7 @@ export async function refinePlan(brain: Brain, plan: InvestigationPlan): Promise
   if (!kinds.includes('stack')) kinds.unshift('stack');
   const keep = plan.steps.filter((s) => kinds.includes(s.kind) || s.kind === 'hub');
   const have = new Set(keep.map((s) => s.kind));
-  const order: StepKind[] = ['stack', 'pages', 'design', 'code', 'api', 'hub'];
+  const order: StepKind[] = ['stack', 'pages', 'design', 'motion', 'assets', 'code', 'api', 'hub'];
   const added = kinds.filter((k) => !have.has(k)).map((kind) => ({ id: `s-${kind}`, kind, does: `Run ${kind} (chosen by the language model).` }));
   const steps = [...keep, ...added].sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind)).map((s, i) => ({ ...s, id: `s${i + 1}-${s.kind}` }));
   return { ...plan, by: 'llm', reasons: [...plan.reasons, `language model chose: ${kinds.join(', ')}`], steps };

@@ -84,6 +84,8 @@ No Chrome or Edge on the machine? `pnpm --filter @dea/core exec playwright insta
 | `dea explain <url>` | The deep teardown: how the site's code works, section by section, with real code excerpts. Writes `explain.md`. |
 | `dea code <url>` | Every script, source maps (original files when published), unpacked bundles, GSAP calls, shaders, listeners, known-vulnerable libraries. |
 | `dea api <url>` | The APIs the page talks to, as OpenAPI 3.1 (`api/openapi.json`) with auth kinds only, never values. |
+| `dea assets <url>` | Every visual asset the page uses: WebGL textures (PNG preview, format, wrap/filter, and which shader sampler draws each), render targets, GLB models, images, KTX2/HDR, video, Lottie, Rive, fonts. Writes `assets/` + `assets.md`. |
+| `dea motion <url>` | How it moves: the GSAP timeline tree and ScrollTriggers, CSS/WAAPI animations, Lottie, Rive, Framer, three.js clips, and a frame recording fitted to clocks, eases and springs. Writes `motion.md` and a runnable `motion/timeline.js`. |
 | `dea investigate <url> --goal "…"` | Plans and runs the steps that answer your question, with checkpoints; writes a proven report. `--background`, `--resume <run>`. |
 | `dea status [run]` | Where an investigation stands, and its report when done. |
 | `dea session …` | DEA's hands: a browser that stays open; `start`, `goto`, `snapshot`, `click`, `type`, `fill`, `submit`, `screenshot`, `stop`. |
@@ -221,7 +223,38 @@ pnpm dea hub alert 5 10                      # pause an AI app after 5 changing/
   Why: function and keyword names in the GLSL.
 - *Inferred* Post-processing through the "postprocessing" library: LuminanceMaterial, EffectMaterial, SMAAWeightsMaterial, …
 
-## Motion
+## Assets (`dea assets`)
+
+DEA watches WebGL itself, so it sees textures however they arrive (image, `ImageBitmap`, canvas, video, data computed in
+JavaScript, compressed). For each texture it saves a PNG preview of what was uploaded, its size, format, wrap, filter and
+mipmaps, and the shader program and sampler uniform it is drawn with, read at the draw call. What the texture does
+there is read from the sampler name and the shader code (noise that offsets UVs, a GPU simulation state, an environment
+map) and labelled Inferred. Render targets are read back after the page ran (float targets are shown normalised).
+Downloaded files are saved with a manifest: GLB/glTF (meshes, materials and their texture slots, animations, embedded
+image sizes), KTX2 headers, HDR sizes, Lottie (fps, length, layers), Rive versions, fonts and video.
+
+```text
+$ pnpm dea assets https://jehaduddin.vercel.app
+Textures in WebGL: 61 (18 previews saved), render targets read back: 7
+Files: 3 font, 3 image, 1 glb
+What drives what:
+  bluenoise64.png → e0TBlue in EffectMaterial: blue noise (dithering, grain, jittered sampling)
+  data texture t7 (256×256) → tPos in ShaderMaterial with tPos, uDt: GPU simulation state (positions/velocities stored in a texture)
+```
+
+Third-party assets belong to their owners: use them to learn and as reference, and swap in your own before you ship.
+
+## Motion (`dea motion`)
+
+DEA reads GSAP's own timeline tree (from `gsap.globalTimeline`, or from the instances it saw being built when GSAP is
+bundled): every timeline and tween with its position, duration, ease, stagger, targets, from/to values, labels and the
+script line that created it, and every ScrollTrigger with start/end, scrub and pin. It also lists running CSS animations
+and transitions, `@keyframes`, Web Animations, Lottie and three.js clips, and notes Rive, Framer Motion and Theatre.js.
+Motion no library describes is recorded every frame (shader uniforms and moving elements, still and while scrolling) and
+fitted: a clock, an oscillation with its period, an eased move with the closest GSAP ease, a spring, or a value that
+follows the scroll. `motion/timeline.js` rebuilds it as a GSAP module you can run.
+
+## Motion in the design decode
 - **Verified** 82 CSS animations / transitions ran while DEA watched.
   Durations: 600ms ×40, 300ms ×11, 250ms ×11, 200ms ×11, 900ms ×4 …
   Easing: `cubic-bezier(0.22, 0.9, 0.24, 1)` (custom ease-out) ×17, `cubic-bezier(0.16, 1, 0.3, 1)` (expo out) ×4 …
@@ -262,13 +295,15 @@ so into the run. Use `--no-gpu-mask` to see exactly what a GPU-less visitor gets
 
 ## MCP server (for Claude, Cursor, VS Code, Codex)
 
-`dea-mcp` exposes 12 tools over stdio:
+`dea-mcp` exposes 14 tools over stdio:
 
 | Tool | Does |
 |---|---|
 | `decode_design` | The full design decode of a URL |
 | `decode_code` | The code teardown (`explain.md`) |
 | `decode_api` | The APIs a page calls, as OpenAPI |
+| `decode_assets` | Textures (with what each drives), render targets, models, media, with a manifest |
+| `decode_motion` | GSAP tree, ScrollTriggers, CSS/WAAPI, Lottie, clips, fitted recordings, and a GSAP rebuild |
 | `investigate` | Start a background investigation toward a goal; returns a run id |
 | `get_run_status` | Steps, progress and the proven report of an investigation |
 | `inspect_site` | Open a URL and save the evidence |
@@ -393,7 +428,7 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
 evidence tabs (Stack, Design, Code, API, Hub history, Report) on the right. Core already streams the events it needs
 (`onEvent` / `streamRun`), and investigations already write `checkpoint.json` for it to follow.
 
-The default MCP tool list stays small on purpose (12 tools); connected apps reach AI apps through the separate Hub gateway.
+The default MCP tool list stays small on purpose (14 tools); connected apps reach AI apps through the separate Hub gateway.
 
 ## Credits
 

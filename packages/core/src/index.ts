@@ -1,3 +1,15 @@
+export { classify as classifyAsset, gltfSummary, ktx2Summary, lottieSummary, parseGlb, riveSummary } from './assets/files.ts';
+export {
+  type AssetsDoc,
+  type AssetsOptions,
+  type AssetsResult,
+  decodeAssets,
+  drives,
+  type NetworkAsset,
+  renderAssetsMd,
+  type TextureInfo,
+} from './assets/index.ts';
+export { programName, samplerRole, samplerUse } from './assets/roles.ts';
 export {
   type InvestigateOptions,
   type InvestigateResult,
@@ -64,6 +76,17 @@ export {
   saveHub,
   updateHub,
 } from './hub/store.ts';
+export { describeFit, easeNames, type Fit, fitSeries, gsapFor, nameEase, unwrapDegrees } from './motion/fit.ts';
+export {
+  decodeMotion,
+  decomposeTransform,
+  type GsapNode,
+  gsapModule,
+  type MotionDoc,
+  type MotionOptions,
+  type MotionResult,
+  renderMotionMd,
+} from './motion/index.ts';
 export { renderReport } from './report.ts';
 export {
   type ActionKind,
@@ -88,3 +111,4 @@ export { collect, type InspectOptions, type InspectResult, inspectSite, type Run
 export { classify, fmtBytes, type NetworkSummary, summarize as summarizeHar } from './see/network.ts';
 export { detectStack, KNOWN_TECH, type StackHit, type StackSignals } from './see/stack.ts';
 export type { DeaEvent, EventSink, Evidence, Fact, Label, RunMeta } from './types.ts';
+export { analyse, duckDuckGo, type Finding, githubCode, type Hint, type Knob, type Params, providersFromEnv, rateLimited, type ResearchResult, researchLoop, type SearchProvider, searxng } from './extract/research.ts';

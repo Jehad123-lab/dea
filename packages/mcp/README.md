@@ -13,7 +13,7 @@ Over HTTP instead of stdio:
 npx -y dea-mcp --http     # http://127.0.0.1:7341/mcp (DEA tools) and /hub (DEA Hub), bearer token printed once
 ```
 
-Tools: `decode_design`, `decode_code`, `decode_api`, `inspect_site`, `detect_stack`, `investigate`, `get_run_status`,
+Tools: `decode_design`, `decode_code`, `decode_api`, `decode_assets`, `decode_motion`, `inspect_site`, `detect_stack`, `investigate`, `get_run_status`,
 `report`, `list_runs`, `browse`, `interact`, `submit` (submits always ask the user first; logins and payments never).
 
 Needs Node 22.12+ and Chrome or Edge (or `npx playwright install chromium`).

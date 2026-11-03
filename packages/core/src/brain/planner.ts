@@ -13,6 +13,16 @@ const RULES: Array<[StepKind, RegExp, string]> = [
     /\b(code|how (it|this|does|do)|works?|implement\w*|bundle|source|script|javascript|js|gsap|timeline|shader|uniforms?|rebuild|recreate|clone|copy|reverse|engineer\w*|tear ?down|interaction)\b/i,
     'how the code works',
   ],
+  [
+    'motion',
+    /\b(motion|animations?|animated?|gsap|timelines?|scroll(ing)?|eas(e|es|ing)|keyframes?|transitions?|lottie|rive|framer|spring)\b/i,
+    'how it moves (timelines, scroll, eases)',
+  ],
+  [
+    'assets',
+    /\b(assets?|textures?|images?|models?|glb|gltf|ktx2?|hdri?|videos?|lottie|rive|fonts? files?|3d models?)\b/i,
+    'which textures, models and media it uses',
+  ],
   ['api', /\b(api|apis|endpoint\w*|data|backend|graphql|rest|json|requests?|network|calls?|cms|content|fetch\w*|auth)\b/i, 'which APIs feed it'],
   [
     'pages',
@@ -21,12 +31,15 @@ const RULES: Array<[StepKind, RegExp, string]> = [
   ],
 ];
 
-const STEP_ORDER: StepKind[] = ['stack', 'pages', 'design', 'code', 'api', 'hub'];
+const STEP_ORDER: StepKind[] = ['stack', 'pages', 'design', 'motion', 'assets', 'code', 'api', 'hub'];
 
 const DOES: Record<StepKind, (w?: Record<string, unknown>) => string> = {
   stack: () => 'Detect the stack: frameworks, libraries, versions, hosting, with proof for each.',
   design: () => 'Decode the design: fonts actually rendered, colours, type scale, motion and easing, WebGL scenes and shaders.',
   code: () => 'Decode the code: bundles, source maps or unpacked code, GSAP calls, shader uniforms, listeners, and what feeds each section.',
+  motion: () =>
+    'Decode the motion: GSAP timeline tree and ScrollTriggers, CSS/WAAPI animations, Lottie/Rive/three.js clips, and a frame recording fitted to eases.',
+  assets: () => 'Collect the assets: WebGL textures with what each drives, render targets, models, images, video, Lottie, Rive, fonts.',
   api: () => 'Map the APIs the page talks to (OpenAPI 3.1), auth kinds only.',
   pages: (w) => `Read up to ${w?.max ?? 5} internal pages (read-only: look and scroll, nothing typed or submitted) and outline each.`,
   hub: (w) => `Send the finished report to ${String(w?.app)}.${String(w?.tool)} through DEA Hub.`,

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { decodeAssets } from '../assets/index.ts';
 import type { BrowserChoice } from '../browser/open.ts';
 import { normalizeUrl } from '../browser/open.ts';
 import { decodeCode } from '../code/decode.ts';
@@ -10,6 +11,7 @@ import { redactText } from '../evidence/secrets.ts';
 import { COVERS, type Gap, type ProbeStep, renderGaps } from '../gaps.ts';
 import { HandsSession } from '../hands/session.ts';
 import { Hub } from '../hub/hub.ts';
+import { decodeMotion } from '../motion/index.ts';
 import { loadPolicy } from '../safety/policy.ts';
 import { stackSite } from '../see/inspect.ts';
 import type { EventSink, Fact } from '../types.ts';
@@ -204,6 +206,18 @@ async function runStep(
       const r = await decodeDesign(url, childOpts);
       st.childRun = r.runId;
       st.summary = r.summary.split('\n').slice(0, 6).join(' · ');
+      return;
+    }
+    case 'motion': {
+      const r = await decodeMotion(url, childOpts);
+      st.childRun = r.runId;
+      st.summary = r.summary.split('\n').slice(0, 8).join(' · ');
+      return;
+    }
+    case 'assets': {
+      const r = await decodeAssets(url, childOpts);
+      st.childRun = r.runId;
+      st.summary = r.summary.split('\n').slice(0, 8).join(' · ');
       return;
     }
     case 'code':
@@ -496,7 +510,7 @@ export async function investigationStatus(
 }
 
 /** Decoders the Brain may run on its own to close a gap: read-only ones only. */
-const FOLLOW = new Set<StepKind>(['stack', 'design', 'code', 'api', 'pages']);
+const FOLLOW = new Set<StepKind>(['stack', 'design', 'code', 'api', 'pages', 'motion', 'assets']);
 
 /**
  * The gaps still open: read gaps.json from every finished step's run; a later step that covers the same area (code

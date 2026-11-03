@@ -3,8 +3,10 @@ import { readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
   type BrowserChoice,
+  decodeAssets,
   decodeCode,
   decodeDesign,
+  decodeMotion,
   type InspectOptions,
   type InspectResult,
   inspectSite,
@@ -181,6 +183,40 @@ common(
   }),
 );
 
+common(
+  program
+    .command('motion')
+    .description(
+      'how the page moves: GSAP timeline tree and ScrollTriggers, CSS/WAAPI animations, Lottie, Rive, Framer, three.js clips, plus a frame recording fitted to curves, with a runnable GSAP rebuild',
+    )
+    .argument('<url>', 'site to read')
+    .option('--idle <s>', 'seconds to record with the page still', '3')
+    .option('--scroll <s>', 'seconds to record while scrolling', '6'),
+).action((url: string, flags: CommonFlags & { idle: string; scroll: string }) =>
+  run(async () => {
+    const r = await decodeMotion(url, { ...options(flags), idleSeconds: Number(flags.idle), scrollSeconds: Number(flags.scroll) });
+    if (flags.json) return void process.stdout.write(`${JSON.stringify(r.motion, null, 2)}\n`);
+    process.stdout.write(`\n${r.summary}\n\nReport: ${where(r)}/motion.md   Rebuild: ${where(r)}/motion/timeline.js\n`);
+  }),
+);
+
+common(
+  program
+    .command('assets')
+    .description(
+      'every visual asset the page uses: WebGL textures (with previews and which shader sampler draws each), render targets, models, images, video, Lottie, Rive, fonts',
+    )
+    .argument('<url>', 'site to read')
+    .option('--scroll-steps <n>', 'how far to scroll while watching', '16')
+    .option('--no-render-targets', 'do not read back runtime render targets'),
+).action((url: string, flags: CommonFlags & { scrollSteps: string; renderTargets: boolean }) =>
+  run(async () => {
+    const r = await decodeAssets(url, { ...options(flags), scrollSteps: Number(flags.scrollSteps), renderTargets: flags.renderTargets });
+    if (flags.json) return void process.stdout.write(`${JSON.stringify(r.assets, null, 2)}\n`);
+    process.stdout.write(`\n${r.summary}\n\nReport: ${where(r)}/assets.md   Files: ${where(r)}/assets/\n`);
+  }),
+);
+
 program
   .command('investigate')
   .description(
@@ -191,7 +227,7 @@ program
   .option('--background', 'start it and return at once; check with dea status <run>')
   .option('--resume <run>', 'continue an investigation from its checkpoint')
   .option('--max-pages <n>', 'internal pages to read (read-only)', '5')
-  .option('--only <steps>', 'run exactly these steps: stack,pages,design,code,api')
+  .option('--only <steps>', 'run exactly these steps: stack,pages,design,motion,assets,code,api')
   .option('--then <app:tool>', 'after the report, send it through DEA Hub (e.g. notion:notion-create-pages); the client name is dea-brain')
   .option(
     '--then-args <json>',

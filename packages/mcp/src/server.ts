@@ -4,8 +4,10 @@ import { fileURLToPath } from 'node:url';
 import {
   type ActionResult,
   deaHome,
+  decodeAssets,
   decodeCode,
   decodeDesign,
+  decodeMotion,
   dispatch,
   HandsSession,
   inspectSite,
@@ -133,6 +135,49 @@ export function createServer(opts: ServerOptions = {}): McpServer {
   );
 
   server.registerTool(
+    'decode_assets',
+    {
+      title: 'Collect the visual assets a website uses',
+      description:
+        'Load and scroll a website in a real browser and save every visual asset it actually uses: each WebGL texture (a PNG preview, size, format, wrap/filter, and which shader program and sampler draws it, with what the texture does there), runtime render targets read back, and the images, KTX2, HDR/EXR, GLB/glTF models (meshes, materials, animations), video, Lottie, Rive and font files it downloaded, with a manifest. Read-only.',
+      inputSchema: z.object({ url, browser }),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    },
+    async ({ url, browser }) => {
+      try {
+        const r = await decodeAssets(url, { browser });
+        return { content: [text(`${DATA_NOTE}\n\n${clip(r.assetsMd)}\n\nFiles: ${r.dir}/assets/\nRun id: ${r.runId}`)] };
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'decode_motion',
+    {
+      title: 'Decode how a website moves',
+      description:
+        'Read the motion of a website from its animation engines and from a frame recording: the GSAP timeline tree (also when GSAP is bundled) and every ScrollTrigger, CSS animations, transitions and @keyframes, Web Animations, Lottie, Rive, Framer Motion, Theatre.js and three.js clips; shader uniforms and moving elements recorded every frame and fitted to clocks, oscillations, eases and springs. Returns the report and a runnable GSAP module. Read-only.',
+      inputSchema: z.object({
+        url,
+        browser,
+        idleSeconds: z.number().min(1).max(20).optional().describe('Seconds to record with the page still (default 3).'),
+        scrollSeconds: z.number().min(1).max(30).optional().describe('Seconds to record while scrolling (default 6).'),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    },
+    async ({ url, browser, idleSeconds, scrollSeconds }) => {
+      try {
+        const r = await decodeMotion(url, { browser, idleSeconds, scrollSeconds });
+        return { content: [text(`${DATA_NOTE}\n\n${clip(r.motionMd)}\n\nRun id: ${r.runId}`), text(clip(r.timelineJs, 30_000))] };
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
     'investigate',
     {
       title: 'Investigate a website toward a goal',
@@ -143,7 +188,7 @@ export function createServer(opts: ServerOptions = {}): McpServer {
         goal: z.string().min(3).describe('What you want to know, in plain words.'),
         maxPages: z.number().int().min(1).max(20).optional().describe('Internal pages to read (default 5).'),
         only: z
-          .array(z.enum(['stack', 'pages', 'design', 'code', 'api']))
+          .array(z.enum(['stack', 'pages', 'design', 'motion', 'assets', 'code', 'api']))
           .optional()
           .describe('Run exactly these steps.'),
         browser,
@@ -250,24 +295,26 @@ export function createServer(opts: ServerOptions = {}): McpServer {
     {
       title: 'Read a saved report',
       description:
-        'Read a saved run: report.md (stack, network, page, WebGL), design.md (design decode), explain.md (code teardown), code.md, api.md, or run.json. Use run "latest" for the newest.',
+        'Read a saved run: report.md (stack, network, page, WebGL), design.md (design decode), explain.md (code teardown), code.md, api.md, assets.md, motion.md, extract.md, or run.json. Use run "latest" for the newest.',
       inputSchema: z.object({
         run: z.string().default('latest').describe('Run id, a unique part of it, or "latest".'),
         which: z
-          .enum(['report', 'design', 'explain', 'code', 'api', 'json'])
+          .enum(['report', 'design', 'explain', 'code', 'api', 'assets', 'motion', 'extract', 'json'])
           .default('report')
-          .describe('report.md, design.md, explain.md, code.md, api.md, or run.json'),
+          .describe('report.md, design.md, explain.md, code.md, api.md, assets.md, motion.md, extract.md, or run.json'),
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ run, which }) => {
       try {
         const dir = await resolveRun(run ?? 'latest');
-        if (which === 'design' || which === 'explain' || which === 'code' || which === 'api') {
+        if (which !== 'report' && which !== 'json') {
           const md = await readFile(join(dir, `${which}.md`), 'utf8').catch(() => null);
           if (!md)
             return fail(
-              new Error(`That run has no ${which}.md; call ${which === 'design' ? 'decode_design' : which === 'api' ? 'decode_api' : 'decode_code'} first.`),
+              new Error(
+                `That run has no ${which}.md; call ${({ design: 'decode_design', api: 'decode_api', assets: 'decode_assets', motion: 'decode_motion', extract: 'extract' } as Record<string, string>)[which] ?? 'decode_code'} first.`,
+              ),
             );
           return { content: [text(`${DATA_NOTE}\n\n${clip(md, 40_000)}`)] };
         }
@@ -444,6 +491,8 @@ export const TOOL_NAMES = [
   'decode_design',
   'decode_code',
   'decode_api',
+  'decode_assets',
+  'decode_motion',
   'investigate',
   'get_run_status',
   'inspect_site',
