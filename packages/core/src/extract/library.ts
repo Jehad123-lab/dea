@@ -119,7 +119,8 @@ export function scoreEntry(e: LibraryEntry, query: string): { score: number; mat
   for (const t of terms) {
     let hit = false;
     for (const [label, vals, w] of fields) {
-      const v = vals.find((x) => x.toLowerCase().includes(t));
+      const stem = t.length > 3 && t.endsWith('s') ? t.slice(0, -1) : t;
+      const v = vals.find((x) => x.toLowerCase().includes(t) || x.toLowerCase().includes(stem));
       if (v) {
         score += w;
         if (!hit) matched.push(`${label}: ${v.slice(0, 60)}`);

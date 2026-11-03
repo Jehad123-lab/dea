@@ -333,7 +333,7 @@ library
     run(async () => {
       const r = await libraryUse(name, dir ?? name, { force: flags.force });
       process.stdout.write(
-        `Copied "${r.entry.name}" (${r.files} files) to ${r.dir}\nNext: cd ${relative(process.cwd(), r.dir) || '.'} && npm install && npm run dev\n`,
+        `Copied "${r.entry.name}" (${r.files} files) to ${r.dir}\nNext: cd ${((rel) => (!rel ? '.' : rel.startsWith('..') ? JSON.stringify(r.dir) : rel))(relative(process.cwd(), r.dir))} && npm install && npm run dev\n`,
       );
     }),
   );

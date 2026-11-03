@@ -313,6 +313,8 @@ describe('library: decode once, reuse everywhere', () => {
     const hits = await librarySearch('gpgpu power3');
     expect(hits).toHaveLength(1);
     expect(hits[0].matched).toEqual(['technique: GPGPU particle simulation', 'ease: power3.out']);
+    // a plural finds the singular ("particles" → "particle")
+    expect(await librarySearch('particles')).toHaveLength(1);
     expect(await librarySearch('gpgpu lottie')).toHaveLength(0);
     const dest = join(root, 'new-site');
     const used = await libraryUse('jehaduddin.vercel.app', dest);
