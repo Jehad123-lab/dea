@@ -45,7 +45,10 @@ the three.js scene graph — and writes them down in plain words, each with its 
 
 ## Install
 
-You need **Node 24** and **pnpm**. DEA uses your installed Chrome or Edge; if neither is found it falls back to
+> **`npm install -g dea-cli` and `npx dea-mcp`: coming soon.** DEA is not on npm yet; until the first release, run it
+> from a clone as below.
+
+From source, you need **Node 24** and **pnpm**. DEA uses your installed Chrome or Edge; if neither is found it falls back to
 Playwright's Chromium.
 
 **Windows (PowerShell)**
@@ -85,6 +88,9 @@ No Chrome or Edge on the machine? `pnpm --filter @dea/core exec playwright insta
 | `dea code <url>` | Every script, source maps (original files when published), unpacked bundles, GSAP calls, shaders, listeners, known-vulnerable libraries. |
 | `dea api <url>` | The APIs the page talks to, as OpenAPI 3.1 (`api/openapi.json`) with auth kinds only, never values. |
 | `dea assets <url>` | Every visual asset the page uses: WebGL textures (PNG preview, format, wrap/filter, and which shader sampler draws each), render targets, GLB models, images, KTX2/HDR, video, Lottie, Rive, fonts. Writes `assets/` + `assets.md`. |
+| `dea extract <url> --to react\|vanilla\|framer` | A kit you can use: tokens (`tokens.css`, Tailwind preset, W3C `tokens.json`), motion (`timeline.js`, `keyframes.css`), the first screen's text placed as on the site, shaders as three.js modules with uniform values and drivers from a live trace, the render pipeline, textures by path; then a build check, a visual diff, research and a "Gap → path to result" section. `--section`, `--own-assets`, `--verify-build`, `--reference`, `--library`, `--batch`. |
+| `dea trace <url>` | Live debug: every WebGL call that matters (shader compiles, uniforms with values over time, texture uploads) with the code that made it, what drives each uniform (clock, scroll, pointer, viewport), and breakpoints (`--break uniform:uTime`, `--break texImage2D`, `--break url:main.js:120`) that return the caller's stack and variables. |
+| `dea library add\|list\|search\|use` | Decode once, reuse everywhere: save kits, find them by site, technique, shader, uniform, ease, colour or font, copy one into a new project. |
 | `dea motion <url>` | How it moves: the GSAP timeline tree and ScrollTriggers, CSS/WAAPI animations, Lottie, Rive, Framer, three.js clips, and a frame recording fitted to clocks, eases and springs. Writes `motion.md` and a runnable `motion/timeline.js`. |
 | `dea investigate <url> --goal "…"` | Plans and runs the steps that answer your question, with checkpoints; writes a proven report. `--background`, `--resume <run>`. |
 | `dea status [run]` | Where an investigation stands, and its report when done. |
@@ -223,6 +229,94 @@ pnpm dea hub alert 5 10                      # pause an AI app after 5 changing/
   Why: function and keyword names in the GLSL.
 - *Inferred* Post-processing through the "postprocessing" library: LuminanceMaterial, EffectMaterial, SMAAWeightsMaterial, …
 
+## Extract (`dea extract`)
+
+Decoding is only useful if you can use what comes out. `dea extract` runs the design, motion and assets decoders and a
+short live WebGL trace (or reuses earlier runs with `--from design=<id>,motion=<id>,assets=<id>,trace=<id>`) and writes
+a small project that builds:
+
+- `tokens/tokens.css`, `tokens/tailwind.preset.js`, `tokens/tokens.json` (W3C design tokens, opens in Figma Tokens
+  Studio): colours, fonts (the site's own font files with `@font-face`), sizes, durations and easing curves.
+- `motion/timeline.js`: the GSAP timelines and ScrollTriggers read from the live GSAP instance, as `buildMotion()`, with
+  the same durations, eases, staggers and triggers; `motion/keyframes.css`: the site's `@keyframes` and transitions.
+- `src/Hero.jsx` (React) or the hero markup (vanilla): the first screen's text with the font, size, weight, colour and
+  position the browser gave it, in viewport units. Verified values; the absolute placement is Inferred.
+- `shaders/<Name>.js`: each of the site's own shader programs as a three.js `RawShaderMaterial` with the exact GLSL it
+  compiled. Uniform starting values come from the live trace (✔, with the code that set them); the rest are marked
+  as guesses. `drivers` + `update(material, state)` replay what moves each uniform on the site (a clock, the scroll,
+  the pointer, the viewport). Textures carry the site's wrap and filter; render-target inputs are marked.
+- `pipeline.js`: the render passes of one recorded frame, in order, with each render target's size and type and the
+  textures each pass read, so a multi-pass site (simulation → scene → bloom → composite) can be rebuilt in order.
+- A minimal scene for `--to react` (react-three-fiber + Vite), `--to vanilla` (three.js + Vite) or `--to framer`
+  (a Framer code component). Textures go to `public/textures/`; `--own-assets` writes same-size placeholders.
+- `dea-kit.json` (what is inside, for the library) and a provenance note on every kit: the source URL, the date, and
+  that the site's code, shaders, fonts and assets belong to their owners.
+
+`--verify-build` runs `npm install && npm run build` in the kit and reports it. Then DEA takes a reference screenshot of
+the original (it waits out a loading screen: a visible progressbar or a full-screen "loader" element buys more time),
+renders the rebuild, and scores it (0.3 colour + 0.35 brightness layout + 0.35 edges, at 96×60). It tries its own facts
+first (screen colour, palette, each shader, the full pipeline), then researches with free search (DuckDuckGo's HTML page
+by default; `DEA_SEARCH=searxng` with `DEA_SEARXNG_URL`, `DEA_SEARCH=github` with `DEA_GITHUB_TOKEN`, `DEA_SEARCH=none`
+to stay offline) for up to 3 rounds, keeping a value only when the score improves. It also recognises the techniques
+in the pipeline (GPGPU particles, mipmap bloom, SMAA, blue-noise dithering, heightmaps, ripple simulations, dissolves,
+point sprites) and cites free sources for each (Codrops, the three.js forum and docs, Shadertoy, CodePen, GitHub). No
+code is copied from any source. Anything still open goes into **Gap → path to result** with the next command to run.
+
+From a real run on the author's portfolio (reference screenshot taken by DEA on a machine without a GPU):
+
+```text
+$ dea extract https://jehaduddin.vercel.app --to react --verify-build --library jehad-hero
+Extracted https://jehaduddin.vercel.app for react: 42 files
+tokens: tokens.css, tailwind.preset.js, tokens.json · motion: 0 GSAP timelines/tweens, 16 keyframes · shaders: CoreStAxShader, BaseLCoreShader, … PosDtRoShader, TimeShader
+uniform drivers from the live trace: uST ← a clock: +0.0125 per second (wall time here); uTime ← a clock …
+techniques: gpgpu, mipmap-bloom, smaa, blue-noise, heightmap, ripple-sim, dissolve, points
+build: npm run build passed (7 s)
+visual diff: __SCORE__
+open gaps: 3 (see "Gap → path to result" in the report)
+```
+
+`--section <selector>` scrolls that part of the page into view for the reference, reads only its text, and keeps only
+the motion that touches it. `--reference shot.png` compares against your own screenshot (for example one taken on a
+machine with a GPU). `--library <name> --tag hero` saves the kit; `--batch urls.txt` extracts a list of sites.
+
+## Live debug (`dea trace`)
+
+When reading the code is not enough, watch it run. `dea trace` wraps WebGL before the page's scripts start and records,
+while it waits, moves the pointer, scrolls and scrolls back:
+
+- every shader program compiled, with the code that compiled it;
+- every uniform the page sets: last value, range, number of calls, the code on the stack when WebGL received it
+  (mapped through source maps when the site publishes them), and what drives it, read from how its values moved
+  against the clock, the scroll and the pointer (Inferred, with the fit);
+- every texture upload, with its size, source and the code that uploaded it.
+
+`--break` pauses the page: on a WebGL call (`texImage2D`, `shaderSource`, `linkProgram`, `drawElements`), on a uniform
+being set (`uniform:uTime`), or on a script position (`url:GLRoot:1174:520`), and records the caller's stack and local
+variables, then resumes. From the author's portfolio:
+
+```text
+$ dea trace https://jehaduddin.vercel.app --break texImage2D url:GLRoot:1174:520
+WebGL trace: 37 programs compiled, 420 uniforms set (80 changing), 49 texture uploads
+  uNT (ShaderMaterial with tPos, uDt, uRo, tTrail) ← animated on its own between 0 and 4.9503; set by GLRoot-EqD-37OA.js:912:3134 (_) via three-DVjc41Gk.js:3725:8487
+  break texImage2D: 2 hit(s), first at three-DVjc41Gk.js:3804:7462 (it)
+  break url:GLRoot:1174:520: 1 hit(s), first at GLRoot-EqD-37OA.js:1174:520
+```
+
+`dea assets` gives the static side of the same chain: each file → the script line that loaded it → the program and
+sampler it is drawn with → the shader line that samples it, e.g.
+`bluenoise64.png ← GLRoot-EqD-37OA.js:1174:520 via three (load) → EffectMaterial.e0TBlue → fragment shader line 795`.
+
+## Library (`dea library`)
+
+```bash
+dea library add <extract-run> --name jehad-hero --tag hero particles   # or: dea extract <url> --library jehad-hero
+dea library list
+dea library search gpgpu power3        # every word must match: site, tags, techniques, shaders, uniforms, eases, colours, fonts
+dea library use jehad-hero ./my-new-site && cd my-new-site && npm install && npm run dev
+```
+
+Kits live in `~/.dea/library` (`DEA_LIBRARY` to move it), copied without `node_modules` or `dist`.
+
 ## Assets (`dea assets`)
 
 DEA watches WebGL itself, so it sees textures however they arrive (image, `ImageBitmap`, canvas, video, data computed in
@@ -295,7 +389,7 @@ so into the run. Use `--no-gpu-mask` to see exactly what a GPU-less visitor gets
 
 ## MCP server (for Claude, Cursor, VS Code, Codex)
 
-`dea-mcp` exposes 14 tools over stdio:
+`dea-mcp` exposes 17 tools over stdio (and over HTTP with `dea serve --http`):
 
 | Tool | Does |
 |---|---|
@@ -304,6 +398,9 @@ so into the run. Use `--no-gpu-mask` to see exactly what a GPU-less visitor gets
 | `decode_api` | The APIs a page calls, as OpenAPI |
 | `decode_assets` | Textures (with what each drives), render targets, models, media, with a manifest |
 | `decode_motion` | GSAP tree, ScrollTriggers, CSS/WAAPI, Lottie, clips, fitted recordings, and a GSAP rebuild |
+| `extract` | A runnable kit (tokens, GSAP/CSS motion, hero layout, three.js shader modules with traced values and drivers, pipeline, scene) with a build check, visual diff, research and gaps |
+| `trace_webgl` | Live debug: WebGL compiles, uniforms (values, drivers, setter), uploads, with stacks; breakpoints with caller variables |
+| `library` | List, search and reuse saved kits |
 | `investigate` | Start a background investigation toward a goal; returns a run id |
 | `get_run_status` | Steps, progress and the proven report of an investigation |
 | `inspect_site` | Open a URL and save the evidence |
@@ -406,6 +503,11 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
 - Without source maps, code excerpts keep the minifier's names (`e`, `t`, `n`); DEA says so at the top of `explain.md`.
 - `dea api` names which script calls an endpoint only when Chrome records an initiator; for many fetches it shows `–`.
 - WebGL in Web Workers (OffscreenCanvas in a worker) is not observed yet.
+- Extract rebuilds the site's shaders, tokens, motion and first-screen text, not its whole app: a multi-pass scene runs
+  pass by pass through `pipeline.js`, but the site's own meshes and scene graph are hooks you fill. On a machine without
+  a GPU, heavy sites render slowly in software, so the reference screenshot can still show a loader; use `--reference`.
+- `dea trace` reads values when WebGL receives them; on three.js sites the line that changes `.value` runs earlier in the
+  frame, so "set by" points at the frame loop's render call, and driver kinds are correlations (Inferred).
 - Pages behind a login are not decoded; Hands never automates logins or payments.
 - DEA Hub: apps that refuse automatic OAuth sign-up (GitHub, Slack, Figma, Asana, HubSpot, Box) need your own OAuth
   client id or a token. Hub runs locally over stdio; a remote URL for it is Phase 9.
@@ -428,7 +530,7 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
 evidence tabs (Stack, Design, Code, API, Hub history, Report) on the right. Core already streams the events it needs
 (`onEvent` / `streamRun`), and investigations already write `checkpoint.json` for it to follow.
 
-The default MCP tool list stays small on purpose (14 tools); connected apps reach AI apps through the separate Hub gateway.
+The default MCP tool list stays small on purpose (17 tools); connected apps reach AI apps through the separate Hub gateway.
 
 ## Credits
 

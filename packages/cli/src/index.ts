@@ -7,11 +7,18 @@ import {
   decodeCode,
   decodeDesign,
   decodeMotion,
+  extract,
   type InspectOptions,
   type InspectResult,
   inspectSite,
   investigateInBackground,
   investigationStatus,
+  libraryAdd,
+  libraryHome,
+  libraryList,
+  libraryRemove,
+  librarySearch,
+  libraryUse,
   listRuns,
   planInvestigation,
   type RunDoc,
@@ -21,6 +28,7 @@ import {
   runInvestigation,
   type StepKind,
   stackSite,
+  traceWebGL,
 } from '@dea/core';
 import { Command, Option } from 'commander';
 import { launchers, registerHub } from './hub.ts';
@@ -185,6 +193,163 @@ common(
 
 common(
   program
+    .command('extract')
+    .description(
+      'decode a site and write what you can USE: design tokens (CSS, Tailwind, W3C), motion as GSAP and CSS, shaders as three.js modules with a scene for React, vanilla or Framer; then a visual diff with research-and-retry',
+    )
+    .argument('[url]', 'site to extract')
+    .option('--to <target>', 'react, vanilla or framer', 'react')
+    .option('--section <selector>', 'keep only motion that touches this CSS selector')
+    .option('--own-assets', 'write same-size placeholders instead of the site textures')
+    .option('--from <runs>', 'reuse runs: design=<id>,motion=<id>,assets=<id>')
+    .option('--no-diff', 'skip the visual diff and research loop')
+    .option('--rounds <n>', 'research rounds when the rebuild does not match', '3')
+    .option('--library <name>', 'save the result in the local library (~/.dea/library)')
+    .option('--tag <tags...>', 'tags for the library entry')
+    .option('--verify-build', 'run npm install and npm run build in the generated project and report it')
+    .option('--no-trace', 'skip the live WebGL trace (uniform values and drivers)')
+    .option('--no-research', 'do not search free sources for the techniques found')
+    .option('--batch <file>', 'extract every URL in a text file (one per line)')
+    .option('--reference <image>', 'your own screenshot of the original to compare against (e.g. taken on a machine with a GPU)')
+    .option('--reference-ms <ms>', 'how long to watch the original for the reference screenshot', '45000'),
+).action(
+  (
+    url: string | undefined,
+    flags: CommonFlags & {
+      to: string;
+      section?: string;
+      ownAssets?: boolean;
+      from?: string;
+      diff: boolean;
+      rounds: string;
+      library?: string;
+      batch?: string;
+      tag?: string[];
+      verifyBuild?: boolean;
+      trace: boolean;
+      research: boolean;
+      reference?: string;
+      referenceMs: string;
+    },
+  ) =>
+    run(async () => {
+      if (!['react', 'vanilla', 'framer'].includes(flags.to)) throw new Error('--to must be react, vanilla or framer');
+      const from = Object.fromEntries(
+        (flags.from ?? '')
+          .split(',')
+          .filter(Boolean)
+          .map((kv) => kv.split('=') as [string, string]),
+      );
+      const urls = flags.batch
+        ? (await readFile(flags.batch, 'utf8'))
+            .split(/\r?\n/)
+            .map((s) => s.trim())
+            .filter((s) => s && !s.startsWith('#'))
+        : url
+          ? [url]
+          : [];
+      if (!urls.length) throw new Error('give a URL or --batch <file>');
+      const rows: string[] = [];
+      for (const [i, u] of urls.entries()) {
+        const r = await extract(u, {
+          ...options(flags),
+          to: flags.to as 'react' | 'vanilla' | 'framer',
+          section: flags.section,
+          ownAssets: flags.ownAssets,
+          from: urls.length === 1 ? from : undefined,
+          noDiff: !flags.diff,
+          rounds: Number(flags.rounds),
+          reference: flags.reference,
+          referenceMs: Number(flags.referenceMs),
+          library: flags.library ? (urls.length > 1 ? `${flags.library}-${i + 1}` : flags.library) : undefined,
+          tags: flags.tag,
+          verifyBuild: flags.verifyBuild,
+          noTrace: !flags.trace,
+          noResearch: !flags.research,
+        });
+        if (flags.json) rows.push(JSON.stringify({ url: u, out: r.out, files: r.files, diff: r.diff && { start: r.diff.start, final: r.diff.final } }));
+        else process.stdout.write(`\n${r.summary}\nReport: ${r.dir}/extract.md\n`);
+      }
+      if (flags.json) process.stdout.write(`[${rows.join(',')}]\n`);
+    }),
+);
+
+const library = program
+  .command('library')
+  .description('decode once, reuse everywhere: kits saved from dea extract, searchable by site, shader, uniform, ease, colour, font or tag');
+
+library
+  .command('add')
+  .description('save an extracted kit (an extract run id or folder) in the library')
+  .argument('<run>', 'extract run id, run folder, or a folder with dea-kit.json')
+  .option('-n, --name <name>', 'name for the kit (default: the site host)')
+  .option('-t, --tag <tags...>', 'tags to find it by')
+  .option('--json', 'print JSON')
+  .action((ref: string, flags: { name?: string; tag?: string[]; json?: boolean }) =>
+    run(async () => {
+      const e = await libraryAdd(ref, { name: flags.name, tags: flags.tag });
+      if (flags.json) return void process.stdout.write(`${JSON.stringify(e, null, 2)}\n`);
+      process.stdout.write(`Saved "${e.name}" (${e.url}, ${e.target}) in ${e.dir}\n`);
+    }),
+  );
+
+library
+  .command('list', { isDefault: true })
+  .description('list the saved kits')
+  .option('--json', 'print JSON')
+  .action((flags: { json?: boolean }) =>
+    run(async () => {
+      const items = await libraryList();
+      if (flags.json) return void process.stdout.write(`${JSON.stringify(items, null, 2)}\n`);
+      if (!items.length) return void process.stdout.write(`The library is empty (${libraryHome()}). Save a kit with: dea extract <url> --library <name>\n`);
+      for (const x of items)
+        process.stdout.write(
+          `${x.name}  ${x.target}  ${x.score != null ? `${Math.round(x.score * 100)}% match  ` : ''}${x.url}${x.tags.length ? `  #${x.tags.join(' #')}` : ''}\n  shaders: ${x.shaders.map((s) => s.name).join(', ') || 'none'}\n`,
+        );
+    }),
+  );
+
+library
+  .command('search')
+  .description('find kits: every word must match the site, name, tags, techniques, shaders, uniforms, drivers, eases, colours or fonts')
+  .argument('<query...>', 'words to look for, e.g. "gpgpu particles" or "power3 #e9e7e1"')
+  .option('--json', 'print JSON')
+  .action((q: string[], flags: { json?: boolean }) =>
+    run(async () => {
+      const hits = await librarySearch(q.join(' '));
+      if (flags.json) return void process.stdout.write(`${JSON.stringify(hits, null, 2)}\n`);
+      if (!hits.length) return void process.stdout.write('No kit matches.\n');
+      for (const h of hits) process.stdout.write(`${h.name}  (${h.url})\n  ${h.matched.join(' · ')}\n`);
+    }),
+  );
+
+library
+  .command('use')
+  .description('copy a saved kit into a folder to start a project from it')
+  .argument('<name>', 'kit name')
+  .argument('[dir]', 'destination folder (default ./<name>)')
+  .option('--force', 'copy into a folder that is not empty')
+  .action((name: string, dir: string | undefined, flags: { force?: boolean }) =>
+    run(async () => {
+      const r = await libraryUse(name, dir ?? name, { force: flags.force });
+      process.stdout.write(
+        `Copied "${r.entry.name}" (${r.files} files) to ${r.dir}\nNext: cd ${relative(process.cwd(), r.dir) || '.'} && npm install && npm run dev\n`,
+      );
+    }),
+  );
+
+library
+  .command('remove')
+  .description('delete a kit from the library')
+  .argument('<name>', 'kit name')
+  .action((name: string) =>
+    run(async () => {
+      process.stdout.write((await libraryRemove(name)) ? `Removed "${name}".\n` : `No kit named "${name}".\n`);
+    }),
+  );
+
+common(
+  program
     .command('motion')
     .description(
       'how the page moves: GSAP timeline tree and ScrollTriggers, CSS/WAAPI animations, Lottie, Rive, Framer, three.js clips, plus a frame recording fitted to curves, with a runnable GSAP rebuild',
@@ -214,6 +379,24 @@ common(
     const r = await decodeAssets(url, { ...options(flags), scrollSteps: Number(flags.scrollSteps), renderTargets: flags.renderTargets });
     if (flags.json) return void process.stdout.write(`${JSON.stringify(r.assets, null, 2)}\n`);
     process.stdout.write(`\n${r.summary}\n\nReport: ${where(r)}/assets.md   Files: ${where(r)}/assets/\n`);
+  }),
+);
+
+common(
+  program
+    .command('trace')
+    .description(
+      'live debug: trace the WebGL calls a page makes (shader compiles, every uniform with its values over time, texture uploads), each with the code that made it, infer what drives each uniform, and pause on breakpoints to read the caller variables',
+    )
+    .argument('<url>', 'site to trace')
+    .option('--ms <ms>', 'how long to watch after load', '12000')
+    .option('--break <what...>', 'texImage2D, shaderSource, linkProgram, drawElements, uniform:<name>, or url:<script>:<line>[:<col>]')
+    .option('--max-hits <n>', 'pauses recorded per breakpoint', '3'),
+).action((url: string, flags: CommonFlags & { ms: string; break?: string[]; maxHits: string }) =>
+  run(async () => {
+    const r = await traceWebGL(url, { ...options(flags), ms: Number(flags.ms), breakOn: flags.break, maxHits: Number(flags.maxHits) });
+    if (flags.json) return void process.stdout.write(`${JSON.stringify({ ...r.doc, env: undefined }, null, 2)}\n`);
+    process.stdout.write(`\n${r.summary}\n\nReport: ${relative(process.cwd(), r.dir).startsWith('..') ? r.dir : relative(process.cwd(), r.dir)}/trace.md\n`);
   }),
 );
 

@@ -1,8 +1,11 @@
 import type { Response } from 'playwright';
+import type { SourceMapConsumer } from 'source-map-js';
+import { type CdpInitiator, flattenInitiator } from '../code/initiator.ts';
 import { type Gap, renderGaps } from '../gaps.ts';
 import { exercisePage } from '../see/exercise.ts';
 import { collect, type InspectOptions, type InspectResult, type RunDoc } from '../see/inspect.ts';
 import type { Fact } from '../types.ts';
+import { type Origin, originOf, type Pass, passesOf, samplingLine } from './chain.ts';
 import {
   type AssetKind,
   classify,
@@ -43,6 +46,8 @@ export interface TextureInfo {
   placeholder: boolean;
   /** for pixels that arrived as an ImageBitmap: the downloaded image with the same size (Inferred) */
   likelyFrom?: string;
+  /** the call stack at the first upload (DEA's texImage2D trace) */
+  stack?: string[];
   usedBy: Array<{ program: string; sampler: string; role: string; uses: string[] }>;
 }
 
@@ -64,6 +69,18 @@ export interface AssetsDoc {
   programs: Array<{ id: string; name: string; samplers: string[] }>;
   webgpu: Array<{ source: unknown; size: string; format: string; file: string | null }>;
   counts: Record<string, number>;
+  /** network → source → runtime, one line per texture and sampler */
+  chains: Array<{
+    texture: string;
+    file: string;
+    origin: Origin | null;
+    program: string;
+    sampler: string;
+    shader: { stage: string; line: number; code: string } | null;
+    text: string;
+  }>;
+  /** one frame of draw calls grouped into passes, in order */
+  pipeline: { captured: boolean; draws: number; passes: Array<Pass & { targetText: string; programNames: string[]; inputTexts: string[] }> };
 }
 
 export interface AssetsResult extends InspectResult {
@@ -98,6 +115,7 @@ const safe = (u: string, i: number) => {
  */
 export async function decodeAssets(url: string, opts: AssetsOptions = {}): Promise<AssetsResult> {
   const bodies: Array<Promise<NetworkAsset | null>> = [];
+  const initiators = new Map<string, CdpInitiator>();
   let saved = 0;
   let totalBytes = 0;
   const maxFile = opts.maxFileBytes ?? 25 * 1024 * 1024;
@@ -113,6 +131,13 @@ export async function decodeAssets(url: string, opts: AssetsOptions = {}): Promi
       tree: false,
       beforeGoto: async (page, cdp) => {
         await page.addInitScript({ content: ASSET_INIT_SCRIPT });
+        // who asked for each file: Chrome's initiator stack, async callers included
+        await cdp.send('Network.enable').catch(() => {});
+        await cdp.send('Debugger.enable').catch(() => {});
+        await cdp.send('Debugger.setAsyncCallStackDepth', { maxDepth: 32 }).catch(() => {});
+        cdp.on('Network.requestWillBeSent', (e: { request: { url: string }; initiator: unknown }) => {
+          if (!initiators.has(e.request.url) && initiators.size < 2000) initiators.set(e.request.url, flattenInitiator(e.initiator));
+        });
         page.on('response', (res: Response) => {
           const u = res.url();
           if (u.startsWith('data:')) return;
@@ -156,11 +181,26 @@ export async function decodeAssets(url: string, opts: AssetsOptions = {}): Promi
         say('reading back render targets (textures the page draws into at runtime)');
         targets = await page.evaluate((m) => (window as any).__DEA_ASSETS__?.readTargets?.(m) ?? [], 8).catch(() => []);
       }
+      say('recording one frame of draw calls (the render pipeline)');
+      await page.evaluate('window.__DEA_ASSETS__ && (window.__DEA_ASSETS__.capture.armed = true)').catch(() => {});
+      for (let i = 0; i < 40; i++) {
+        const done = await page.evaluate('window.__DEA_ASSETS__ ? window.__DEA_ASSETS__.capture.done : true').catch(() => true);
+        if (done) break;
+        await page.waitForTimeout(500);
+      }
       pageData = await page
         .evaluate(() => {
           const A = (window as any).__DEA_ASSETS__;
           if (!A) return null;
-          return { textures: Object.values(A.textures), programs: Object.values(A.programs), bindings: A.bindings, gpu: A.gpu, errors: A.errors };
+          return {
+            textures: Object.values(A.textures),
+            programs: Object.values(A.programs),
+            bindings: A.bindings,
+            gpu: A.gpu,
+            errors: A.errors,
+            draws: A.capture.done ? A.capture.draws : [],
+            captured: Boolean(A.capture.done),
+          };
         })
         .catch(() => null);
       return undefined;
@@ -256,6 +296,7 @@ export async function decodeAssets(url: string, opts: AssetsOptions = {}): Promi
       original: src.url ? (fromNet.get(src.url) ?? null) : null,
       normalized: t.preview?.normalized ?? null,
       placeholder: (t.width ?? src.w ?? 0) * (t.height ?? src.h ?? 0) <= 4 && !t.renderTarget,
+      stack: Array.isArray(t.stack) ? t.stack.slice(0, 12) : undefined,
       usedBy,
     });
   }
@@ -295,6 +336,91 @@ export async function decodeAssets(url: string, opts: AssetsOptions = {}): Promi
   }
   delete w.files.x;
 
+  // ---------- network → source → runtime
+  await progress('linking files to the code that loaded them and the shaders that sample them');
+  const mapCache = new Map<string, SourceMapConsumer | null>();
+  const scriptTexts = new Map<string, string>();
+  const fetchText = async (u: string) => {
+    try {
+      const r = await fetch(u, { signal: AbortSignal.timeout(10_000) });
+      if (!r.ok) return null;
+      const t = await r.text();
+      return t.length > 15_000_000 ? null : t;
+    } catch {
+      return null;
+    }
+  };
+  const originCache = new Map<string, Origin | null>();
+  const originFor = async (u: string | undefined) => {
+    if (!u || u.startsWith('data:')) return null;
+    const base = u.split('#')[0];
+    if (!originCache.has(base)) {
+      const init = initiators.get(base);
+      originCache.set(
+        base,
+        init?.frames.length
+          ? await originOf(init.frames, fetchText, mapCache, scriptTexts)
+          : init?.type === 'parser'
+            ? { where: 'the HTML (a tag in the page)', label: 'Verified', how: 'requested by the HTML parser', frames: [] }
+            : null,
+      );
+    }
+    return originCache.get(base) ?? null;
+  };
+  for (const a of net) (a as NetworkAsset & { origin?: Origin | null }).origin = await originFor(a.url);
+  const chains: AssetsDoc['chains'] = [];
+  for (const t of textures) {
+    if (t.placeholder) continue;
+    const src = t.source.url ?? t.likelyFrom;
+    let origin = await originFor(src);
+    if (!origin && t.stack?.length && !t.renderTarget) {
+      // no network request behind it (data, canvas, video frame): the stack DEA's texImage2D trace saw at the upload
+      const frames = t.stack
+        .map((l) => /at (?:(.+?) \()?((?:https?|webpack-internal):[^)\s]+):(\d+):(\d+)\)?/.exec(l))
+        .filter((m): m is RegExpExecArray => Boolean(m))
+        .map((m) => ({ functionName: m[1] ?? '', url: m[2], lineNumber: Number(m[3]) - 1, columnNumber: Number(m[4]) - 1 }));
+      const o = frames.length ? await originOf(frames, fetchText, mapCache, scriptTexts) : null;
+      if (o)
+        origin = { ...o, how: `the call stack at the texture upload (DEA's texImage2D trace); ${o.how.replace(/^Chrome’s initiator stack/, 'positions')}` };
+    }
+    const fileName = src
+      ? src.startsWith('data:')
+        ? `inline image ${t.id}`
+        : src.includes('.glb#')
+          ? `${short(src.split('#')[0])} › ${src.split('#')[1]}`
+          : short(src)
+      : t.renderTarget
+        ? `render target ${t.id}`
+        : `${t.source.kind} texture ${t.id}`;
+    const seen = new Set<string>();
+    for (const b of bindings.filter((x) => x.texture === t.id)) {
+      const p = progs.get(b.program);
+      const key = `${p?.name}|${b.sampler}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const shader = samplingLine(p?.shaders ?? [], b.sampler);
+      const text = `${fileName}${origin ? ` ← ${origin.where}${origin.via ? ` via ${origin.via}` : ''}${origin.excerpt ? ` [${origin.excerpt.replace(/\s+/g, ' ').slice(0, 90)}]` : ''}` : ''} → ${p?.name ?? b.program}.${b.sampler}${shader ? ` → ${shader.stage} shader line ${shader.line}: ${shader.code}` : ''}`;
+      chains.push({ texture: t.id, file: fileName, origin, program: p?.name ?? b.program, sampler: b.sampler, shader, text });
+    }
+  }
+  // ---------- render pipeline of one frame
+  const draws = ((pageData?.draws ?? []) as Array<{ program: string; target: string; inputs: string[] }>).map((d) => ({ ...d, program: d.program ?? '?' }));
+  const texText = (id: string) => {
+    if (id === 'screen') return 'the screen';
+    const t = textures.find((x) => x.id === id);
+    return t ? `${id} (${t.width}×${t.height} ${t.internalFormat || t.type || ''}${t.source.url ? ` ${short(t.source.url)}` : ''})`.replace(/\s+\)/, ')') : id;
+  };
+  const pipeline: AssetsDoc['pipeline'] = {
+    captured: Boolean(pageData?.captured),
+    draws: draws.length,
+    passes: passesOf(draws).map((p) => ({
+      ...p,
+      targetText: texText(p.target),
+      programNames: p.programs.map((x) => progs.get(x)?.name ?? x),
+      inputTexts: p.inputs.map(texText),
+    })),
+  };
+
   const counts: Record<string, number> = { textures: textures.length, renderTargets: renderTargets.length, webgpu: webgpu.length };
   for (const a of net) counts[a.kind] = (counts[a.kind] ?? 0) + 1;
   const doc: AssetsDoc = {
@@ -308,6 +434,8 @@ export async function decodeAssets(url: string, opts: AssetsOptions = {}): Promi
     })),
     webgpu,
     counts,
+    chains,
+    pipeline,
   };
   await w.json('assets/manifest.json', doc, 'assetsManifest');
   // shader sources per program, with the texture file each sampler reads: what `dea extract` rebuilds from
@@ -393,6 +521,17 @@ export function assetGaps(d: AssetsDoc, site: string): Gap[] {
         text: 'treat them by their source and size: images as colour maps, small tiling data textures as noise; previews are saved in assets/textures/',
       },
       next: [{ why: 'scroll further and interact so the scenes that use them draw', command: `dea assets ${site} --scroll-steps 40 --headed` }],
+    });
+  if (d.pipeline && !d.pipeline.captured && d.textures.length)
+    gaps.push({
+      area: 'assets',
+      topic: 'The render pipeline was not recorded',
+      known: [`Verified: ${d.textures.filter((t) => t.renderTarget).length} render targets exist; ${d.programs.length} programs were linked`],
+      missing: 'one complete animation frame: the page drew too slowly or not at all while DEA waited',
+      approximation: {
+        text: 'the sampler bindings above still say which program reads which texture; render targets point to post-processing or simulation passes',
+      },
+      next: [{ why: 'on a machine with a GPU the frame completes quickly', command: `dea assets ${site} --headed` }],
     });
   const rtFailed = d.renderTargets.filter((r) => !r.file);
   if (rtFailed.length)
@@ -494,6 +633,30 @@ export function renderAssetsMd(d: AssetsDoc, run: RunDoc, gaps: Gap[]): string {
     'Third-party assets belong to their owners: use them to learn and as reference, and swap in your own before you ship.',
     '',
   ];
+  if (d.chains?.length) {
+    L.push(
+      '## Network → source → runtime',
+      '',
+      '✔ Each line: the file, the code that loaded it (Chrome’s initiator stack, through source maps when published), the program and sampler it is drawn with, and the shader line that samples it.',
+      '',
+    );
+    for (const c of d.chains.slice(0, 60)) L.push(`- ${c.text.replace(/`/g, "'")}`);
+    L.push('');
+  }
+  if (d.pipeline?.passes.length) {
+    L.push(
+      `## Render pipeline (one frame, ${d.pipeline.draws} draw calls)`,
+      '',
+      '✔ Recorded at the WebGL calls during one animation frame: which program drew into which target, in order, and what each pass read.',
+      '',
+    );
+    for (const p of d.pipeline.passes.slice(0, 60))
+      L.push(
+        `${p.index}. → ${p.targetText}: ${p.programNames.slice(0, 4).join(', ')}${p.programNames.length > 4 ? ` +${p.programNames.length - 4}` : ''} (${p.draws} draw${p.draws > 1 ? 's' : ''})${p.inputTexts.length ? `; reads ${p.inputTexts.slice(0, 5).join(', ')}` : ''}`,
+      );
+    L.push('');
+  } else if (d.pipeline && !d.pipeline.captured)
+    L.push('## Render pipeline', '', 'No animation frame completed while DEA waited, so no pipeline was recorded (see gaps).', '');
   const withUse = d.textures.filter((t) => t.usedBy.length);
   if (withUse.length) {
     L.push('## What each texture drives', '');

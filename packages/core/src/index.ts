@@ -46,6 +46,19 @@ export type { ApiEndpoint, ScriptSource } from './code/types.ts';
 export { explainPrograms, uniformMeaning } from './code/uniforms.ts';
 export { unpack } from './code/unpack.ts';
 export { checkScripts, cmpVersion } from './code/vulns.ts';
+export {
+  classifyDriver,
+  type Driver,
+  driverText,
+  fit as fitLine,
+  renderTraceMd,
+  TRACE_INIT_SCRIPT,
+  type TraceDoc,
+  type TraceOptions,
+  traceGaps,
+  traceWebGL,
+  type UniformTrace,
+} from './debug/trace.ts';
 export { colorName, contrast, groupColors } from './design/colors.ts';
 export { easingName } from './design/css.ts';
 export { type DesignDoc, type DesignOptions, type DesignResult, decodeDesign, designSummary } from './design/index.ts';
@@ -54,7 +67,44 @@ export { streamRun } from './events.ts';
 export { deaHome, isRunId, listRuns, newRunId, type RunSummary, RunWriter, readRun, resolveRun, runsDir } from './evidence/run.ts';
 export { isSecretHeader, isSecretParam, redactBody, redactText, redactUrl, stripHar } from './evidence/secrets.ts';
 export {
+  driversCode,
+  guessDriver,
+  type HeroLayout,
+  heroHtml,
+  heroJsx,
+  heroStyles,
+  keyframesCss,
+  type Observed,
+  observedLiteral,
+  type PipelinePass,
+  type ProgramSource,
+  particlesStandin,
+  pickPrograms,
+  pipelineModule,
+  projectFiles,
+  type ShaderModule,
+  type Standin,
+  shaderModule,
+  shaderName,
+  type Target,
+  tokenFiles,
+} from './extract/generate.ts';
+export { type ExtractOptions, type ExtractResult, extract, extractGaps, filterTree, observedFrom } from './extract/index.ts';
+export {
+  type KitManifest,
+  kitDir,
+  type LibraryEntry,
+  libraryAdd,
+  libraryHome,
+  libraryList,
+  libraryRemove,
+  librarySearch,
+  libraryUse,
+  scoreEntry,
+} from './extract/library.ts';
+export {
   analyse,
+  detectTechniques,
   duckDuckGo,
   type Finding,
   githubCode,
@@ -65,8 +115,10 @@ export {
   type ResearchResult,
   rateLimited,
   researchLoop,
+  researchTechniques,
   type SearchProvider,
   searxng,
+  type Technique,
 } from './extract/research.ts';
 export { COVERS, type Gap, type ProbeStep, renderGaps } from './gaps.ts';
 export { dispatch, SESSION_METHODS, SessionClient, type SessionInfo, type SessionMethod, serveSession, sessionFile } from './hands/daemon.ts';

@@ -9,10 +9,14 @@ import {
   decodeDesign,
   decodeMotion,
   dispatch,
+  extract,
   HandsSession,
   inspectSite,
   investigateInBackground,
   investigationStatus,
+  libraryList,
+  librarySearch,
+  libraryUse,
   listRuns,
   loadPolicy,
   MODES,
@@ -22,6 +26,7 @@ import {
   renderReport,
   resolveRun,
   stackSite,
+  traceWebGL,
 } from '@dea/core';
 import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
@@ -171,6 +176,86 @@ export function createServer(opts: ServerOptions = {}): McpServer {
       try {
         const r = await decodeMotion(url, { browser, idleSeconds, scrollSeconds });
         return { content: [text(`${DATA_NOTE}\n\n${clip(r.motionMd)}\n\nRun id: ${r.runId}`), text(clip(r.timelineJs, 30_000))] };
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'extract',
+    {
+      title: 'Extract a website into code you can use',
+      description:
+        'Decode a website and write a runnable kit: design tokens (tokens.css, a Tailwind preset, W3C tokens.json), motion as a GSAP module and CSS keyframes, the site shaders as three.js RawShaderMaterial modules with a minimal React (react-three-fiber), vanilla three.js or Framer scene, and textures by local path (or same-size placeholders). Then renders the rebuild, compares it with the original first screen, and researches and retries (up to 3 rounds, free search providers) when it does not match. Writes files under the run folder; never changes the site.',
+      inputSchema: z.object({
+        url,
+        browser,
+        to: z.enum(['react', 'vanilla', 'framer']).default('react').describe('Which kind of project to write.'),
+        section: z.string().optional().describe('A CSS selector: keep only motion that touches it.'),
+        ownAssets: z.boolean().optional().describe('Write same-size placeholders instead of the site textures.'),
+        diff: z.boolean().optional().describe('Run the visual diff and research loop (default true).'),
+        verifyBuild: z.boolean().optional().describe('Run npm install and npm run build in the generated project and report the result.'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    async ({ url, browser, to, section, ownAssets, diff, verifyBuild }) => {
+      try {
+        const r = await extract(url, { browser, to, section, ownAssets, noDiff: diff === false, verifyBuild });
+        return { content: [text(`${DATA_NOTE}\n\n${clip(r.extractMd)}\n\nFiles: ${r.out}\nRun id: ${r.runId}`)] };
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'trace_webgl',
+    {
+      title: 'Live-debug a WebGL page',
+      description:
+        'Trace the WebGL calls a website really makes, with the call stack of the code behind each: every shader program compiled, every uniform set (last value, range, and what drives it: a clock, the scroll, the pointer, the viewport, or its own animation), every texture upload. Optional breakpoints pause the page on a WebGL call (texImage2D, shaderSource, linkProgram, drawElements), on a uniform being set (uniform:uTime) or on a script line (url:chunk.js:120) and return the caller stack and local variables. Read-only for the site.',
+      inputSchema: z.object({
+        url,
+        browser,
+        ms: z.number().int().min(2000).max(120000).optional().describe('How long to watch after load (default 12000).'),
+        breakOn: z.array(z.string()).max(6).optional().describe('Breakpoints, e.g. ["uniform:uTime", "texImage2D", "url:main.js:120"].'),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    },
+    async ({ url, browser, ms, breakOn }) => {
+      try {
+        const r = await traceWebGL(url, { browser, ms, breakOn });
+        return { content: [text(`${DATA_NOTE}\n\n${clip(r.md)}\n\nRun id: ${r.runId}`)] };
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'library',
+    {
+      title: 'Search and reuse extracted kits',
+      description:
+        'The local library of kits saved by extract (~/.dea/library). action "list" lists them; "search" finds kits whose site, tags, techniques, shaders, uniforms, drivers, eases, colours or fonts match every word of the query; "use" copies a kit into a new folder to start a project from it.',
+      inputSchema: z.object({
+        action: z.enum(['list', 'search', 'use']),
+        query: z.string().optional().describe('Words to search for (action search).'),
+        name: z.string().optional().describe('Kit name (action use).'),
+        dir: z.string().optional().describe('Destination folder, new or empty (action use).'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ action, query, name, dir }) => {
+      try {
+        if (action === 'use') {
+          if (!name || !dir) throw new Error('use needs name and dir');
+          const r = await libraryUse(name, dir);
+          return { content: [text(`Copied "${r.entry.name}" (${r.files} files) to ${r.dir}. Next: npm install && npm run dev`)] };
+        }
+        const items = action === 'search' ? await librarySearch(query ?? '') : await libraryList();
+        return { content: [text(items.length ? JSON.stringify(items, null, 2) : 'No kits.')] };
       } catch (e) {
         return fail(e);
       }
@@ -493,6 +578,9 @@ export const TOOL_NAMES = [
   'decode_api',
   'decode_assets',
   'decode_motion',
+  'extract',
+  'trace_webgl',
+  'library',
   'investigate',
   'get_run_status',
   'inspect_site',

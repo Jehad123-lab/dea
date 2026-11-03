@@ -8,7 +8,9 @@
  */
 export const ASSET_INIT_SCRIPT = String.raw`(() => {
   if (window.__DEA_ASSETS__) return;
-  const A = (window.__DEA_ASSETS__ = { textures: {}, programs: {}, bindings: [], gpu: [], errors: [], previews: 0 });
+  const A = (window.__DEA_ASSETS__ = { textures: {}, programs: {}, bindings: [], gpu: [], errors: [], previews: 0, capture: { armed: false, on: false, ts: 0, done: false, draws: [] } });
+  const stackNow = () => String(new Error().stack || '').split('\n').slice(3, 15).map((s) => s.trim()).filter((s) => s.startsWith('at '));
+  const fbTex = new WeakMap();
   const MAX_TEX = 400, MAX_PREVIEWS = 80, MAX_BIND = 3000, PREVIEW = 512;
   let texN = 0, progN = 0;
   const texObj = new Map(), texId = new WeakMap(), progId = new WeakMap(), shaderSrc = new WeakMap(), state = new WeakMap(), texCtx = new Map();
@@ -68,6 +70,7 @@ export const ASSET_INIT_SCRIPT = String.raw`(() => {
       const t = rec(boundTex(gl, target));
       if (!t || level !== 0) return;
       t.uploads++;
+      if (t.uploads === 1) t.stack = stackNow();
       texCtx.set(t.id, gl);
       t.target = targetOf(target) === CUBE ? 'cube' : targetOf(target) === T3D ? '3d' : targetOf(target) === TARR ? '2d-array' : '2d';
       if (t.uploads > 3 && t.source && t.source.kind !== 'video') { t.dynamic = true; return; }
@@ -102,37 +105,63 @@ export const ASSET_INIT_SCRIPT = String.raw`(() => {
     f('texStorage2D', function (a) { const t = rec(boundTex(this, a[0])); if (!t) return; Object.assign(t, { levels: a[1], internalFormat: a[2], width: a[3], height: a[4] }); if (a[1] > 1) t.mipmaps = true; });
     f('texImage3D', function (a) { upload(this, a[0], a[1], { meta: { internalFormat: a[2], width: a[3], height: a[4], depth: a[5], format: a[7], type: a[8] } }, 'pixels'); });
     f('compressedTexImage2D', function (a) { const t = rec(boundTex(this, a[0])); if (!t || a[1] !== 0) return; texCtx.set(t.id, this); t.uploads++; Object.assign(t, { compressed: true, internalFormat: a[2], width: a[3], height: a[4], source: { kind: 'compressed', bytes: a[6] && a[6].byteLength } }); });
-    f('framebufferTexture2D', function (a) { const t = rec(a[3]); if (t) { t.renderTarget = true; texCtx.set(t.id, this); } });
+    f('framebufferTexture2D', function (a) { const t = rec(a[3]); if (t) { t.renderTarget = true; texCtx.set(t.id, this); if (a[1] === 0x8CE0) { const fb = st(this).fb; if (fb) fbTex.set(fb, t.id); } } });
+    f('bindFramebuffer', function (a) { if (a[0] === 0x8D40 || a[0] === 0x8CA9) st(this).fb = a[1]; });
     f('attachShader', function (a) { let p = progId.get(a[0]); if (!p) { p = 'p' + (++progN); progId.set(a[0], p); A.programs[p] = { id: p, shaders: [] }; } const s = shaderSrc.get(a[1]); if (s) A.programs[p].shaders.push(s); else A.programs[p].pending = (A.programs[p].pending || []).concat([a[1]]); });
     f('shaderSource', function (a) { shaderSrc.set(a[0], String(a[1]).slice(0, 60000)); });
-    f('linkProgram', function (a) { const p = A.programs[progId.get(a[0])]; if (p && p.pending) { for (const sh of p.pending) { const s = shaderSrc.get(sh); if (s) p.shaders.push(s); } delete p.pending; } });
+    f('linkProgram', function (a) { const p0 = A.programs[progId.get(a[0])]; if (p0 && !p0.stack) p0.stack = stackNow(); const p = p0; if (p && p.pending) { for (const sh of p.pending) { const s = shaderSrc.get(sh); if (s) p.shaders.push(s); } delete p.pending; } });
     const sampled = new WeakMap();
+    const SAMPLERS = [0x8B5E, 0x8B60, 0x8B5F, 0x8DC1, 0x8B62, 0x8DC5, 0x8DCA, 0x8DCF, 0x8DD2];
+    const samplersNow = (gl, prog) => {
+      const s = st(gl);
+      const out = [];
+      const count = gl.getProgramParameter(prog, 0x8B86); // ACTIVE_UNIFORMS
+      for (let i = 0; i < count; i++) {
+        const u = gl.getActiveUniform(prog, i);
+        if (!u || !SAMPLERS.includes(u.type)) continue;
+        const loc = gl.getUniformLocation(prog, u.name);
+        const unit = loc ? gl.getUniform(prog, loc) : null;
+        const tgt = u.type === 0x8B60 ? CUBE : u.type === 0x8B5F ? T3D : u.type === 0x8DC1 ? TARR : T2D;
+        const tex = unit != null && s.units[unit] ? s.units[unit][tgt] : null;
+        out.push({ name: u.name.replace(/\[0\]$/, ''), unit, tid: tex ? texId.get(tex) || null : null });
+      }
+      return out;
+    };
     const onDraw = function () {
-      if (A.bindings.length >= MAX_BIND) return;
+      const cap = A.capture;
       const prog = this.getParameter(0x8B8D); // CURRENT_PROGRAM
       if (!prog) return;
+      const pid = progId.get(prog);
+      if (cap.on && cap.draws.length < 400) {
+        const fb = st(this).fb;
+        cap.draws.push({ program: pid, target: fb ? fbTex.get(fb) || 'framebuffer' : 'screen', inputs: samplersNow(this, prog).map((x) => x.tid).filter(Boolean) });
+      }
+      if (A.bindings.length >= MAX_BIND) return;
       const n = sampled.get(prog) || 0;
       if (n >= 3) return;
       sampled.set(prog, n + 1);
-      const pid = progId.get(prog);
-      const s = st(this);
-      const count = this.getProgramParameter(prog, 0x8B86); // ACTIVE_UNIFORMS
-      for (let i = 0; i < count; i++) {
-        const u = this.getActiveUniform(prog, i);
-        if (!u || ![0x8B5E, 0x8B60, 0x8B5F, 0x8DC1, 0x8B62, 0x8DC5, 0x8DCA, 0x8DCF, 0x8DD2].includes(u.type)) continue;
-        const loc = this.getUniformLocation(prog, u.name);
-        const unit = loc ? this.getUniform(prog, loc) : null;
-        const tgt = u.type === 0x8B60 ? CUBE : u.type === 0x8B5F ? T3D : u.type === 0x8DC1 ? TARR : T2D;
-        const tex = unit != null && s.units[unit] ? s.units[unit][tgt] : null;
-        const tid = tex ? texId.get(tex) : null;
-        const key = pid + '|' + u.name + '|' + tid;
-        if (!A.bindings.some((b) => b.key === key)) A.bindings.push({ key, program: pid, sampler: u.name.replace(/\[0\]$/, ''), texture: tid || null, unit });
+      for (const x of samplersNow(this, prog)) {
+        const key = pid + '|' + x.name + '|' + x.tid;
+        if (!A.bindings.some((b) => b.key === key)) A.bindings.push({ key, program: pid, sampler: x.name, texture: x.tid, unit: x.unit });
       }
     };
     for (const d of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced']) f(d, onDraw);
   };
   wrap(window.WebGLRenderingContext, 'webgl');
   wrap(window.WebGL2RenderingContext, 'webgl2');
+
+  // one-frame capture of every draw (armed by DEA): starts at the next animation frame, stops at the one after
+  try {
+    const raf = window.requestAnimationFrame;
+    window.requestAnimationFrame = function (cb) {
+      return raf.call(window, function (ts) {
+        const c = A.capture;
+        if (c.armed && !c.on && !c.done) { c.on = true; c.ts = ts; }
+        else if (c.on && ts > c.ts) { c.on = false; c.armed = false; c.done = true; }
+        return cb(ts);
+      });
+    };
+  } catch (e) {}
 
   // WebGPU: images copied into textures
   try {

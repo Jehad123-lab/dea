@@ -224,6 +224,8 @@ export async function researchLoop(o: {
   target?: number;
   maxTriesPerRound?: number;
   onStep?: (s: string) => void;
+  /** keep only findings about this site (a generic CSS tutorial is not evidence of a site's colours) */
+  relevant?: (f: Finding) => boolean;
 }): Promise<ResearchResult> {
   const target = o.target ?? 0.92;
   let params = { ...o.params };
@@ -249,7 +251,9 @@ export async function researchLoop(o: {
         }
       }
     log.findings = findings.length;
-    const hints = analyse(findings, o.knobs).filter((h) => !tried.has(`${h.knob}=${h.value}`) && params[h.knob] !== h.value);
+    const hints = analyse(o.relevant ? findings.filter(o.relevant) : findings, o.knobs).filter(
+      (h) => !tried.has(`${h.knob}=${h.value}`) && params[h.knob] !== h.value,
+    );
     let improved = false;
     for (const h of hints.slice(0, o.maxTriesPerRound ?? 8)) {
       tried.add(`${h.knob}=${h.value}`);
@@ -280,3 +284,104 @@ export async function researchLoop(o: {
 }
 
 const pct = (x: number) => `${Math.round(x * 1000) / 10}%`;
+
+/** A rendering technique DEA recognised in the decoded pipeline, with the evidence and where to learn it. */
+export interface Technique {
+  id: string;
+  name: string;
+  evidence: string;
+  queries: string[];
+  sources: Finding[];
+}
+
+const TECHNIQUES: Array<{ id: string; name: string; test: (t: string) => string | null; queries: string[] }> = [
+  {
+    id: 'gpgpu',
+    name: 'GPGPU particle simulation (positions and velocities in float textures, ping-pong render targets)',
+    test: (t) => (/\btPos\b/.test(t) && /\btVel\b/.test(t) ? 'samplers tPos and tVel read and written by full-screen passes' : null),
+    queries: ['three.js GPGPU particles tutorial codrops', 'three.js GPUComputationRenderer particles position velocity texture'],
+  },
+  {
+    id: 'mipmap-bloom',
+    name: 'Mipmap blur bloom (a chain of downsample and upsample passes)',
+    test: (t) => (/DownsamplingMaterial/.test(t) && /UpsamplingMaterial/.test(t) ? 'Downsampling and Upsampling passes in the frame' : null),
+    queries: ['postprocessing MipmapBlurPass bloom three.js', 'physically based bloom downsample upsample webgl'],
+  },
+  {
+    id: 'smaa',
+    name: 'SMAA anti-aliasing',
+    test: (t) => (/SMAA/.test(t) ? 'SMAA materials in the frame' : null),
+    queries: ['SMAA three.js postprocessing SMAAEffect'],
+  },
+  {
+    id: 'blue-noise',
+    name: 'Blue-noise dithering',
+    test: (t) => (/blue.?noise|TBlue\b/i.test(t) ? 'a blue-noise texture sampled with gl_FragCoord' : null),
+    queries: ['blue noise dithering shader gl_FragCoord banding', 'blue noise texture webgl dithering tutorial'],
+  },
+  {
+    id: 'heightmap',
+    name: 'Heightmap terrain (vertex displacement from a texture)',
+    test: (t) => (/uniform sampler2D \w*(Hgt|Height|Disp)\w*/i.test(t) ? 'a height texture sampled in a vertex shader' : null),
+    queries: ['three.js terrain vertex displacement heightmap shader', 'codrops procedural terrain shader three.js'],
+  },
+  {
+    id: 'ripple-sim',
+    name: 'Ripple / wave simulation in a feedback texture',
+    test: (t) => (/\btPrev\b/.test(t) && /uTexel/.test(t) ? 'a pass that reads its own previous frame (tPrev) with a texel size' : null),
+    queries: ['webgl water ripple simulation shader feedback texture', 'three.js ripple effect render target ping pong'],
+  },
+  {
+    id: 'dissolve',
+    name: 'Dissolve / disintegration effect',
+    test: (t) => (/uDissolve|uProgress\b.*noise/i.test(t) ? 'a dissolve uniform in a material' : null),
+    queries: ['three.js dissolve effect shader noise threshold codrops'],
+  },
+  {
+    id: 'points',
+    name: 'Shader-sized point sprites',
+    test: (t) => (/gl_PointSize/.test(t) ? 'programs that write gl_PointSize' : null),
+    queries: ['three.js custom shader points particles gl_PointSize size attenuation'],
+  },
+];
+
+const TRUSTED =
+  /tympanus\.net\/codrops|discourse\.threejs\.org|threejs\.org|shadertoy\.com|codepen\.io|gsap\.com|github\.com|pmndrs|iquilezles\.org|thebookofshaders\.com|webglfundamentals\.org|maximeheckel\.com|medium\.com/i;
+
+/** Which known techniques the decoded shaders and pipeline show (program names + GLSL). */
+export function detectTechniques(text: string): Technique[] {
+  const out: Technique[] = [];
+  for (const t of TECHNIQUES) {
+    const ev = t.test(text);
+    if (ev) out.push({ id: t.id, name: t.name, evidence: ev, queries: t.queries, sources: [] });
+  }
+  return out;
+}
+
+/** Look each technique up in the free providers and keep the best sources (tutorial and forum sites first). */
+export async function researchTechniques(
+  techs: Technique[],
+  providers: SearchProvider[],
+  o: { perTechnique?: number; onStep?: (s: string) => void } = {},
+): Promise<Technique[]> {
+  for (const t of techs) {
+    const seen = new Set<string>();
+    const found: Finding[] = [];
+    for (const q of t.queries.slice(0, 2)) {
+      for (const p of providers) {
+        o.onStep?.(`research: ${p.name} "${q}"`);
+        try {
+          for (const f of await p.search(q))
+            if (f.url && !seen.has(f.url)) {
+              seen.add(f.url);
+              found.push(f);
+            }
+        } catch {
+          /* one provider failing is fine */
+        }
+      }
+    }
+    t.sources = found.sort((a, b) => Number(TRUSTED.test(b.url)) - Number(TRUSTED.test(a.url))).slice(0, o.perTechnique ?? 3);
+  }
+  return techs;
+}
