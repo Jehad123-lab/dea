@@ -75,6 +75,12 @@ export function renderDesignMd(d: DesignDoc, run: RunDoc): string {
       );
     }
   }
+  const split = d.typography.styles.filter((x) => x.role.includes('split'));
+  if (split.length)
+    push(
+      '',
+      `- ${I} Text split into single letters for animation: ${split.map((x) => `${x.size}px "${x.sample.slice(0, 30)}" (${x.elements} pieces)`).join('; ')}. Why: many elements of that style hold only one or two characters each (the SplitText pattern).`,
+    );
   const sc = d.typography.scale;
   push('');
   if (sc.ratio && sc.consistent)
@@ -97,6 +103,13 @@ export function renderDesignMd(d: DesignDoc, run: RunDoc): string {
   // colour
   push('## Colour', '');
   const c = d.color;
+  if (c.coverage) {
+    const parts = Object.entries(c.coverage)
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${k === 'dom' ? 'HTML backgrounds' : k} ${Math.round(v * 100)}%`);
+    if (parts.length) push(`- ${V} The first screen is painted by: ${parts.join(', ')} (160 points checked with elementsFromPoint).`);
+  }
   if (c.background) push(`- ${V} Background **${c.background.hex}** (${c.background.name}), ${pct(c.background.share)} of painted colour.`);
   if (c.text)
     push(
@@ -281,7 +294,8 @@ export function renderDesignMd(d: DesignDoc, run: RunDoc): string {
         );
       if (sh.techniquesCustom.length)
         push(`- ${I} Techniques in the site’s own shaders: ${sh.techniquesCustom.join(', ')}. Why: function and keyword names in the GLSL.`);
-      if (sh.interactivity.length) push(`- ${I} The shaders look ${sh.interactivity.join(', ')}. Why: uniform names.`);
+      if (sh.interactivity.length)
+        push(`- ${I} The site’s shaders appear to ${sh.interactivity.join(' and ')}. Why: uniform names like uTime, uMouse, uScroll.`);
       if (sh.origins.postprocessing.length) push(`- ${I} Post-processing through the "postprocessing" library: ${sh.origins.postprocessing.join(', ')}.`);
       if (sh.origins.addons.length || sh.origins.internal.length)
         push(`- ${V} three.js’s own programs: ${[...sh.origins.addons, ...sh.origins.internal].join(', ')}.`);

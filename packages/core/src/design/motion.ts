@@ -78,6 +78,8 @@ export async function readJsMotion(page: Page, sampleMs = 1500): Promise<JsMotio
               ].includes(k),
           );
           const targets = t.targets?.() ?? [];
+          // gsap.set() (duration 0) and gsap.delayedCall() (a function target) are not motion
+          if (!(t.duration?.() > 0) || typeof targets[0] === 'function') continue;
           const e = easeName(v.ease);
           eases.set(e, (eases.get(e) ?? 0) + 1);
           if (tweens.length < 60)

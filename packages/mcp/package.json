@@ -7,7 +7,7 @@
   "description": "DEA MCP server: decode any website's stack and design, with evidence.",
   "author": "Jehad Uddin",
   "bin": {
-    "dea-mcp": "./src/stdio.ts"
+    "dea-mcp": "./bin/dea-mcp.mjs"
   },
   "dependencies": {
     "@dea/core": "workspace:*",

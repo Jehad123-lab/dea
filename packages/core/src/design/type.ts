@@ -10,6 +10,7 @@ export interface TypeStyle {
   letterSpacing: number | null;
   transform: string;
   chars: number;
+  elements: number;
   sample: string;
   selector: string;
 }
@@ -34,8 +35,11 @@ const SCALES: Array<[number, string]> = [
 ];
 
 /** Find the modular scale (if any) behind a set of font sizes. */
+/** Text split into one element per letter or word (for per-letter animation) is not body copy. */
+export const isSplit = (s: TextSample) => s.elements >= 6 && s.chars / s.elements < 3;
+
 export function typeScale(samples: TextSample[]): TypeScale {
-  const meaningful = samples.filter((s) => s.chars >= 3);
+  const meaningful = samples.filter((s) => s.chars >= 3 && !isSplit(s));
   const totalChars = meaningful.reduce((n, s) => n + s.chars, 0) || 1;
   // sizes used for at least a little text
   const sizes = [...new Set(meaningful.filter((s) => s.chars / totalChars > 0.002 || s.size >= 24).map((s) => Math.round(s.size)))].sort((a, b) => a - b);
@@ -65,10 +69,11 @@ export function typeScale(samples: TextSample[]): TypeScale {
 export function typeStyles(samples: TextSample[]): TypeStyle[] {
   const meaningful = samples.filter((s) => s.chars >= 2);
   if (!meaningful.length) return [];
-  const body = [...meaningful].sort((a, b) => b.chars - a.chars)[0];
+  const body = [...meaningful].filter((s) => !isSplit(s)).sort((a, b) => b.chars - a.chars)[0] ?? meaningful[0];
   return meaningful.slice(0, 24).map((s) => {
     let role = 'text';
-    if (s === body) role = 'body';
+    if (isSplit(s)) role = s.size >= body.size * 1.4 ? 'display, split into letters' : 'split into letters';
+    else if (s === body) role = 'body';
     else if (/^h1$/.test(s.tag) || s.size >= Math.max(40, body.size * 2.5)) role = 'display';
     else if (/^h[2-3]$/.test(s.tag) || s.size >= body.size * 1.4) role = 'heading';
     else if (s.transform === 'uppercase' || (s.letterSpacing ?? 0) >= 0.05) role = 'label';
@@ -84,6 +89,7 @@ export function typeStyles(samples: TextSample[]): TypeStyle[] {
       letterSpacing: s.letterSpacing,
       transform: s.transform,
       chars: s.chars,
+      elements: s.elements,
       sample: s.sample,
       selector: s.selector,
     };

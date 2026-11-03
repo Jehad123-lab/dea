@@ -56,6 +56,6 @@ describe('shader reading', () => {
     ]);
     expect(sum.programs).toHaveLength(1);
     expect(sum.shaderCount).toBe(2);
-    expect(sum.interactivity).toEqual(['reacts to the mouse', 'reacts to scroll', 'animated over time']);
+    expect(sum.interactivity).toEqual(['react to the mouse', 'react to scroll', 'animate over time']);
   });
 });

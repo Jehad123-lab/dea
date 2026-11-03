@@ -57,10 +57,10 @@ const TECHNIQUES: Array<[string, RegExp]> = [
 ];
 
 const INTERACTIVE: Array<[string, RegExp]> = [
-  ['reacts to the mouse', /\bu?_?(mouse|pointer|cursor)\w*/i],
-  ['reacts to scroll', /\bu?_?(scroll|progress)\w*/i],
-  ['animated over time', /\bu?_?(time|elapsed|iTime)\b/i],
-  ['reacts to audio', /\bu?_?(audio|fft|frequency)\w*/i],
+  ['react to the mouse', /\bu?_?(mouse|pointer|cursor)\w*/i],
+  ['react to scroll', /\bu?_?(scroll|progress)\w*/i],
+  ['animate over time', /\bu?_?(time|elapsed|iTime)\b/i],
+  ['react to audio', /\bu?_?(audio|fft|frequency)\w*/i],
 ];
 
 /** three.js programs it builds for itself, and common addons; not the site author's own GLSL */
@@ -280,7 +280,7 @@ export function shaderFacts(
     if (sum.interactivity.length) {
       facts.push({
         key: 'webgl.interactivity',
-        claim: `The custom shaders look ${sum.interactivity.join(', ')}.`,
+        claim: `The site's own shaders appear to ${sum.interactivity.join(' and ')}.`,
         value: sum.interactivity,
         label: 'Inferred',
         evidence: [{ source: 'shader', pointer: 'uniform names', excerpt: sum.customUniforms.slice(0, 12).join(', ') }],

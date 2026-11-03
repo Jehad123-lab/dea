@@ -211,6 +211,7 @@ async function buildDesign(session: Session, writer: RunWriter, watch: Animation
     schema: 'dea.design/1' as const,
     typography: { families: fontFamilies, styles: styleList, scale, fluid: css.fluidType, faces, fontFaceRules: css.fontFaces.slice(0, 30) },
     color: {
+      coverage: styles.coverage,
       scheme: roles.scheme,
       background: roles.background,
       text: roles.text,

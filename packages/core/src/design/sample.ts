@@ -3,7 +3,7 @@ import type { Page } from 'playwright';
 export interface ColorSample {
   css: string;
   weight: number;
-  kind: 'text' | 'background' | 'border' | 'svg';
+  kind: 'text' | 'background' | 'border' | 'svg' | 'visible';
 }
 
 export interface TextSample {
@@ -17,6 +17,8 @@ export interface TextSample {
   letterSpacing: number | null;
   transform: string;
   chars: number;
+  /** how many elements carry this style; many elements with 1–2 characters each = text split for animation */
+  elements: number;
   sample: string;
   selector: string;
   fontId: number | null;
@@ -31,6 +33,8 @@ export interface StyleSample {
   shadows: Record<string, number>;
   viewport: { width: number; height: number };
   elementsScanned: number;
+  /** what paints the first screen, from a 16×10 grid of points: canvas, video, image or a DOM background */
+  coverage: { canvas: number; video: number; image: number; dom: number };
 }
 
 /**
@@ -96,6 +100,9 @@ export async function sampleStyles(page: Page): Promise<StyleSample> {
       const family = cs.fontFamily.split(',')[0].replace(/["']/g, '').trim();
       const key = `${family}|${cs.fontWeight}|${cs.fontStyle}|${size}`;
       const prev = byKey.get(key);
+      // a letter of split text says little; show the word or line it belongs to
+      const shown = own.length <= 2 && el.parentElement ? (el.parentElement.textContent ?? '').replace(/\s+/g, ' ').trim() || own : own;
+      const keepPrev = !!prev && prev.s.sample.length >= shown.length;
       const s: TextSample = {
         tag: el.tagName.toLowerCase(),
         family,
@@ -107,11 +114,12 @@ export async function sampleStyles(page: Page): Promise<StyleSample> {
         letterSpacing: ls,
         transform: cs.textTransform,
         chars: (prev?.s.chars ?? 0) + chars,
-        sample: prev && prev.s.sample.length >= own.length ? prev.s.sample : own.slice(0, 80),
-        selector: prev && prev.s.sample.length >= own.length ? prev.s.selector : sel(el),
+        elements: (prev?.s.elements ?? 0) + 1,
+        sample: keepPrev && prev ? prev.s.sample : shown.slice(0, 80),
+        selector: keepPrev && prev ? prev.s.selector : sel(el),
         fontId: null,
       };
-      byKey.set(key, { el: prev && prev.s.sample.length >= own.length ? prev.el : el, s });
+      byKey.set(key, { el: keepPrev && prev ? prev.el : el, s });
     }
     const text = [...byKey.values()].sort((a, b) => b.s.chars - a.s.chars);
     for (const e of Array.from(document.querySelectorAll('[data-dea-font]'))) e.removeAttribute('data-dea-font');
@@ -119,6 +127,42 @@ export async function sampleStyles(page: Page): Promise<StyleSample> {
       t.el.setAttribute('data-dea-font', String(i));
       t.s.fontId = i;
     });
+    // What is actually on top at each point of the first screen. pointer-events is forced on for a moment
+    // because elementsFromPoint skips elements with pointer-events: none (common on full-screen canvases).
+    const cover = { canvas: 0, video: 0, image: 0, dom: 0 };
+    const force = document.createElement('style');
+    force.textContent = '*{pointer-events:auto!important}';
+    document.head.appendChild(force);
+    const cell = (vw * vh) / 160;
+    try {
+      for (let gx = 0; gx < 16; gx++) {
+        for (let gy = 0; gy < 10; gy++) {
+          const x = ((gx + 0.5) / 16) * vw;
+          const y = ((gy + 0.5) / 10) * vh;
+          let hit = false;
+          for (const el of document.elementsFromPoint(x, y)) {
+            const cs = getComputedStyle(el);
+            if (cs.visibility === 'hidden' || Number(cs.opacity) < 0.1) continue;
+            const tag = el.tagName;
+            if (tag === 'CANVAS') cover.canvas++;
+            else if (tag === 'VIDEO') cover.video++;
+            else if (tag === 'IMG' || tag === 'PICTURE' || /url\(/.test(cs.backgroundImage)) cover.image++;
+            else if (cs.backgroundColor && !/rgba\(\d+, \d+, \d+, 0(\.0\d*)?\)|transparent/.test(cs.backgroundColor)) {
+              cover.dom++;
+              colors.push({ css: cs.backgroundColor, weight: cell, kind: 'visible' });
+            } else continue;
+            hit = true;
+            break;
+          }
+          if (!hit) {
+            cover.dom++;
+            colors.push({ css: 'rgb(255, 255, 255)', weight: cell, kind: 'visible' }); // the browser's default canvas colour
+          }
+        }
+      }
+    } finally {
+      force.remove();
+    }
     const rootVars: Record<string, string> = {};
     const rcs = getComputedStyle(document.documentElement);
     for (let i = 0; i < rcs.length; i++) {
@@ -134,6 +178,7 @@ export async function sampleStyles(page: Page): Promise<StyleSample> {
       shadows,
       viewport: { width: vw, height: vh },
       elementsScanned: scanned,
+      coverage: { canvas: cover.canvas / 160, video: cover.video / 160, image: cover.image / 160, dom: cover.dom / 160 },
     };
   });
 }

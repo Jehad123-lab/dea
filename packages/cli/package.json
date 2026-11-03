@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "bin": {
-    "dea": "./src/index.ts"
+    "dea": "./bin/dea.mjs"
   },
   "dependencies": {
     "@dea/core": "workspace:*",

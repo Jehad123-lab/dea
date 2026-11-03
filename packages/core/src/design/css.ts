@@ -161,8 +161,10 @@ export function easingName(value: string): string | null {
   if (best) return best[0];
   const [x1, y1, x2, y2] = p;
   if (y1 > 1 || y2 > 1 || y1 < 0 || y2 < 0) return 'custom, overshoots (springy)';
-  if (x1 <= 0.4 && y1 >= 0.6 && y2 >= 0.9) return 'custom ease-out (fast start, long soft landing)';
-  if (x1 >= 0.3 && y1 <= 0.3 && x2 <= 0.7 && y2 >= 0.9) return 'custom ease-in-out';
-  if (y2 <= 0.6 && x2 >= 0.5) return 'custom ease-in (slow start)';
+  const easesIn = y1 < x1 - 0.02; // the curve starts below the diagonal: a slow start
+  const easesOut = y2 > x2 + 0.02; // it ends above the diagonal: a soft landing
+  if (easesIn && easesOut) return 'custom ease-in-out';
+  if (easesOut) return y1 - x1 > 0.4 ? 'custom ease-out (fast start, long soft landing)' : 'custom ease-out';
+  if (easesIn) return 'custom ease-in (slow start)';
   return 'custom curve';
 }
