@@ -45,3 +45,30 @@ jobs:
           grep -q '"name": "three.js"' stack.json
       - name: MCP tool test against a real site
         run: pnpm test:e2e
+
+  windows:
+    name: Windows (unit tests + Edge smoke test)
+    runs-on: windows-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: dea stack in Microsoft Edge (preinstalled on the runner)
+        shell: pwsh
+        run: |
+          pnpm -s dea stack https://threejs.org/examples/webgl_animation_keyframes.html --browser msedge --json | Out-File -Encoding utf8 stack.json
+          Get-Content stack.json
+          if (-not (Select-String -Path stack.json -Pattern '"name": "three.js"' -Quiet)) { throw 'three.js not detected' }
+      - name: DEA Hub on Windows (config file, permissions, history)
+        shell: pwsh
+        run: |
+          $env:DEA_HUB_HOME = "$env:RUNNER_TEMP\dea-hub"
+          pnpm -s dea hub list
+          pnpm -s dea mcp install --client vscode --project --hub --dry-run
