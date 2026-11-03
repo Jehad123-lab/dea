@@ -1,0 +1,8 @@
+{
+  "note": "Copy to .dea/policy.json. Every field is optional.",
+  "mode": "supervised",
+  "allowedDomains": ["httpbin.org", "*.example.com"],
+  "blockedDomains": [],
+  "blockedActions": ["upload"],
+  "maxActions": 200
+}

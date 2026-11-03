@@ -111,14 +111,23 @@ afterAll(async () => {
 });
 
 describe('dea MCP server', () => {
-  it('lists the read-only tools in a fixed order, and stays small', async () => {
+  it('lists the tools in a fixed order, with honest hints, and stays small', async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toEqual([...TOOL_NAMES]);
-    expect(tools.length).toBeLessThanOrEqual(10); // tool budget: keep the default list small
+    expect(tools.length).toBeLessThanOrEqual(14); // tool budget: keep the default list small
+    const hands = new Set(['browse', 'interact', 'submit']);
     for (const t of tools) {
-      expect(t.annotations?.readOnlyHint).toBe(true);
-      expect(t.annotations?.destructiveHint).toBe(false);
       expect(t.description?.length).toBeGreaterThan(20);
+      if (hands.has(t.name)) {
+        expect(t.annotations?.readOnlyHint).toBe(false);
+        expect(t.annotations?.destructiveHint).toBe(t.name === 'submit');
+      } else if (t.name === 'investigate') {
+        expect(t.annotations?.readOnlyHint).toBe(false); // it writes a run, but never changes a site
+        expect(t.annotations?.destructiveHint).toBe(false);
+      } else {
+        expect(t.annotations?.readOnlyHint).toBe(true);
+        expect(t.annotations?.destructiveHint).toBe(false);
+      }
     }
   });
 

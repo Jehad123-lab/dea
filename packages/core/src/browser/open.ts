@@ -45,7 +45,8 @@ const ARGS = [
   '--disable-smooth-scrolling',
 ];
 
-async function launch(choice: BrowserChoice, headless: boolean): Promise<{ browser: Browser; channel: string }> {
+/** Start a browser: your installed Chrome, then Edge, then Playwright's Chromium (or exactly the one asked for). */
+export async function launchBrowser(choice: BrowserChoice, headless: boolean): Promise<{ browser: Browser; channel: string }> {
   const order: Array<'chrome' | 'msedge' | 'chromium'> = choice === 'auto' ? ['chrome', 'msedge', 'chromium'] : [choice];
   const errors: string[] = [];
   for (const channel of order) {
@@ -63,12 +64,28 @@ async function launch(choice: BrowserChoice, headless: boolean): Promise<{ brows
   throw new Error(`Could not start a browser.\n${errors.join('\n')}\nInstall Chrome or Edge, or run: npx playwright install chromium`);
 }
 
+/** DEA's page observers (WebGL, shaders, rAF, library probes). Installed before any page script runs. */
+export async function installObservers(context: BrowserContext, gpuMask?: boolean): Promise<void> {
+  await context.addInitScript({ content: NAME_SHIM });
+  if (gpuMask === false) await context.addInitScript({ content: 'window.__DEA_GPU_MASK__ = false;' });
+  await context.addInitScript({ content: INIT_SCRIPT });
+}
+
+export function browserInfo(browser: Browser, channel: string, headless: boolean): BrowserInfo {
+  return {
+    name: channel === 'msedge' ? 'Microsoft Edge' : channel === 'chrome' ? 'Google Chrome' : 'Chromium',
+    version: browser.version(),
+    headless,
+    channel,
+  };
+}
+
 /** Open a URL in a real browser with DEA's observers installed. */
 export async function openSite(url: string, opts: OpenOptions = {}): Promise<Session> {
   const target = normalizeUrl(url);
   const headless = opts.headless ?? true;
   const viewport = opts.viewport ?? { width: 1440, height: 900 };
-  const { browser, channel } = await launch(opts.browser ?? 'auto', headless);
+  const { browser, channel } = await launchBrowser(opts.browser ?? 'auto', headless);
   const warnings: string[] = [];
   const context = await browser.newContext({
     viewport,
@@ -76,9 +93,7 @@ export async function openSite(url: string, opts: OpenOptions = {}): Promise<Ses
     ignoreHTTPSErrors: false,
     ...(opts.harPath ? { recordHar: { path: opts.harPath, content: 'omit' as const, mode: 'full' as const } } : {}),
   });
-  await context.addInitScript({ content: NAME_SHIM });
-  if (opts.gpuMask === false) await context.addInitScript({ content: 'window.__DEA_GPU_MASK__ = false;' });
-  await context.addInitScript({ content: INIT_SCRIPT });
+  await installObservers(context, opts.gpuMask);
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
   page.setDefaultTimeout(opts.timeoutMs ?? 45_000);
@@ -101,12 +116,7 @@ export async function openSite(url: string, opts: OpenOptions = {}): Promise<Ses
   });
   await page.waitForTimeout(opts.settleMs ?? 2_500);
 
-  const info: BrowserInfo = {
-    name: channel === 'msedge' ? 'Microsoft Edge' : channel === 'chrome' ? 'Google Chrome' : 'Chromium',
-    version: browser.version(),
-    headless,
-    channel,
-  };
+  const info = browserInfo(browser, channel, headless);
   let closed = false;
   return {
     browser,

@@ -15,6 +15,7 @@ import {
   stackSite,
 } from '@dea/core';
 import { Command, Option } from 'commander';
+import { registerSession } from './session.ts';
 
 const VERSION = '0.1.0';
 
@@ -131,6 +132,9 @@ program
       const dir = await resolveRun(ref);
       const doc = await readRun<RunDoc>(dir);
       if (flags.json) return void process.stdout.write(`${JSON.stringify(doc, null, 2)}\n`);
+      if (!['inspect', 'stack', 'design'].includes(doc.meta.kind) && !flags.design) {
+        return void process.stdout.write(await readFile(join(dir, 'report.md'), 'utf8').catch(() => 'This run has no report yet (still running?).\n'));
+      }
       if (flags.design) {
         const md = await readFile(join(dir, 'design.md'), 'utf8').catch(() => null);
         if (!md) throw new Error('This run has no design decode. Run "dea design <url>".');
@@ -154,5 +158,7 @@ program
       for (const r of runs) process.stdout.write(`${r.id}  ${r.kind.padEnd(7)}  ${r.title || r.url}\n`);
     }),
   );
+
+registerSession(program, run);
 
 await program.parseAsync();
