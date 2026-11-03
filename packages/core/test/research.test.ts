@@ -17,7 +17,12 @@ describe('research-and-retry', () => {
       async search(q) {
         asked.push(q);
         return [
-          { title: 'Brand guide', url: 'https://example.test/brand', snippet: 'Links use #ff5500. The page background: #0e100f with off-white text.', source: 'mock' },
+          {
+            title: 'Brand guide',
+            url: 'https://example.test/brand',
+            snippet: 'Links use #ff5500. The page background: #0e100f with off-white text.',
+            source: 'mock',
+          },
           { title: 'Unrelated', url: 'https://example.test/other', snippet: 'nothing useful here', source: 'mock' },
         ];
       },
@@ -56,11 +61,14 @@ describe('research-and-retry', () => {
 
   it('pulls numbers, fonts and eases out of findings', () => {
     const f: Finding = { title: 't', url: 'u', source: 's', snippet: 'uniforms: { uSpeed: { value: 0.35 } }, font-family: "Mori Gothic", ease: "power3.out"' };
-    const hints = analyse([f], [
-      { name: 'uSpeed', kind: 'number', min: 0, max: 10 },
-      { name: 'font', kind: 'font' },
-      { name: 'ease', kind: 'ease' },
-    ]);
+    const hints = analyse(
+      [f],
+      [
+        { name: 'uSpeed', kind: 'number', min: 0, max: 10 },
+        { name: 'font', kind: 'font' },
+        { name: 'ease', kind: 'ease' },
+      ],
+    );
     expect(hints.map((h) => [h.knob, h.value])).toEqual([
       ['uSpeed', 0.35],
       ['font', 'Mori Gothic'],
@@ -75,6 +83,9 @@ describe('research-and-retry', () => {
     expect(await p.search('gsap')).toEqual([{ title: 'GSAP docs', url: 'https://gsap.com/docs', snippet: 'Eases like power2.out', source: 'duckduckgo' }]);
     expect(providersFromEnv({ DEA_SEARCH: 'none' })).toEqual([]);
     expect(providersFromEnv({}).map((x) => x.name)).toEqual(['duckduckgo']);
-    expect(providersFromEnv({ DEA_SEARCH: 'searxng,github', DEA_SEARXNG_URL: 'http://localhost:8888', GITHUB_TOKEN: 't' }).map((x) => x.name)).toEqual(['searxng', 'github']);
+    expect(providersFromEnv({ DEA_SEARCH: 'searxng,github', DEA_SEARXNG_URL: 'http://localhost:8888', GITHUB_TOKEN: 't' }).map((x) => x.name)).toEqual([
+      'searxng',
+      'github',
+    ]);
   });
 });

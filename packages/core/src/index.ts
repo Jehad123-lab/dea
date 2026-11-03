@@ -53,6 +53,21 @@ export { parseShader, summarizeShaders } from './design/shaders.ts';
 export { streamRun } from './events.ts';
 export { deaHome, isRunId, listRuns, newRunId, type RunSummary, RunWriter, readRun, resolveRun, runsDir } from './evidence/run.ts';
 export { isSecretHeader, isSecretParam, redactBody, redactText, redactUrl, stripHar } from './evidence/secrets.ts';
+export {
+  analyse,
+  duckDuckGo,
+  type Finding,
+  githubCode,
+  type Hint,
+  type Knob,
+  type Params,
+  providersFromEnv,
+  type ResearchResult,
+  rateLimited,
+  researchLoop,
+  type SearchProvider,
+  searxng,
+} from './extract/research.ts';
 export { COVERS, type Gap, type ProbeStep, renderGaps } from './gaps.ts';
 export { dispatch, SESSION_METHODS, SessionClient, type SessionInfo, type SessionMethod, serveSession, sessionFile } from './hands/daemon.ts';
 export { type ActionResult, type ElementInfo, type HandsOptions, HandsSession, type LoggedAction, redactArgs, renderSessionReport } from './hands/session.ts';
@@ -111,4 +126,3 @@ export { collect, type InspectOptions, type InspectResult, inspectSite, type Run
 export { classify, fmtBytes, type NetworkSummary, summarize as summarizeHar } from './see/network.ts';
 export { detectStack, KNOWN_TECH, type StackHit, type StackSignals } from './see/stack.ts';
 export type { DeaEvent, EventSink, Evidence, Fact, Label, RunMeta } from './types.ts';
-export { analyse, duckDuckGo, type Finding, githubCode, type Hint, type Knob, type Params, providersFromEnv, rateLimited, type ResearchResult, researchLoop, type SearchProvider, searxng } from './extract/research.ts';

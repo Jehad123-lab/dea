@@ -89,7 +89,10 @@ export function githubCode(token: string, f: Fetch = fetch): SearchProvider {
         out.push({
           title: `${it.repository.full_name}: ${it.name}`,
           url: it.html_url,
-          snippet: (it.text_matches ?? []).map((t) => t.fragment).join(' … ').slice(0, 1200),
+          snippet: (it.text_matches ?? [])
+            .map((t) => t.fragment)
+            .join(' … ')
+            .slice(0, 1200),
           source: 'github',
           license,
         });
@@ -176,7 +179,8 @@ export function analyse(findings: Finding[], knobs: Knob[]): Hint[] {
           add({ knob: k.name, value: v, finding: f, why: `"${m[0].slice(0, 60)}"` });
         }
       } else if (k.kind === 'font') {
-        for (const m of text.matchAll(/font-family\s*:\s*["']?([^;"',)]+)/gi)) add({ knob: k.name, value: m[1].trim(), finding: f, why: `"${m[0].slice(0, 60)}"` });
+        for (const m of text.matchAll(/font-family\s*:\s*["']?([^;"',)]+)/gi))
+          add({ knob: k.name, value: m[1].trim(), finding: f, why: `"${m[0].slice(0, 60)}"` });
       } else if (k.kind === 'ease') {
         for (const m of text.matchAll(EASE_RE)) add({ knob: k.name, value: m[1], finding: f, why: `ease name "${m[1]}"` });
       }
