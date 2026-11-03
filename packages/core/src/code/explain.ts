@@ -221,6 +221,10 @@ export function renderExplain(ctx: ExplainContext): string {
     P(
       `- ${V} Motion: GSAP ${rt?.gsapVersion ?? ''} built ${realTweens.length} tweens and ${tweens.filter((t) => t.kind === 'timeline').length} timelines while DEA watched; ${tweens.filter((t) => t.scrollTrigger).length} are tied to scroll (ScrollTrigger). Targets: ${countKinds(realTweens)}.`,
     );
+  else if (code.staticTweens.length)
+    P(
+      `- ${V} Motion: ${code.staticTweens.length} GSAP calls (gsap.to/from/fromTo/set/timeline) found in the shipped code${rt?.gsapVersion ? ` for GSAP ${rt.gsapVersion}` : ''}; none ran while DEA watched (they start on scroll, clicks or later chapters), so section 5 lists them as written.`,
+    );
   else P(`- ${U} No GSAP tweens were seen being built${rt?.gsapVersion ? ` (GSAP ${rt.gsapVersion} is present)` : ''}.`);
   const apis = code.api.filter((e) => !e.telemetry);
   if (apis.length)

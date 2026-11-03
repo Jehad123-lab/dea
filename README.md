@@ -40,7 +40,7 @@ the three.js scene graph — and writes them down in plain words, each with its 
   [W3C design tokens](https://www.designtokens.org/).
 - **Honest.** No fact without a label. No label without evidence.
 - **Safe by default.** Cookies, auth headers, tokens and signed-URL parameters are stripped before anything is
-  written to disk. Tools are read-only.
+  written to disk. Tools read by default; anything that changes a site or an app asks you first.
 - **No GPL in the box.** DEA's stack detector is its own; Wappalyzer data (GPL-3.0) is never bundled.
 
 ## Install
@@ -81,7 +81,15 @@ No Chrome or Edge on the machine? `pnpm --filter @dea/core exec playwright insta
 | `dea inspect <url>` | Open the site and save everything: stack, network log, page tree, fonts, scripts, shaders. |
 | `dea stack <url>` | What the site is built with, each item with version, label and proof. |
 | `dea design <url>` | The design decode: fonts, colours, type scale, motion, scroll, WebGL. Writes `design.md` + `design.json`. |
-| `dea report [run]` | Print a saved report (`latest` by default). `--design` prints `design.md`, `--json` the raw run. |
+| `dea explain <url>` | The deep teardown: how the site's code works, section by section, with real code excerpts. Writes `explain.md`. |
+| `dea code <url>` | Every script, source maps (original files when published), unpacked bundles, GSAP calls, shaders, listeners, known-vulnerable libraries. |
+| `dea api <url>` | The APIs the page talks to, as OpenAPI 3.1 (`api/openapi.json`) with auth kinds only, never values. |
+| `dea investigate <url> --goal "…"` | Plans and runs the steps that answer your question, with checkpoints; writes a proven report. `--background`, `--resume <run>`. |
+| `dea status [run]` | Where an investigation stands, and its report when done. |
+| `dea session …` | DEA's hands: a browser that stays open; `start`, `goto`, `snapshot`, `click`, `type`, `fill`, `submit`, `screenshot`, `stop`. |
+| `dea hub …` | Connect apps (Notion, Linear, GitHub, …) once and choose what each AI app may do with them. See [DEA Hub](#dea-hub). |
+| `dea mcp install --client <app>` | Add DEA to Claude, Claude Code, Cursor, VS Code, Windsurf or Codex. |
+| `dea report [run]` | Print a saved report (`latest` by default). `--design`, `--explain`, `--json`. |
 | `dea runs` | List saved runs, newest first. |
 
 Useful flags: `--browser chrome|msedge|chromium`, `--headed` (watch it work), `--json`, `--viewport 1280x800`,
@@ -114,6 +122,93 @@ Jehad Uddin — Creative Technologist & Design Engineer
 ### Example: from `design.md`
 
 ```markdown
+## Code teardown (`dea explain`)
+
+`dea explain` pauses the page in Chrome's debugger, collects every script it ran, looks for public source maps (and
+rebuilds the original files when they exist), unpacks minified bundles with webcrack, reads GSAP calls, shaders and
+event listeners, and links API responses to the sections that show them. From DEA's run on the author's own portfolio:
+
+```markdown
+## 1. The short version
+- ✔ Built with Vite; shipped as 12 script files (491.0 KB app code, 1.24 MB libraries) plus 2 inline scripts.
+- ✔ Stack: three.js r170, GSAP 3.15.0, React 18.3.1, Vite, Vercel, Sanity.
+- ✔ The visuals are WebGL: three.js r170, 10 scene(s), 68 materials, 67 author-written shader stages
+  (noise (simplex/perlin), fractal noise (fbm), GPU particle simulation, curl noise, instancing, blur).
+- ✔ Data: 1 API endpoint(s) on q3b5m2q9.apicdn.sanity.io; their content shows up in 1 section(s).
+- ≈ Frame loops drive the page: 26 requestAnimationFrame calls and 50 direct style writes in the app code.
+- ✔ No native scroll: the document is 900px tall in a 900px window, so "scrolling" is the site's own.
+- ✔ Code splitting: 14 dynamic-import sites; separately loaded app chunks: GLRoot, LaterChapters, Work.
+```
+
+Checked against that site's source: 43 of 43 GSAP calls found, 38 with identical values (the other 5 are computed at
+run time). On excalidraw.com DEA rebuilt 694 original files from its public source maps; on hn.algolia.com `dea api`
+found `POST /1/indexes/{index}/query` and named its auth as the `x-algolia-api-key` header (value redacted).
+
+## Investigate (`dea investigate`)
+
+Ask a question; DEA plans the steps that answer it (no language model needed), runs each with a checkpoint, and writes
+`report.md` where every claim cites evidence `[E#]` from the runs it made.
+
+```text
+$ dea investigate https://gsap.com --goal "Which fonts and colours does it use, what is it built with, and what do its main pages cover?"
+Plan (rules): "use" → what it is built with; "fonts" → how it looks and moves; "pages" → what the other pages contain
+
+- ✔ GSAP 3.15.0 (animation) [E2]
+- ✔ Text is set mostly in Mori (drawn with PP Mori), 100% of characters. [E7][E8]
+- ✔ Dark scheme: background #0e100f (near-black), text #fffce1 (lime-tinted off-white), accents #fec5fb, #ff8709,
+  #0ae448; text contrast 18.43:1. [E10]
+- ✔ GSAP 3.15.0 animates 273 elements …; 44 ScrollTriggers, 1 pinned sections. [E14][E15]
+- ✔ https://gsap.com/pricing/ — "Pricing | GSAP": h1: Pricing: Now Free! … [E20]
+
+| E2 | …-gsap-com-d73cc061 | run.json | global: window.gsap.version | 3.15.0 |
+```
+
+- `--background` returns at once; `dea status <run>` shows each step and says when a background process died.
+- `--resume <run>` continues from `checkpoint.json` without redoing finished steps.
+- Other pages are read with DEA's hands in restricted mode, on that site only: look and scroll, never type or submit.
+- `--then notion:notion-create-pages` sends the report through [DEA Hub](#dea-hub) as the client `dea-brain`.
+- Optional language model: set `DEA_LLM_BASE_URL` and `DEA_LLM_MODEL` (any OpenAI-compatible endpoint, e.g. a free
+  local Ollama at `http://localhost:11434/v1`). It may only choose among DEA's own steps, and any sentence of its
+  answer that cites no DEA evidence is removed. Off by default.
+
+## Hands (`dea session`)
+
+One browser kept open between commands. Elements are addressed by the refs in the latest snapshot (`e12`).
+
+```powershell
+pnpm dea session start https://httpbin.org/forms/post
+pnpm dea session snapshot
+pnpm dea session fill '{"e7":"Jehad","e11":"jehad@example.com"}'
+pnpm dea session submit e30          # asks first: prints exactly what would be sent
+pnpm dea session submit e30 --yes    # after you have read it
+pnpm dea session stop                # writes the session report with a screenshot per action
+```
+
+`.dea/policy.json` (see `policy.example.json`) sets the mode — `restricted` (look and scroll), `supervised` (default:
+acts, asks before submits), `delegated` (submits without asking) — plus allowed/blocked domains and actions. Logins and
+payments are never automated. Every action is logged to `actions.jsonl`.
+
+## DEA Hub
+
+Connect your apps once; every AI app then reaches them **only through DEA**, with the access you choose per app and
+per AI app. Tokens never leave your computer and are never shown to the AI apps.
+
+```powershell
+pnpm dea hub catalog                         # 32 official remote MCP servers (Notion, Linear, Sentry, Stripe, …)
+pnpm dea hub connect notion                  # signs in through your browser (OAuth); tokens saved encrypted
+pnpm dea hub add files -- npx -y @modelcontextprotocol/server-filesystem C:\notes
+pnpm dea mcp install --client claude --hub   # Claude now sees connected apps through DEA
+pnpm dea hub allow claude notion read        # full | read | selected --tools a,b | off
+pnpm dea hub history --client claude         # every call: when, which tool, arguments with secrets hidden
+pnpm dea hub off claude                      # kill switch, takes effect on a running app; dea hub on claude
+pnpm dea hub alert 5 10                      # pause an AI app after 5 changing/deleting calls in 10 minutes
+```
+
+- New AI apps start at **read**: only tools the app marks read-only (`readOnlyHint`) are visible.
+- Settings live in `~/.dea/hub.json`; secrets in `~/.dea/secrets.enc` (AES-256-GCM; key in `~/.dea/hub.key` or `DEA_HUB_KEY`).
+- Bring an existing `mcpServers` config with `dea hub add --json claude_desktop_config.json`.
+- Apps without automatic sign-up (GitHub, Slack, Figma, …) take `--client-id` from your own OAuth app, or `--token-env`.
+
 ## WebGL and 3D
 - **Verified** Scene: 145 objects (55 Mesh, 35 Group, 32 Bone, 6 Points, 5 Sprite, 3 DirectionalLight),
   348,063 vertices, 2802 instances; materials ShaderMaterial, SpriteMaterial, MeshPhysicalMaterial,
@@ -167,20 +262,31 @@ so into the run. Use `--no-gpu-mask` to see exactly what a GPU-less visitor gets
 
 ## MCP server (for Claude, Cursor, VS Code, Codex)
 
-`dea-mcp` exposes five read-only tools over stdio:
+`dea-mcp` exposes 12 tools over stdio:
 
 | Tool | Does |
 |---|---|
 | `decode_design` | The full design decode of a URL |
+| `decode_code` | The code teardown (`explain.md`) |
+| `decode_api` | The APIs a page calls, as OpenAPI |
+| `investigate` | Start a background investigation toward a goal; returns a run id |
+| `get_run_status` | Steps, progress and the proven report of an investigation |
 | `inspect_site` | Open a URL and save the evidence |
 | `detect_stack` | What a URL is built with, with proof |
-| `report` | Read a saved `report.md`, `design.md` or `run.json` |
+| `report` | Read a saved `report.md`, `design.md`, `explain.md`, `code.md`, `api.md` or `run.json` |
 | `list_runs` | List saved runs |
+| `browse` | Hands: open, snapshot, scroll, screenshot, tabs |
+| `interact` | Hands: click, type, fill, select, hover (never submits) |
+| `submit` | Hands: submit a form; asks you first unless your policy is `delegated` |
 
-All tools carry `readOnlyHint: true`. Page text is returned as data, with a note that it is not instructions.
-MCP runs are saved in `~/.dea/runs` unless `DEA_HOME` is set.
+Read tools carry `readOnlyHint: true`; `submit` is the only `destructiveHint`. Page text is returned as data, with a
+note that it is not instructions. MCP runs are saved in `~/.dea/runs` unless `DEA_HOME` is set.
 
-Claude Desktop (`claude_desktop_config.json`) or Cursor (`.cursor/mcp.json`), with DEA cloned to `C:\code\dea`:
+The easy way: `pnpm dea mcp install --client claude` (or `claude-code`, `cursor`, `vscode`, `windsurf`, `codex`).
+It merges DEA into that app's config, keeps everything else and saves a backup; `--dry-run` shows the change first,
+`--project` writes the project file (`.cursor/mcp.json`, `.vscode/mcp.json`), `--hub` also adds the DEA Hub gateway.
+
+By hand, with DEA cloned to `C:\code\dea`:
 
 ```json
 {
@@ -229,15 +335,17 @@ const design = await result;
 ```text
 packages/
   core/   @dea/core   the engine (private)
-    src/browser/      open a real browser with DEA's observers installed      (Phase 5 adds tabs, browse, interact, submit)
+    src/browser/      open a real browser with DEA's observers installed
     src/see/          inspect, page snapshot, network (HAR), stack detector
     src/design/       fonts, colours, type, motion, scroll, three.js, shaders; all CDP calls in design/cdp.ts
+    src/code/         scripts via the debugger, source maps, webcrack, GSAP/shader/listener maps, explain.md, HAR → OpenAPI
+    src/hands/        the browser session: tabs, refs, actions, actions.jsonl
+    src/safety/       permission modes: restricted, supervised, delegated (enforced in core)
+    src/brain/        investigate: planner, checkpoints, proven report, optional model
+    src/hub/          MCP client, OAuth, encrypted secrets, access levels, history, alerts
     src/evidence/     run folders, secret stripping
-    src/safety/       permission modes: restricted, supervised, delegated (policy + tests; enforced from Phase 5)
-    src/brain/        investigate-run shapes (Phase 6)
-    src/code/         script and API shapes (Phase 7)
   cli/    dea         the command line (commander)
-  mcp/    dea-mcp     the MCP server (stdio)
+  mcp/    dea-mcp     the MCP server (stdio) and the Hub gateway
 ```
 
 Core never imports MCP, so the CLI, the tests and the MCP server all call the same functions.
@@ -256,30 +364,36 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
 
 ## Limits, honestly
 
-- Bundled GSAP hides its individual tweens: DEA can see which elements GSAP moves, not each ease. With `window.gsap` it reads every tween.
+- Bundled GSAP hides its individual tweens at run time: DEA reads them from the shipped code instead, where computed
+  values show up under the minifier's names. With `window.gsap` it reads every live tween.
 - JavaScript motion and scroll timing are sampled, so on a slow machine (software WebGL) they are partial; DEA marks them Unknown when it cannot tell.
 - Shader technique names (noise, fresnel, bloom, …) come from function and keyword names in GLSL, so they are Inferred.
+- Without source maps, code excerpts keep the minifier's names (`e`, `t`, `n`); DEA says so at the top of `explain.md`.
+- `dea api` names which script calls an endpoint only when Chrome records an initiator; for many fetches it shows `–`.
 - WebGL in Web Workers (OffscreenCanvas in a worker) is not observed yet.
-- Pages behind a login are not supported yet (Phase 6, `ask_auth`).
+- Pages behind a login are not decoded; Hands never automates logins or payments.
+- DEA Hub: apps that refuse automatic OAuth sign-up (GitHub, Slack, Figma, Asana, HubSpot, Box) need your own OAuth
+  client id or a token. Hub runs locally over stdio; a remote URL for it is Phase 9.
+- `investigate` without a language model writes claims and evidence, not prose; its planner is keyword rules.
 
 ## Roadmap
 
-| Phase | Goal | Done when |
+| Phase | Goal | Status |
 |---|---|---|
-| 0–3 ✅ | Rules + CI, core (see a site), design decoder, read-only MCP server | Shipped in this repo |
-| 4 | **Publish `dea-mcp` 0.1** — bundle with tsdown (`onlyBundle: @dea/core` so GPL can't slip in), `mcpName` + `server.json`, MCP Registry | A friend runs `npx -y dea-mcp` on another computer and gets a design report |
-| 5 | **Hands** — tabs, snapshots with refs, `browse` / `interact` / `submit`; modes restricted, supervised, delegated; submit always asks | An AI app fills a test form and the final submit shows you an approval first |
-| 6 | **Brain** — `investigate` runs in the background with plan, checkpoints and self-check; bring your own model or let the calling AI think | "How does this site's hero animation work?" returns a report with shaders, easing and evidence, no clicks from you |
-| 7 | **Code and API decoder** — scripts via `Debugger`, source maps, webcrack, HAR → OpenAPI, retire.js | DEA writes an OpenAPI file for a public JSON API and names the script that calls each endpoint |
-| 8 | **Hub** — use other MCP servers (Notion first, then Composio) through a few gateway tools | DEA saves a design report into Notion, after asking you |
-| 9 | **Remote server + sign-in** — streamable HTTP, OAuth (CIMD, then DCR) | Add DEA as a Claude connector by URL and run `decode_design` |
-| 10 | **Launch** — 30-second demo, saved example runs, issue templates, changesets | Someone you don't know installs DEA and opens an issue |
+| 0–3 | Rules + CI, core (see a site), design decoder, read-only MCP server | ✅ |
+| 5 | **Hands** — tabs, snapshots with refs, `browse` / `interact` / `submit`; modes restricted, supervised, delegated; submit always asks | ✅ |
+| 6 | **Brain** — `investigate` in the background with plan, checkpoints, resume, proven report; optional OpenAI-compatible model | ✅ (planner is rules; model optional) |
+| 7 | **Code and API decoder** — `Debugger` scripts, source maps, webcrack, GSAP/shader/listener maps, HAR → OpenAPI, retire.js | ✅ |
+| 8 | **Hub** — DEA as MCP client and gateway: connect apps once, per-app × per-client access, history, kill switch, alerts; `dea mcp install` | ✅ (local, stdio) |
+| 4 | **Publish `dea-mcp` 0.1** — bundle with tsdown (`onlyBundle: @dea/core`), `server.json`, MCP Registry | Next |
+| 9 | **Remote server + sign-in** — streamable HTTP, OAuth (CIMD, then DCR), so Hub and DEA work as a URL connector | Later |
+| 10 | **Launch** — 30-second demo, saved example runs, issue templates, changesets | Later |
 
-**Later: DEA Studio** — a local web UI (`dea ui`), Manus-style: goal box and step timeline on the left; live browser
-view and evidence tabs (Stack, Design with font specimens, colour swatches, easing curves and shaders, Network, Report)
-on the right. Core already streams the events it needs (`onEvent` / `streamRun`).
+**Later: DEA Studio** — a local web UI (`dea ui`): goal box and step timeline on the left; live browser view and
+evidence tabs (Stack, Design, Code, API, Hub history, Report) on the right. Core already streams the events it needs
+(`onEvent` / `streamRun`), and investigations already write `checkpoint.json` for it to follow.
 
-The default tool list stays small on purpose (about 10 tools), with the rest behind a setting.
+The default MCP tool list stays small on purpose (12 tools); connected apps reach AI apps through the separate Hub gateway.
 
 ## Credits
 
