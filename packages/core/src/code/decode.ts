@@ -3,12 +3,14 @@ import { join } from 'node:path';
 import type { Request, Response } from 'playwright';
 import { deaHome } from '../evidence/run.ts';
 import { redactBody, redactUrl } from '../evidence/secrets.ts';
+import { renderGaps } from '../gaps.ts';
 import { collect, type InspectOptions, type InspectResult, type RunDoc } from '../see/inspect.ts';
 import type { Fact } from '../types.ts';
 import { type ApiCall, buildOpenApi, isApiCall, isAssetUrl, isTelemetry } from './api.ts';
 import { CodeIndex, type Excerpt, type StaticTween } from './excerpt.ts';
 import { renderApiMd, renderCodeMd, renderExplain } from './explain.ts';
 import { CODE_INIT_SCRIPT } from './hooks.ts';
+import { apiGaps, type CdpInitiator, describeInitiator, endpointNeedles, findInScripts, flattenInitiator, type Initiator } from './initiator.ts';
 import { type ListenerInfo, parseStack, type Runtime, readListeners, readRuntime } from './runtime.ts';
 import { detectBundler, isLibraryPath, type LoadedMap, loadSourceMap, readScripts, type ScriptRecord, safeSourcePath, watchScripts } from './scripts.ts';
 import { explainPrograms } from './uniforms.ts';
@@ -62,7 +64,7 @@ export interface CodeDoc {
   listeners: Array<ListenerInfo & { where: string | null }>;
   api: ReturnType<typeof buildOpenApi>['endpoints'];
   /** files the code fetched itself (3D models, decoders, textures, JSON scenes), with the code that asked */
-  assets: Array<{ url: string; mime: string; bytes: number; initiator: string | null }>;
+  assets: Array<{ url: string; mime: string; bytes: number; initiator: Initiator | null }>;
   /** GSAP calls found by reading the code (they may run only after a click or a state change) */
   staticTweens: StaticTween[];
 }
@@ -77,6 +79,8 @@ export async function decodeCode(url: string, opts: CodeOptions = {}, kind: 'cod
   let seen: Awaited<ReturnType<typeof watchScripts>> | null = null;
   const bodies = new Map<string, { text: string; mime: string }>();
   const meta = new Map<string, { resourceType: string; auth: string[]; mime: string; body: string | null }>();
+  /** Chrome's own answer to "who asked for this request" (Network.requestWillBeSent initiator), by method + URL */
+  const cdpInitiators = new Map<string, CdpInitiator>();
   let runtime: Runtime | null = null;
   let listeners: ListenerInfo[] = [];
   let scripts: ScriptRecord[] = [];
@@ -91,6 +95,13 @@ export async function decodeCode(url: string, opts: CodeOptions = {}, kind: 'cod
       tree: opts.tree ?? false,
       beforeGoto: async (page, cdp) => {
         seen = await watchScripts(cdp);
+        cdp.on('Network.requestWillBeSent', (e: any) => {
+          const k = reqKey(String(e.request?.method ?? 'GET'), String(e.request?.url ?? ''));
+          if (cdpInitiators.size < 3000 && !cdpInitiators.has(k)) cdpInitiators.set(k, flattenInitiator(e.initiator));
+        });
+        // async parents make Chrome's initiator stack reach past promise chains back to the code that asked
+        await cdp.send('Debugger.setAsyncCallStackDepth', { maxDepth: 32 }).catch(() => {});
+        await cdp.send('Network.enable', {}).catch(() => {});
         await page.addInitScript({ content: CODE_INIT_SCRIPT });
         page.on('request', (req: Request) => {
           const h = req.headers();
@@ -219,7 +230,10 @@ export async function decodeCode(url: string, opts: CodeOptions = {}, kind: 'cod
   await progress(`looking for source maps on ${scripts.filter((s) => s.role !== 'inline').length} scripts`);
   const maps: LoadedMap[] = [];
   const mapStatus = new Map<string, string>();
-  const candidates = scripts.filter((s) => s.role !== 'inline').slice(0, 40);
+  // maps on the network: the first 40 scripts; inline (data: URI) maps cost no request, so up to 400 of those
+  const withNet = scripts.filter((s) => s.role !== 'inline' && !s.source.includes('sourceMappingURL=data:')).slice(0, 40);
+  const withData = scripts.filter((s) => s.role !== 'inline' && s.source.includes('sourceMappingURL=data:')).slice(0, 400);
+  const candidates = [...withNet, ...withData];
   for (let i = 0; i < candidates.length; i += 4) {
     await Promise.all(
       candidates.slice(i, i + 4).map(async (s) => {
@@ -297,7 +311,7 @@ export async function decodeCode(url: string, opts: CodeOptions = {}, kind: 'cod
   // ---------- code index: positions → readable code
   const index = new CodeIndex(scripts, maps);
   const label = (f: { url: string; line: number; col: number }, e: Excerpt) =>
-    `${e.from === 'original' ? e.file : (f.url.split('/').pop() ?? f.url)}:${e.from === 'original' ? e.line : `${f.line}:${f.col}`}${e.name ? ` (${e.name})` : ''}`;
+    `${e.from === 'original' ? e.file.replace(/\?[0-9a-f]{4,8}$/, '') : f.url.startsWith('webpack-internal:') ? `webpack module ${f.url.split('/').pop()}` : (f.url.split('/').pop() ?? f.url)}:${e.from === 'original' ? e.line : `${f.line}:${f.col}`}${e.name ? ` (${e.name})` : ''}`;
   const where = (f: { url: string; line: number; col: number }) => {
     const e = index.at(f.url, f.line, f.col, 30);
     return e ? label(f, e) : null;
@@ -338,14 +352,22 @@ export async function decodeCode(url: string, opts: CodeOptions = {}, kind: 'cod
   await progress('building the API map from the network log');
   const har = JSON.parse(await readFile(w.path('network.har'), 'utf8')) as { log: { entries: any[] } };
   const rt = runtime as Runtime | null;
-  const initiatorOf = (u: string) => {
+  const initiatorOf = (method: string, u: string) => {
     const ru = redactUrl(u);
     const hit = rt?.requests.find((r) => {
       const x = redactUrl(r.url);
       return x === ru || ru.startsWith(x) || x.startsWith(ru.split('?')[0]);
     });
-    if (!hit) return null;
-    return appSite(hit.stack)?.where ?? null;
+    return describeInitiator({
+      url: u,
+      hookStack: hit?.stack ?? null,
+      cdp: cdpInitiators.get(reqKey(method, u)) ?? null,
+      appSite,
+      roleOf: (s) => index.script(s)?.role,
+      libsOf: (s) => index.script(s)?.libs ?? [],
+      scripts,
+      pageUrl: finalUrl,
+    });
   };
   const calls: ApiCall[] = [];
   const assets: CodeDoc['assets'] = [];
@@ -358,7 +380,12 @@ export async function decodeCode(url: string, opts: CodeOptions = {}, kind: 'cod
     if (!isApiCall({ method, url: u, responseMime, resourceType: m?.resourceType })) return;
     if (isAssetUrl(u, responseMime)) {
       if (assets.length < 80)
-        assets.push({ url: u, mime: responseMime, bytes: Number(e.response?._transferSize ?? e.response?.content?.size ?? 0), initiator: initiatorOf(u) });
+        assets.push({
+          url: u,
+          mime: responseMime,
+          bytes: Number(e.response?._transferSize ?? e.response?.content?.size ?? 0),
+          initiator: initiatorOf(method, u),
+        });
       return;
     }
     const b = bodies.get(key);
@@ -373,10 +400,40 @@ export async function decodeCode(url: string, opts: CodeOptions = {}, kind: 'cod
       requestHeaderNames: (e.request?.headers ?? []).map((h: any) => String(h.name).toLowerCase()),
       auth: [...new Set(m?.auth ?? [])],
       harIndex: i,
-      initiator: initiatorOf(u),
+      initiator: initiatorOf(method, u),
     });
   });
+  // fallback: no call stack named the caller and the bundles were not unpacked yet → deobfuscate the app bundles and
+  // look for the endpoint there (string arrays decoded). Whatever this finds is Inferred.
+  let autoUnpacked = false;
+  const unresolved = calls.filter((c) => !c.initiator && !isTelemetry(c.url));
+  if (unresolved.length && opts.unpack === false) {
+    const todo = scripts
+      .filter((s) => (s.role === 'app' || s.role === 'mixed') && s.source.length > 2000 && s.source.length <= 1_500_000)
+      .sort((a, b) => b.source.length - a.source.length)
+      .slice(0, 3);
+    if (todo.length) {
+      await progress(`${unresolved.length} API call(s) with no known caller: unpacking ${todo.length} app bundle(s) to look for them`);
+      autoUnpacked = true;
+      const texts: Array<{ url: string; source: string; role: string }> = [];
+      for (const s of todo) {
+        const r = await unpack(s.source, { timeoutMs: 45_000 });
+        if (!('error' in r)) texts.push({ url: s.url, source: r.code, role: s.role });
+      }
+      for (const c of unresolved) {
+        const hit = findInScripts(texts, endpointNeedles(c.url));
+        if (hit)
+          c.initiator = {
+            where: `${hit.url.split('/').pop()} (unpacked) line ${hit.line}`,
+            label: 'Inferred',
+            how: `the string "${hit.needle}" is in the deobfuscated bundle; DEA unpacked it because no call stack named the caller`,
+          };
+      }
+    }
+  }
   const spec = buildOpenApi(calls, { title: result.run.meta.title, site: finalUrl });
+  const gaps = apiGaps(spec.endpoints, finalUrl, { unpacked: opts.unpack !== false || autoUnpacked });
+  await w.json('gaps.json', gaps, 'gaps');
   await w.json('api/openapi.json', spec.openapi, 'openapi');
   let bodyN = 0;
   for (const c of calls) {
@@ -427,9 +484,10 @@ export async function decodeCode(url: string, opts: CodeOptions = {}, kind: 'cod
 
   await progress('writing the teardown (explain.md)');
   const ctx = { run: result.run, code, programs, index, tweenSites, rawShaders, calls, spec };
-  const explainMd = renderExplain(ctx);
+  const gapMd = renderGaps(gaps);
+  const explainMd = `${renderExplain(ctx)}${gapMd ? `\n\n${gapMd}` : ''}`;
   const codeMd = renderCodeMd(ctx);
-  const apiMd = renderApiMd(ctx);
+  const apiMd = `${renderApiMd(ctx)}${gapMd ? `\n\n${gapMd}` : ''}`;
   await w.text('explain.md', explainMd, 'explain');
   await w.text('code.md', codeMd, 'code');
   await w.text('api.md', apiMd, 'api');
@@ -508,6 +566,23 @@ function codeFacts(code: CodeDoc, programs: number): Fact[] {
     label: 'Verified',
     evidence: [{ source: 'har', pointer: 'network.har' }],
   });
+  code.api
+    .filter((e) => !e.telemetry)
+    .slice(0, 8)
+    .forEach((e, i) => {
+      const who = e.initiators[0];
+      const host = e.host.replace(/^https?:\/\//, '');
+      facts.push({
+        key: `code.api.caller.${i + 1}`,
+        claim: who
+          ? `${e.method} ${host}${e.path} is called from ${who.where} (${who.how}).`
+          : `${e.method} ${host}${e.path}: the calling code is not known yet; see "Gap → path to result" for a rebuild and the next probe.`,
+        value: who?.where ?? null,
+        label: who ? who.label : 'Unknown',
+        ...(who?.label === 'Inferred' ? { why: who.how } : {}),
+        evidence: [{ source: 'har', pointer: `${e.method} ${host}${e.path}`, ...(who ? { excerpt: who.where } : {}) }],
+      });
+    });
   return facts;
 }
 

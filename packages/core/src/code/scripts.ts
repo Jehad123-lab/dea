@@ -99,21 +99,31 @@ export async function readScripts(
       );
     const third = THIRD_PARTY.find(([, re]) => re.test(s.url));
     if (third && !libs.includes(third[0])) libs.push(third[0]);
-    const role: ScriptRecord['role'] = inline
-      ? 'inline'
-      : third
-        ? 'vendor'
-        : vendorName && (libs.length || /polyfill|vendor|framework|commons/.test(base))
+    // eval'd modules (webpack dev builds) carry their own inline source map: its file list says library or app
+    const own = inlineMapSources(source);
+    const fromPackages = own?.length ? own.every((p) => isLibraryPath(p)) : false;
+    if (fromPackages && own)
+      for (const p of own) {
+        const pkg = /node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(p)?.[1];
+        if (pkg && !libs.includes(pkg) && libs.length < 8) libs.push(pkg);
+      }
+    const role: ScriptRecord['role'] = fromPackages
+      ? 'vendor'
+      : inline
+        ? 'inline'
+        : third
           ? 'vendor'
-          : /webpack-runtime|webpack\/runtime|__webpack_require__\.p\s*=/.test(source) && source.length < 30_000
-            ? 'runtime'
-            : libs.length && !appSignals
-              ? 'vendor'
-              : libs.length && source.length > 300_000
-                ? 'mixed'
-                : libs.length >= 2 && /three\.js|React/.test(libs.join()) && !/(classList|querySelector)/.test(source)
-                  ? 'vendor'
-                  : 'app';
+          : vendorName && (libs.length || /polyfill|vendor|framework|commons/.test(base))
+            ? 'vendor'
+            : /webpack-runtime|webpack\/runtime|__webpack_require__\.p\s*=/.test(source) && source.length < 30_000
+              ? 'runtime'
+              : libs.length && !appSignals
+                ? 'vendor'
+                : libs.length && source.length > 300_000
+                  ? 'mixed'
+                  : libs.length >= 2 && /three\.js|React/.test(libs.join()) && !/(classList|querySelector)/.test(source)
+                    ? 'vendor'
+                    : 'app';
     out.push({ ...s, inline, bytes: source.length, hash: s.hash || createHash('sha1').update(source).digest('hex'), source, libs, role });
   }
   return out;
@@ -162,7 +172,27 @@ export function detectBundler(scripts: ScriptRecord[]): BundlerHit[] {
 }
 
 /** Where the source map is, if the site published one. */
+/** The original file names in a script's inline (data: URI) source map, or null when it has none. */
+export function inlineMapSources(source: string): string[] | null {
+  const i = source.lastIndexOf('sourceMappingURL=data:');
+  if (i < 0 || source.length - i > 8_000_000) return null;
+  const ref = /^sourceMappingURL=(data:[^\s'"]+)/.exec(source.slice(i))?.[1];
+  if (!ref) return null;
+  const comma = ref.indexOf(',');
+  try {
+    const meta = ref.slice(5, comma);
+    const body = ref.slice(comma + 1);
+    const raw = JSON.parse(meta.includes('base64') ? Buffer.from(body, 'base64').toString('utf8') : decodeURIComponent(body)) as { sources?: unknown };
+    return Array.isArray(raw.sources) ? raw.sources.map(String) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function sourceMapRef(s: ScriptRecord): string | null {
+  const di = s.source.lastIndexOf('sourceMappingURL=data:');
+  const fromData = di >= 0 ? /^sourceMappingURL=(data:[^\s'"]+)/.exec(s.source.slice(di)) : null;
+  if (fromData?.[1]) return fromData[1];
   const fromTail = /\/\/[#@]\s*sourceMappingURL=([^\s'"]+)\s*$/m.exec(s.source.slice(-4000));
   const ref = s.sourceMapUrl || fromTail?.[1] || null;
   if (!ref) return null;

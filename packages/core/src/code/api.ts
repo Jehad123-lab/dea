@@ -1,4 +1,5 @@
 import { REDACTED, redactBody, redactUrl } from '../evidence/secrets.ts';
+import { type Initiator, initiatorText } from './initiator.ts';
 
 export interface ApiCall {
   method: string;
@@ -14,8 +15,8 @@ export interface ApiCall {
   auth: string[];
   /** where in the HAR this came from */
   harIndex: number | null;
-  /** the code that asked for it (script URL:line:col), when DEA saw it */
-  initiator: string | null;
+  /** the code that asked for it, labelled Verified (seen in a call stack) or Inferred (the URL is written there) */
+  initiator: Initiator | null;
 }
 
 type Schema = Record<string, any>;
@@ -148,7 +149,7 @@ export interface ApiSpecResult {
     graphql: string[];
     query: string | null;
     auth: string[];
-    initiators: string[];
+    initiators: Initiator[];
     example: string;
     responseKeys: string[];
   }>;
@@ -189,7 +190,7 @@ export function buildOpenApi(calls: ApiCall[], info: { title: string; site: stri
     const auth = new Set<string>();
     const graphql = new Set<string>();
     let groq: string | null = null;
-    const initiators = new Set<string>();
+    const initiators = new Map<string, Initiator>();
     for (const c of g.calls) {
       const u = new URL(redactUrl(c.url));
       for (const [k, v] of u.searchParams) if (!qp.has(k)) qp.set(k, v.slice(0, 200));
@@ -197,7 +198,7 @@ export function buildOpenApi(calls: ApiCall[], info: { title: string; site: stri
       if (gq && /\*\[|_type|groq/.test(gq)) groq = gq.slice(0, 1200);
       statuses.add(c.status);
       for (const a of c.auth) auth.add(a);
-      if (c.initiator) initiators.add(c.initiator);
+      if (c.initiator && !initiators.has(c.initiator.where)) initiators.set(c.initiator.where, c.initiator);
       const reqJson = parseJson(c.requestBody ? redactBody(c.requestBody, c.requestMime) : null);
       if (reqJson !== undefined) {
         reqSchema = reqSchema ? mergeSchema(reqSchema, inferSchema(reqJson)) : inferSchema(reqJson);
@@ -250,7 +251,12 @@ export function buildOpenApi(calls: ApiCall[], info: { title: string; site: stri
         `Seen ${g.calls.length}× while DEA loaded ${info.site}.`,
         isTelemetry(sample.url) ? 'This looks like analytics/telemetry, not app data.' : '',
         groq ? `Sanity GROQ query: ${groq}` : '',
-        initiators.size ? `Called from: ${[...initiators].slice(0, 3).join('; ')}` : '',
+        initiators.size
+          ? `Called from: ${[...initiators.values()]
+              .slice(0, 3)
+              .map((x) => `${initiatorText(x)}, ${x.how}`)
+              .join('; ')}`
+          : 'Called from: Unknown (no call stack and the URL is not written in any script DEA read)',
       ]
         .filter(Boolean)
         .join('\n\n'),
@@ -297,7 +303,7 @@ export function buildOpenApi(calls: ApiCall[], info: { title: string; site: stri
       graphql: [...graphql],
       query: groq,
       auth: [...auth],
-      initiators: [...initiators],
+      initiators: [...initiators.values()].sort((a, b) => Number(a.label === 'Inferred') - Number(b.label === 'Inferred')),
       example: redactUrl(sample.url),
       responseKeys: top && typeof top === 'object' && !Array.isArray(top) ? Object.keys(top as object).slice(0, 12) : [],
     });

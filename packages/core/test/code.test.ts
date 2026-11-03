@@ -72,7 +72,7 @@ describe('API decoder', () => {
       requestHeaderNames: ['authorization'],
       auth: ['Bearer'],
       harIndex: id,
-      initiator: 'https://example.com/assets/app.js:1:200',
+      initiator: { where: 'app.js:1:200', label: 'Verified' as const, how: 'call stack' },
     });
     const r = buildOpenApi([call(101), call(202)], { title: 'Example', site: 'https://example.com' });
     const doc = r.openapi as any;
@@ -82,7 +82,7 @@ describe('API decoder', () => {
     expect(JSON.stringify(doc)).not.toContain(secret);
     expect(JSON.stringify(doc.components?.securitySchemes ?? {})).toMatch(/bearer/i);
     expect(r.endpoints[0].calls).toBe(2);
-    expect(r.endpoints[0].initiators[0]).toContain('app.js');
+    expect(r.endpoints[0].initiators[0].where).toContain('app.js');
   });
 
   it('ties response values to the sections that show them', () => {

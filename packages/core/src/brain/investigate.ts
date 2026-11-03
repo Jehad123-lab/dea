@@ -7,14 +7,15 @@ import { decodeCode } from '../code/decode.ts';
 import { decodeDesign } from '../design/index.ts';
 import { deaHome, newRunId, RunWriter, readRun, resolveRun, runsDir } from '../evidence/run.ts';
 import { redactText } from '../evidence/secrets.ts';
+import { COVERS, type Gap, type ProbeStep, renderGaps } from '../gaps.ts';
 import { HandsSession } from '../hands/session.ts';
 import { Hub } from '../hub/hub.ts';
 import { loadPolicy } from '../safety/policy.ts';
 import { stackSite } from '../see/inspect.ts';
 import type { EventSink, Fact } from '../types.ts';
 import { brainFromEnv, refinePlan, writeAnswer } from './llm.ts';
-import { goalTerms, type PlanOptions, planInvestigation } from './planner.ts';
-import type { Checkpoint, Claim, EvidenceRef, PlanStep, RunFacts, StepState } from './types.ts';
+import { followUpStep, goalTerms, matchedTerms, type PlanOptions, pageTerms, planInvestigation, rankLinks } from './planner.ts';
+import type { Checkpoint, Claim, EvidenceRef, PlanStep, RunFacts, StepKind, StepState } from './types.ts';
 
 export interface InvestigateOptions extends PlanOptions {
   browser?: BrowserChoice;
@@ -117,30 +118,62 @@ export async function runInvestigation(ref: { url: string; goal: string } | { re
   };
   const childOpts = { browser: o.browser ?? (cp.options.browser as BrowserChoice | undefined), headless: o.headless ?? true, runsRoot: join(dir, '..') };
   let ran = 0;
-  for (const st of cp.steps) {
-    if (st.status === 'done' || st.status === 'skipped') continue;
-    if (o.maxSteps !== undefined && ran >= o.maxSteps) {
-      cp.status = 'stopped';
+  const runPending = async (): Promise<boolean> => {
+    for (const st of cp.steps) {
+      if (st.status === 'done' || st.status === 'skipped' || st.status === 'failed') continue;
+      if (o.maxSteps !== undefined && ran >= o.maxSteps) {
+        cp.status = 'stopped';
+        await saveCheckpoint(dir, cp);
+        return false;
+      }
+      const step = cp.plan.steps.find((s) => s.id === st.id) as PlanStep;
+      st.status = 'doing';
+      st.startedAt = now();
+      delete st.error;
       await saveCheckpoint(dir, cp);
-      return { runId: cp.runId, dir, checkpoint: cp, report: '' };
+      await say(`${st.id}: ${step.does}`);
+      try {
+        await runStep(step, st, cp, dir, childOpts, say);
+        st.status = 'done';
+      } catch (e) {
+        st.status = 'failed';
+        st.error = (e as Error).message.split('\n')[0].slice(0, 300);
+        await say(`${st.id} failed: ${st.error}`);
+      }
+      st.finishedAt = now();
+      ran++;
+      await saveCheckpoint(dir, cp);
     }
-    const step = cp.plan.steps.find((s) => s.id === st.id) as PlanStep;
-    st.status = 'doing';
-    st.startedAt = now();
-    delete st.error;
-    await saveCheckpoint(dir, cp);
-    await say(`${st.id}: ${step.does}`);
-    try {
-      await runStep(step, st, cp, dir, childOpts, say);
-      st.status = 'done';
-    } catch (e) {
-      st.status = 'failed';
-      st.error = (e as Error).message.split('\n')[0].slice(0, 300);
-      await say(`${st.id} failed: ${st.error}`);
+    return true;
+  };
+  // a resumed run retries the step that was cut off mid-way
+  for (const st of cp.steps) if (st.status === 'doing') st.status = 'todo';
+  if (!(await runPending())) return { runId: cp.runId, dir, checkpoint: cp, report: '' };
+
+  // Follow the gaps: each decoder names the probe that would close what it could not decode. Run the ones that are
+  // read-only decoders DEA has not run yet, then look again, until nothing new is learned (at most 2 rounds).
+  for (let round = 1; round <= 2; round++) {
+    const gaps = await openGaps(cp, dir);
+    const done = new Set(cp.steps.map((s) => s.kind));
+    const wanted: StepKind[] = [];
+    for (const g of gaps)
+      for (const n of g.next)
+        if (n.probe && FOLLOW.has(n.probe as StepKind) && !done.has(n.probe as StepKind) && !wanted.includes(n.probe as StepKind))
+          wanted.push(n.probe as StepKind);
+    if (!wanted.length) break;
+    for (const kind of wanted) {
+      const step = followUpStep(
+        kind,
+        cp.plan.steps.length + 1,
+        gaps.filter((g) => g.next.some((n) => n.probe === kind)).map((g) => g.topic),
+      );
+      cp.plan.steps.push(step);
+      cp.steps.push({ id: step.id, kind, status: 'todo' });
+      cp.plan.reasons.push(`follow-up (round ${round}): ${kind} to close ${step.does.split('closes: ')[1] ?? 'a gap'}`);
     }
-    st.finishedAt = now();
-    ran++;
     await saveCheckpoint(dir, cp);
+    await say(`following ${wanted.length} probe(s) from the gaps: ${wanted.join(', ')}`);
+    if (!(await runPending())) return { runId: cp.runId, dir, checkpoint: cp, report: '' };
   }
   await say('writing the proven report');
   const report = await writeReport(cp, dir, o);
@@ -197,27 +230,42 @@ async function runStep(
         const o1 = await hands.outline();
         const home = (o1.data ?? {}) as { links?: Array<{ url: string; label: string }> } & Record<string, unknown>;
         pages.push({ url: hands.page.url(), ...home, links: undefined, linkCount: home.links?.length ?? 0 });
-        const terms = goalTerms(cp.goal);
-        const ranked = (home.links ?? [])
-          .map((l) => ({ ...l, score: terms.filter((t) => `${l.url} ${l.label}`.toLowerCase().includes(t)).length * 10 - l.url.split('/').length }))
-          .sort((a, b) => b.score - a.score);
-        for (const l of ranked.slice(0, max - 1)) {
-          await say(`reading ${l.url}`);
+        const terms = pageTerms(cp.goal, cp.url);
+        const picks = rankLinks(home.links ?? [], terms, max - 1);
+        await say(
+          terms.length
+            ? `page words in the goal: ${terms.join(', ')}; ${picks.filter((p) => p.matched.length).length} link(s) match`
+            : 'no page topic in the goal: reading a sample of the main pages',
+        );
+        for (const l of picks) {
+          await say(`reading ${l.url} (${l.why})`);
           const g = await hands.goto(l.url);
           if (!g.ok) {
-            pages.push({ url: l.url, error: g.error ?? g.reason });
+            pages.push({ url: l.url, error: g.error ?? g.reason, why: l.why });
             continue;
           }
           await hands.scroll({ by: 1800 }).catch(() => null);
           const o2 = await hands.outline();
-          const d = (o2.data ?? {}) as Record<string, unknown>;
-          pages.push({ url: hands.page.url(), ...d, links: undefined, linkCount: Array.isArray(d.links) ? d.links.length : 0 });
+          const d = (o2.data ?? {}) as Record<string, unknown> & { title?: string; headings?: string[] };
+          const at = hands.page.url();
+          if (pages.some((p) => String(p.url).replace(/\/+$/, '') === at.replace(/\/+$/, ''))) continue; // a redirect to a page already read
+          // a link that matched must lead to a page about it: its title, h1 or address has to name the goal word too
+          if (l.matched.length) {
+            const h1 = (d.headings ?? []).filter((h) => h.startsWith('h1:')).join(' ');
+            const onTopic = matchedTerms(`${d.title ?? ''} ${h1} ${new URL(at).pathname}`, l.matched);
+            if (!onTopic.length) {
+              pages.push({ url: at, offTopic: true, title: d.title, why: `${l.why}, but its title, h1 and address do not mention it` });
+              continue;
+            }
+          }
+          pages.push({ url: at, ...d, links: undefined, linkCount: Array.isArray(d.links) ? d.links.length : 0, why: l.why });
         }
       } finally {
         await hands.close();
       }
       st.data = pages;
-      st.summary = `${pages.length} page(s) read: ${pages
+      const kept = pages.filter((p) => !p.offTopic && !p.error);
+      st.summary = `${kept.length} page(s) read${pages.length > kept.length ? ` (${pages.length - kept.length} left out: off-topic or failed)` : ''}: ${kept
         .map((p) => String(p.title ?? p.url))
         .join(' | ')
         .slice(0, 300)}`;
@@ -312,13 +360,15 @@ export async function writeReport(cp: Checkpoint, dir: string, o: InvestigateOpt
     forms?: number;
     canvases?: number;
     error?: string;
+    offTopic?: boolean;
+    why?: string;
   }>;
   for (const p of pages) {
-    if (p.error) continue;
+    if (p.error || p.offTopic) continue;
     const id = cite(pagesStep?.childRun ?? cp.runId, 'actions.jsonl', `outline of ${p.url}`, p.headings?.[0]);
     claims.push({
       id: `C${claims.length + 1}`,
-      text: `${p.url} — "${p.title ?? ''}": ${p.headings?.slice(0, 3).join('; ') || 'no headings'}${p.forms ? `; ${p.forms} form(s)` : ''}${p.canvases ? `; ${p.canvases} canvas` : ''} (${p.words ?? 0} words).`,
+      text: `${p.url} — "${p.title ?? ''}": ${p.headings?.slice(0, 3).join('; ') || 'no headings'}${p.forms ? `; ${p.forms} form(s)` : ''}${p.canvases ? `; ${p.canvases} canvas` : ''} (${p.words ?? 0} words).${p.why ? ` Read because: ${p.why}.` : ''}`,
       label: 'Verified',
       cites: [id],
       from: 'pages',
@@ -369,6 +419,8 @@ export async function writeReport(cp: Checkpoint, dir: string, o: InvestigateOpt
       `- ${MARK[c.label]} ${c.text}${c.cites.length ? ` ${c.cites.map((x) => `[${x}]`).join('')}` : ''}${c.why && c.label !== 'Verified' ? ` — ${c.why}` : ''}`,
     );
   if (claims.length > 120) L.push(`- … ${claims.length - 120} more in claims.json`);
+  const gaps = await openGaps(cp, dir);
+  if (gaps.length) L.push('', renderGaps(gaps));
   L.push(
     '',
     '## How DEA worked it out',
@@ -441,4 +493,30 @@ export async function investigationStatus(
   const report = cp.status === 'done' || cp.status === 'failed' ? await readFile(join(dir, 'report.md'), 'utf8').catch(() => null) : null;
   const progress = (await readFile(join(dir, 'progress.md'), 'utf8').catch(() => '')).split('\n').slice(-8).join('\n');
   return { cp, alive, report, progress };
+}
+
+/** Decoders the Brain may run on its own to close a gap: read-only ones only. */
+const FOLLOW = new Set<StepKind>(['stack', 'design', 'code', 'api', 'pages']);
+
+/**
+ * The gaps still open: read gaps.json from every finished step's run; a later step that covers the same area (code
+ * covers api) supersedes the gaps of an earlier one.
+ */
+export async function openGaps(cp: Checkpoint, dir: string): Promise<Gap[]> {
+  const latest = new Map<string, string>();
+  for (const st of cp.steps) {
+    if (st.status !== 'done' || !st.childRun) continue;
+    for (const area of COVERS[st.kind as ProbeStep] ?? []) latest.set(area, st.childRun);
+  }
+  const out: Gap[] = [];
+  const seen = new Set<string>();
+  for (const [area, run] of latest) {
+    const gaps = JSON.parse(await readFile(join(dir, '..', run, 'gaps.json'), 'utf8').catch(() => '[]')) as Gap[];
+    for (const g of gaps)
+      if (g.area === area && !seen.has(g.topic)) {
+        seen.add(g.topic);
+        out.push(g);
+      }
+  }
+  return out;
 }

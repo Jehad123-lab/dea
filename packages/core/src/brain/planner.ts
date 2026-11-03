@@ -75,6 +75,12 @@ export function planInvestigation(url: string, goal: string, o: PlanOptions = {}
   return { goal, url, by: 'rules', reasons, steps };
 }
 
+/** A step the Brain adds by itself to close gaps a decoder reported. */
+export function followUpStep(kind: StepKind, n: number, topics: string[]): PlanStep {
+  const w = kind === 'pages' ? { max: 5 } : undefined;
+  return { id: `s${n}-${kind}`, kind, does: `${DOES[kind](w)} Follow-up added by DEA; closes: ${topics.slice(0, 3).join('; ')}`, ...(w ? { with: w } : {}) };
+}
+
 /** Words of the goal worth matching against facts and links (stop words dropped). */
 export function goalTerms(goal: string): string[] {
   const stop = new Set(
@@ -83,4 +89,106 @@ export function goalTerms(goal: string): string[] {
     ),
   );
   return [...new Set(goal.toLowerCase().match(/[a-z0-9][a-z0-9.+#-]{1,}/g) ?? [])].filter((w) => !stop.has(w));
+}
+
+// ------------------------------------------------------------------------------------------------ page choice
+
+/** Words that ask HOW to analyse (fonts, stack, API…), not WHICH page to read. They pick steps, not pages. */
+const ANALYSIS = RULES.filter(([k]) => k !== 'pages').map(([, re]) => re);
+const PAGE_WORDS = new Set(
+  'page pages site website section sections structure navigation nav content copy text seo link links route routes whole other others main home homepage cover covers covered overview look looks work works built made used uses say says said show shows contain contains mention mentions talk talks describe describes list read check see offer offers each every kind thing things stuff info information details detail'.split(
+    ' ',
+  ),
+);
+
+const stem = (w: string) =>
+  w.length <= 3 ? w : w.endsWith('ies') ? `${w.slice(0, -3)}y` : /(ss|x|ch|sh)es$/.test(w) ? w.slice(0, -2) : /[^su]s$/.test(w) ? w.slice(0, -1) : w;
+const tokens = (s: string) => (s.toLowerCase().match(/[a-z0-9]+/g) ?? []).map(stem);
+
+/**
+ * Goal words that name a page topic ("pricing", "showcase", "docs"): goal words minus stop words, minus words that ask
+ * for an analysis ("fonts", "built"), minus generic page words, minus the site's own name.
+ */
+export function pageTerms(goal: string, url = ''): string[] {
+  let host: string[] = [];
+  try {
+    host = new URL(url).hostname.split('.');
+  } catch {
+    /* no url */
+  }
+  const asked = goal.replace(/\b(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?/gi, ' ');
+  return goalTerms(asked).filter((w) => !PAGE_WORDS.has(w) && !host.includes(w) && !ANALYSIS.some((re) => re.test(w)) && /[a-z]/.test(w));
+}
+
+export interface PagePick {
+  url: string;
+  label: string;
+  /** why DEA chose it, said in the report */
+  why: string;
+  /** the goal words it matched; empty for a sample */
+  matched: string[];
+}
+
+/** Which goal words a text (address, link label, title, h1) contains, whole words only ("css" does not match "discuss"). */
+export function matchedTerms(text: string, terms: string[]): string[] {
+  const have = new Set(tokens(text));
+  return terms.filter((t) => have.has(stem(t)));
+}
+
+/**
+ * Choose internal pages to read. A link must match a goal word in its address or its label; with no page words in the
+ * goal (or no match), DEA reads a labelled sample of the top-level pages instead of guessing.
+ */
+export function rankLinks(links: Array<{ url: string; label: string }>, terms: string[], max: number): PagePick[] {
+  const path = (u: string) => {
+    try {
+      return new URL(u).pathname;
+    } catch {
+      return u;
+    }
+  };
+  const depth = (u: string) => path(u).split('/').filter(Boolean).length;
+  // one entry per page: /pricing and /pricing/ (and ?ref=nav) are the same page
+  const uniq = new Map<string, { url: string; label: string }>();
+  for (const l of links) {
+    const k = path(l.url).replace(/\/+$/, '').toLowerCase() || '/';
+    const had = uniq.get(k);
+    if (!had || (!had.label && l.label)) uniq.set(k, l);
+  }
+  links = [...uniq.values()];
+  if (terms.length) {
+    const hits = links
+      .map((l) => {
+        const inPath = matchedTerms(path(l.url), terms);
+        const inLabel = matchedTerms(l.label, terms);
+        return { l, inPath, inLabel, score: inPath.length * 3 + inLabel.length * 2 - depth(l.url) * 0.1 };
+      })
+      .filter((x) => x.inPath.length + x.inLabel.length > 0)
+      .sort((a, b) => b.score - a.score);
+    if (hits.length)
+      return hits.slice(0, max).map((x) => {
+        const m = [...new Set([...x.inPath, ...x.inLabel])];
+        return {
+          url: x.l.url,
+          label: x.l.label,
+          matched: m,
+          why: `matched "${m.join('", "')}" in its ${x.inPath.length ? 'address' : 'link text'}`,
+        };
+      });
+  }
+  const seen = new Set<string>();
+  return links
+    .filter(
+      (l) =>
+        depth(l.url) === 1 &&
+        !/^(#|login|signin|sign-in|signup|register|account|cart|checkout|privacy|terms|cookies?|legal)$/i.test(path(l.url).replace(/\//g, '')),
+    )
+    .filter((l) => (seen.has(path(l.url)) ? false : (seen.add(path(l.url)), true)))
+    .slice(0, max)
+    .map((l) => ({
+      url: l.url,
+      label: l.label,
+      matched: [],
+      why: terms.length ? `a sample of the main pages (no link matched "${terms.join('", "')}")` : 'a sample of the main pages (the goal names no page topic)',
+    }));
 }

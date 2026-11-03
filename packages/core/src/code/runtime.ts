@@ -440,7 +440,7 @@ export function parseStack(lines: string[]): Frame[] {
     const m = /^at (?:(.+?) \()?(.+?):(\d+):(\d+)\)?$/.exec(l.trim());
     if (!m) continue;
     const url = m[2].replace(/^async /, '');
-    if (!/^https?:/.test(url)) continue;
+    if (!/^(https?:|webpack-internal:|webpack:)/.test(url)) continue;
     out.push({ fn: m[1] ?? '', url, line: Number(m[3]), col: Number(m[4]) });
   }
   return out;

@@ -4,6 +4,7 @@ import type { ApiCall, ApiSpecResult } from './api.ts';
 import { isTelemetry } from './api.ts';
 import type { CodeDoc } from './decode.ts';
 import type { CodeIndex, Excerpt } from './excerpt.ts';
+import { initiatorText } from './initiator.ts';
 import type { Section, TweenInfo } from './runtime.ts';
 import { isLibraryPath } from './scripts.ts';
 import type { ProgramExplained } from './uniforms.ts';
@@ -407,7 +408,7 @@ export function renderExplain(ctx: ExplainContext): string {
       ),
     ];
     P(
-      `- ${V} \`${e.method} ${new URL(e.host).host}${e.path}\` ×${e.calls} (HTTP ${e.statuses.join(', ')})${e.graphql.length ? ` GraphQL ${e.graphql.join(', ')}` : ''}${e.auth.length ? `, auth: ${e.auth.join(', ')} (values never saved)` : ''}${e.initiators.length ? `, called from \`${e.initiators[0]}\`` : ''}${secs.length ? `. Feeds section ${secs.map((x) => `3.${x + 1}`).join(', ')}` : ''}.`,
+      `- ${V} \`${e.method} ${new URL(e.host).host}${e.path}\` ×${e.calls} (HTTP ${e.statuses.join(', ')})${e.graphql.length ? ` GraphQL ${e.graphql.join(', ')}` : ''}${e.auth.length ? `, auth: ${e.auth.join(', ')} (values never saved)` : ''}${e.initiators.length ? `, called from \`${e.initiators[0].where}\`${e.initiators[0].label === 'Inferred' ? ` (Inferred: ${e.initiators[0].how})` : ''}` : ', caller Unknown'}${secs.length ? `. Feeds section ${secs.map((x) => `3.${x + 1}`).join(', ')}` : ''}.`,
     );
     if (e.query) P(`  - Query: \`${cut(e.query, 300)}\``);
     if (e.responseKeys.length) P(`  - Response keys: ${e.responseKeys.map((k) => `\`${k}\``).join(', ')}`);
@@ -416,7 +417,9 @@ export function renderExplain(ctx: ExplainContext): string {
   if (code.assets.length) {
     P('', `${V} Files the code fetched itself (not page assets):`, '');
     for (const a of code.assets.slice(0, 20))
-      P(`- \`${cut(a.url.replace(/^https?:\/\/[^/]+/, ''), 90)}\`${a.bytes ? ` (${fmtBytes(a.bytes)})` : ''}${a.initiator ? ` ← \`${a.initiator}\`` : ''}`);
+      P(
+        `- \`${cut(a.url.replace(/^https?:\/\/[^/]+/, ''), 90)}\`${a.bytes ? ` (${fmtBytes(a.bytes)})` : ''}${a.initiator ? ` ← \`${a.initiator.where}\`${a.initiator.label === 'Inferred' ? ' (Inferred)' : ''}` : ''}`,
+      );
   }
   P('', 'Full machine-readable spec: `api/openapi.json` (OpenAPI 3.1). Human view: `api.md`.', '');
 
@@ -696,7 +699,7 @@ export function renderApiMd(ctx: ExplainContext): string {
   if (app.length) L.push('| method | endpoint | calls | status | auth | called from |', '|---|---|---|---|---|---|');
   for (const e of app)
     L.push(
-      `| ${e.method} | ${cell(`${new URL(e.host).host}${e.path}`)} | ${e.calls} | ${e.statuses.join(', ')} | ${cell(e.auth.join(', ') || 'none seen')} | ${cell(e.initiators[0] ?? '–')} |`,
+      `| ${e.method} | ${cell(`${new URL(e.host).host}${e.path}`)} | ${e.calls} | ${e.statuses.join(', ')} | ${cell(e.auth.join(', ') || 'none seen')} | ${cell(initiatorText(e.initiators[0]))} |`,
     );
   for (const e of app) {
     if (!e.query && !e.graphql.length && !e.responseKeys.length) continue;

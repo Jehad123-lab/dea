@@ -17,5 +17,5 @@ export interface ApiEndpoint {
   /** HAR entry indexes that prove the call */
   harEntries: number[];
   /** the script whose stack started the request, when known */
-  initiator: string | null;
+  initiator: import('./initiator.ts').Initiator | null;
 }

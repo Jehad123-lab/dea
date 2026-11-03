@@ -9,7 +9,7 @@ export {
   writeReport,
 } from './brain/investigate.ts';
 export { brainFromEnv, checkCitations } from './brain/llm.ts';
-export { goalTerms, planInvestigation } from './brain/planner.ts';
+export { goalTerms, matchedTerms, pageTerms, planInvestigation, rankLinks } from './brain/planner.ts';
 export type { Brain, Checkpoint, Claim, EvidenceRef, InvestigationPlan, PlanStep, StepKind, StepState } from './brain/types.ts';
 export { type BrowserChoice, browserInfo, installObservers, launchBrowser, normalizeUrl, type OpenOptions, openSite, type Session } from './browser/open.ts';
 export { type ApiCall, buildOpenApi, inferSchema, isApiCall, isAssetUrl, isTelemetry, mergeSchema, templatePath } from './code/api.ts';
@@ -17,6 +17,17 @@ export { type CodeDoc, type CodeOptions, type CodeResult, decodeCode } from './c
 export { CodeIndex, type Excerpt } from './code/excerpt.ts';
 export { linkData } from './code/explain.ts';
 export { CODE_INIT_SCRIPT } from './code/hooks.ts';
+export {
+  apiGaps,
+  type CdpInitiator,
+  describeInitiator,
+  endpointNeedles,
+  findInScripts,
+  flattenInitiator,
+  framesToStack,
+  type Initiator,
+  initiatorText,
+} from './code/initiator.ts';
 export { parseStack } from './code/runtime.ts';
 export { detectBundler, type ScriptRecord, safeSourcePath, sourceMapRef } from './code/scripts.ts';
 export type { ApiEndpoint, ScriptSource } from './code/types.ts';
@@ -30,6 +41,7 @@ export { parseShader, summarizeShaders } from './design/shaders.ts';
 export { streamRun } from './events.ts';
 export { deaHome, isRunId, listRuns, newRunId, type RunSummary, RunWriter, readRun, resolveRun, runsDir } from './evidence/run.ts';
 export { isSecretHeader, isSecretParam, redactBody, redactText, redactUrl, stripHar } from './evidence/secrets.ts';
+export { COVERS, type Gap, type ProbeStep, renderGaps } from './gaps.ts';
 export { dispatch, SESSION_METHODS, SessionClient, type SessionInfo, type SessionMethod, serveSession, sessionFile } from './hands/daemon.ts';
 export { type ActionResult, type ElementInfo, type HandsOptions, HandsSession, type LoggedAction, redactArgs, renderSessionReport } from './hands/session.ts';
 export { CATALOG, type CatalogEntry, findCatalog } from './hub/catalog.ts';
