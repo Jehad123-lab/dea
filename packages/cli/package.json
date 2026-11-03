@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@dea/core": "workspace:*",
-    "commander": "^15.0.0"
+    "commander": "^15.0.0",
+    "dea-mcp": "workspace:*"
   }
 }

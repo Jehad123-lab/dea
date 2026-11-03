@@ -16,6 +16,7 @@ import {
   stackSite,
 } from '@dea/core';
 import { Command, Option } from 'commander';
+import { registerHub } from './hub.ts';
 import { registerSession } from './session.ts';
 
 const VERSION = '0.1.0';
@@ -229,5 +230,6 @@ program
   );
 
 registerSession(program, run);
+registerHub(program, run);
 
 await program.parseAsync();

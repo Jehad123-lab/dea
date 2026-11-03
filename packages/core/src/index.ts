@@ -20,6 +20,26 @@ export { deaHome, isRunId, listRuns, newRunId, type RunSummary, RunWriter, readR
 export { isSecretHeader, isSecretParam, redactBody, redactText, redactUrl, stripHar } from './evidence/secrets.ts';
 export { dispatch, SESSION_METHODS, SessionClient, type SessionInfo, type SessionMethod, serveSession, sessionFile } from './hands/daemon.ts';
 export { type ActionResult, type ElementInfo, type HandsOptions, HandsSession, type LoggedAction, redactArgs, renderSessionReport } from './hands/session.ts';
+export { CATALOG, type CatalogEntry, findCatalog } from './hub/catalog.ts';
+export { connectServer, DEFAULT_CALLBACK_PORT, expandEnv, HubOAuth, listAllTools, type ToolInfo, waitForCallback } from './hub/client.ts';
+export { type CallResult, Hub, qualify, SEP, unqualify } from './hub/hub.ts';
+export { grantFor, type HistoryLine, isDestructive, isReadOnly, logCall, mayCall, overLimit, readHistory, summarizeArgs, visibleTools } from './hub/policy.ts';
+export {
+  type AppGrant,
+  type ClientDef,
+  checkName,
+  DEFAULT_CONFIG,
+  type HubConfig,
+  hubHome,
+  LEVELS,
+  type Level,
+  loadHub,
+  parseServersConfig,
+  SecretStore,
+  type ServerDef,
+  saveHub,
+  updateHub,
+} from './hub/store.ts';
 export { renderReport } from './report.ts';
 export {
   type ActionKind,

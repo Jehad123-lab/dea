@@ -12,9 +12,11 @@
   "dependencies": {
     "@dea/core": "workspace:*",
     "@modelcontextprotocol/server": "^2.4.0",
-    "zod": "^4.6.7"
-  },
-  "devDependencies": {
+    "zod": "^4.6.7",
     "@modelcontextprotocol/client": "^2.4.0"
+  },
+  "exports": {
+    ".": "./src/server.ts",
+    "./gateway": "./src/gateway-stdio.ts"
   }
 }
