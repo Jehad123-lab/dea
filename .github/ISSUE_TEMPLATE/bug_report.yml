@@ -1,0 +1,31 @@
+name: Bug report
+description: Something DEA got wrong, crashed on, or labelled dishonestly
+labels: [bug]
+body:
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: The exact command you ran
+      placeholder: dea extract https://example.com --to react
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The terminal output (and the relevant part of the report). Remove anything private.
+      render: text
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: Windows 11, Node 24.1, Chrome 141, dea 0.1.0
+    validations:
+      required: true

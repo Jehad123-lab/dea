@@ -1,0 +1,332 @@
+{
+  "url": "https://jehaduddin.vercel.app",
+  "extractedAt": "2026-11-03T14:20:25.230Z",
+  "target": "react",
+  "title": "Jehad Uddin — Creative Technologist & Design Engineer",
+  "score": 0.8805241753168402,
+  "shaders": [
+    {
+      "name": "CoreStAxShader",
+      "uniforms": [
+        "morphTexture",
+        "uCore",
+        "uST",
+        "uShape",
+        "uPieces",
+        "uLoop",
+        "uAx",
+        "uHgt",
+        "uHgtE",
+        "uL",
+        "uLC",
+        "uHero",
+        "uFloor",
+        "uFog",
+        "uOn",
+        "uShadow",
+        "uCam",
+        "uTime",
+        "uPool",
+        "uBuild",
+        "uColI",
+        "uCoreI",
+        "uMist",
+        "uColC",
+        "uRockSh",
+        "uRockShB"
+      ],
+      "drivers": {
+        "uST": "clock",
+        "uTime": "clock",
+        "uPool": "clock",
+        "uColI": "clock"
+      }
+    },
+    {
+      "name": "BaseLCoreShader",
+      "uniforms": [
+        "morphTexture",
+        "uBase",
+        "uAmp",
+        "uSeed",
+        "uHaze",
+        "uSharp",
+        "uOn",
+        "uFloor",
+        "uTime",
+        "uL",
+        "uLC",
+        "uFog",
+        "uCenter",
+        "uCam",
+        "uCore",
+        "uColI",
+        "uCoreI",
+        "uMist",
+        "uColC"
+      ],
+      "drivers": {
+        "uTime": "clock",
+        "uColI": "clock"
+      }
+    },
+    {
+      "name": "DetailLLcShader",
+      "uniforms": [
+        "morphTexture",
+        "uDetail",
+        "uL",
+        "uLC",
+        "uHero",
+        "uFloor",
+        "uFog",
+        "uOn",
+        "uShadow",
+        "uCam",
+        "uTime",
+        "uPool",
+        "uBuild",
+        "uCore",
+        "uColI",
+        "uCoreI",
+        "uMist",
+        "uColC",
+        "uRockSh",
+        "uRockShB"
+      ],
+      "drivers": {
+        "uTime": "clock",
+        "uPool": "clock",
+        "uColI": "clock"
+      }
+    },
+    {
+      "name": "DetailLLcShader2",
+      "uniforms": [
+        "morphTexture",
+        "uDetail",
+        "uL",
+        "uLC",
+        "uHero",
+        "uFloor",
+        "uFog",
+        "uOn",
+        "uShadow",
+        "uCam",
+        "uTime",
+        "uPool",
+        "uBuild",
+        "uCore",
+        "uColI",
+        "uCoreI",
+        "uMist",
+        "uColC",
+        "uRockSh",
+        "uRockShB"
+      ],
+      "drivers": {
+        "uTime": "clock",
+        "uPool": "clock",
+        "uColI": "clock"
+      }
+    },
+    {
+      "name": "ViewOnCaShader",
+      "uniforms": [
+        "morphTexture",
+        "uView",
+        "uOn",
+        "uTime",
+        "uCore",
+        "uGain",
+        "uShade",
+        "uDpr",
+        "uCa",
+        "uCb",
+        "uHot",
+        "uRect"
+      ],
+      "drivers": {
+        "uView": "viewport"
+      }
+    },
+    {
+      "name": "CamFloorCoreShader",
+      "uniforms": [
+        "morphTexture",
+        "uCam",
+        "uFloor",
+        "uTime",
+        "uOn",
+        "uBuild",
+        "uCore",
+        "uColI",
+        "uCoreI",
+        "uMist",
+        "uColC"
+      ],
+      "drivers": {
+        "uTime": "clock",
+        "uColI": "clock"
+      }
+    },
+    {
+      "name": "TimeCamPtrShader",
+      "uniforms": [
+        "morphTexture",
+        "uTime",
+        "uSize",
+        "uFade",
+        "uAspect",
+        "uCam",
+        "uPtr",
+        "uPtrV",
+        "uBox",
+        "uHole",
+        "uHoleOn"
+      ],
+      "drivers": {
+        "uTime": "clock",
+        "uAspect": "viewport"
+      }
+    },
+    {
+      "name": "ViewDprOnShader",
+      "uniforms": [
+        "morphTexture",
+        "uView",
+        "uDpr",
+        "uOn",
+        "uTime",
+        "uGain",
+        "uShade",
+        "uHot",
+        "uCb",
+        "uRect"
+      ],
+      "drivers": {
+        "uView": "viewport"
+      }
+    },
+    {
+      "name": "RippleRipRipTexelShader",
+      "uniforms": [
+        "morphTexture",
+        "uRipple",
+        "uRefl",
+        "uRip",
+        "uRipTexel",
+        "uRipAmp",
+        "uTime",
+        "uSwell",
+        "uGlint",
+        "uCaustK",
+        "uReflOn",
+        "uFogFar",
+        "uNight",
+        "uCam",
+        "uFloor",
+        "uFeet",
+        "uRes",
+        "uGlNear",
+        "uLift",
+        "uDeep",
+        "uRingK",
+        "uTop",
+        "uHor",
+        "uMist",
+        "uBeltCol",
+        "uSun",
+        "uSunCol",
+        "uSunK",
+        "uBelt"
+      ],
+      "drivers": {
+        "uTime": "clock",
+        "uRes": "viewport"
+      }
+    },
+    {
+      "name": "PosDtRoShader",
+      "uniforms": [
+        "morphTexture",
+        "tPos",
+        "tVel",
+        "tHome",
+        "uDt",
+        "uNT",
+        "uNS",
+        "uBreath",
+        "uFlow",
+        "uStir",
+        "uR",
+        "uK",
+        "uRo",
+        "uRd",
+        "uRv",
+        "tTrail",
+        "uTrailOn",
+        "uTrailK",
+        "uTanF",
+        "uAsp",
+        "uVP",
+        "uCR",
+        "uCU"
+      ],
+      "drivers": {
+        "uNS": "clock",
+        "uAsp": "viewport"
+      }
+    },
+    {
+      "name": "TimeCoreColCShader",
+      "uniforms": [
+        "morphTexture",
+        "uTime",
+        "uFloor",
+        "uOn",
+        "uPix",
+        "uCore",
+        "uColC"
+      ],
+      "drivers": {
+        "uTime": "clock"
+      }
+    },
+    {
+      "name": "TimeShader",
+      "uniforms": [
+        "morphTexture",
+        "uTime",
+        "uFade",
+        "uSize",
+        "uDpr"
+      ],
+      "drivers": {
+        "uTime": "clock"
+      }
+    }
+  ],
+  "eases": [],
+  "colors": [
+    "#000000",
+    "#e9e7e1",
+    "#000000",
+    "#e9e7e1",
+    "#ffffff"
+  ],
+  "fonts": [
+    "Timeless Sans Grotesk"
+  ],
+  "techniques": [
+    "GPGPU particle simulation (positions and velocities in float textures, ping-pong render targets)",
+    "Mipmap blur bloom (a chain of downsample and upsample passes)",
+    "SMAA anti-aliasing",
+    "Blue-noise dithering",
+    "Heightmap terrain (vertex displacement from a texture)",
+    "Ripple / wave simulation in a feedback texture",
+    "Dissolve / disintegration effect",
+    "Shader-sized point sprites"
+  ],
+  "provenance": "Extracted from https://jehaduddin.vercel.app on 2026-11-03 by DEA. Third-party code, shaders, fonts and assets belong to their owners."
+}

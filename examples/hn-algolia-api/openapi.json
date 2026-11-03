@@ -1,0 +1,1495 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "All | Search powered by Algolia (observed API)",
+    "version": "observed",
+    "description": "Reconstructed by DEA from live traffic on https://hn.algolia.com/. Only calls DEA saw are listed; secrets are redacted."
+  },
+  "servers": [
+    {
+      "url": "https://telemetry.algolia.com"
+    },
+    {
+      "url": "https://uj5wyc0l7x-dsn.algolia.net"
+    },
+    {
+      "url": "https://www.google-analytics.com"
+    },
+    {
+      "url": "https://t5-eu-1.algolia.net"
+    },
+    {
+      "url": "https://t32-usw-1.algolia.net"
+    },
+    {
+      "url": "https://t6-eu-1.algolia.net"
+    },
+    {
+      "url": "https://c3-de-1.algolia.net"
+    },
+    {
+      "url": "https://t5-in-1.algolia.net"
+    }
+  ],
+  "paths": {
+    "/1/settings": {
+      "servers": [
+        {
+          "url": "https://telemetry.algolia.com"
+        }
+      ],
+      "get": {
+        "summary": "GET /1/settings",
+        "description": "Seen 1× while DEA loaded https://hn.algolia.com/.\n\nThis looks like analytics/telemetry, not app data.\n\nCalled from: webpack://static/scripts/providers/SearchProvider.tsx:104 (SearchProvider), call stack when the page called fetch/XHR",
+        "tags": [
+          "telemetry"
+        ],
+        "parameters": [
+          {
+            "name": "applications",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "UJ5WYC0L7X"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTTP 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "collect": {
+                      "type": "integer"
+                    },
+                    "probe": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    }
+                  },
+                  "required": [
+                    "collect",
+                    "probe"
+                  ]
+                },
+                "example": {
+                  "collect": 1,
+                  "probe": [
+                    "https://t5-eu-1.algolia.net/1/isalive",
+                    "https://t32-usw-1.algolia.net/1/isalive"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/1/indexes/Item_dev/query": {
+      "servers": [
+        {
+          "url": "https://uj5wyc0l7x-dsn.algolia.net"
+        }
+      ],
+      "post": {
+        "summary": "POST /1/indexes/Item_dev/query",
+        "description": "Seen 1× while DEA loaded https://hn.algolia.com/.\n\nCalled from: webpack://static/scripts/providers/SearchProvider.tsx:177 (SearchProvider), Chrome’s initiator stack (async callers included)",
+        "tags": [
+          "uj5wyc0l7x-dsn.algolia.net"
+        ],
+        "parameters": [
+          {
+            "name": "x-algolia-agent",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "Algolia for JavaScript (4.13.1); Browser (lite)"
+          },
+          {
+            "name": "x-algolia-api-key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "[redacted by dea]"
+          },
+          {
+            "name": "x-algolia-application-id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "UJ5WYC0L7X"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTTP 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "hits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "title": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          "author": {
+                            "type": "string"
+                          },
+                          "points": {
+                            "type": "integer"
+                          },
+                          "num_comments": {
+                            "type": "integer"
+                          },
+                          "story_id": {
+                            "type": "integer"
+                          },
+                          "created_at_i": {
+                            "type": "integer"
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updated_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "_tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "children": {
+                            "type": "array",
+                            "items": {
+                              "type": "integer"
+                            }
+                          },
+                          "objectID": {
+                            "type": "string"
+                          },
+                          "_highlightResult": {
+                            "type": "object",
+                            "properties": {
+                              "title": {
+                                "type": "object",
+                                "properties": {
+                                  "value": {
+                                    "type": "string"
+                                  },
+                                  "matchLevel": {
+                                    "type": "string"
+                                  },
+                                  "matchedWords": {
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "matchLevel",
+                                  "matchedWords"
+                                ]
+                              },
+                              "url": {
+                                "type": "object",
+                                "properties": {
+                                  "value": {
+                                    "type": "string",
+                                    "format": "uri"
+                                  },
+                                  "matchLevel": {
+                                    "type": "string"
+                                  },
+                                  "matchedWords": {
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "matchLevel",
+                                  "matchedWords"
+                                ]
+                              },
+                              "author": {
+                                "type": "object",
+                                "properties": {
+                                  "value": {
+                                    "type": "string"
+                                  },
+                                  "matchLevel": {
+                                    "type": "string"
+                                  },
+                                  "matchedWords": {
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "matchLevel",
+                                  "matchedWords"
+                                ]
+                              },
+                              "story_text": {
+                                "type": "object",
+                                "properties": {
+                                  "value": {
+                                    "type": "string"
+                                  },
+                                  "matchLevel": {
+                                    "type": "string"
+                                  },
+                                  "matchedWords": {
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "value",
+                                  "matchLevel",
+                                  "matchedWords"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "title",
+                              "url",
+                              "author"
+                            ]
+                          },
+                          "_rankingInfo": {
+                            "type": "object",
+                            "properties": {
+                              "nbTypos": {
+                                "type": "integer"
+                              },
+                              "firstMatchedWord": {
+                                "type": "integer"
+                              },
+                              "proximityDistance": {
+                                "type": "integer"
+                              },
+                              "userScore": {
+                                "type": "integer"
+                              },
+                              "geoDistance": {
+                                "type": "integer"
+                              },
+                              "geoPrecision": {
+                                "type": "integer"
+                              },
+                              "nbExactWords": {
+                                "type": "integer"
+                              },
+                              "words": {
+                                "type": "integer"
+                              },
+                              "filters": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "nbTypos",
+                              "firstMatchedWord",
+                              "proximityDistance",
+                              "userScore",
+                              "geoDistance",
+                              "geoPrecision",
+                              "nbExactWords",
+                              "words",
+                              "filters"
+                            ]
+                          },
+                          "story_text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "title",
+                          "url",
+                          "author",
+                          "points",
+                          "num_comments",
+                          "story_id",
+                          "created_at_i",
+                          "created_at",
+                          "updated_at",
+                          "_tags",
+                          "children",
+                          "objectID",
+                          "_highlightResult",
+                          "_rankingInfo"
+                        ]
+                      }
+                    },
+                    "nbHits": {
+                      "type": "integer"
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "nbPages": {
+                      "type": "integer"
+                    },
+                    "hitsPerPage": {
+                      "type": "integer"
+                    },
+                    "exhaustiveNbHits": {
+                      "type": "boolean"
+                    },
+                    "exhaustiveTypo": {
+                      "type": "boolean"
+                    },
+                    "exhaustive": {
+                      "type": "object",
+                      "properties": {
+                        "nbHits": {
+                          "type": "boolean"
+                        },
+                        "typo": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "nbHits",
+                        "typo"
+                      ]
+                    },
+                    "query": {
+                      "type": "string"
+                    },
+                    "params": {
+                      "type": "string"
+                    },
+                    "queryID": {
+                      "type": "string"
+                    },
+                    "serverUsed": {
+                      "type": "string"
+                    },
+                    "indexUsed": {
+                      "type": "string"
+                    },
+                    "parsedQuery": {
+                      "type": "string"
+                    },
+                    "timeoutCounts": {
+                      "type": "boolean"
+                    },
+                    "timeoutHits": {
+                      "type": "boolean"
+                    },
+                    "processingTimeMS": {
+                      "type": "integer"
+                    },
+                    "processingTimingsMS": {
+                      "type": "object",
+                      "properties": {
+                        "_request": {
+                          "type": "object",
+                          "properties": {
+                            "roundTrip": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "roundTrip"
+                          ]
+                        },
+                        "afterFetch": {
+                          "type": "object",
+                          "properties": {
+                            "format": {
+                              "type": "object",
+                              "properties": {
+                                "highlighting": {
+                                  "type": "integer"
+                                },
+                                "total": {
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "highlighting",
+                                "total"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "format"
+                          ]
+                        },
+                        "fetch": {
+                          "type": "object",
+                          "properties": {
+                            "total": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "total"
+                          ]
+                        },
+                        "getIdx": {
+                          "type": "object",
+                          "properties": {
+                            "load": {
+                              "type": "object",
+                              "properties": {
+                                "gens": {
+                                  "type": "integer"
+                                },
+                                "total": {
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "gens",
+                                "total"
+                              ]
+                            },
+                            "total": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "load",
+                            "total"
+                          ]
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "_request",
+                        "afterFetch",
+                        "fetch",
+                        "getIdx",
+                        "total"
+                      ]
+                    },
+                    "serverTimeMS": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "hits",
+                    "nbHits",
+                    "page",
+                    "nbPages",
+                    "hitsPerPage",
+                    "exhaustiveNbHits",
+                    "exhaustiveTypo",
+                    "exhaustive",
+                    "query",
+                    "params",
+                    "queryID",
+                    "serverUsed",
+                    "indexUsed",
+                    "parsedQuery",
+                    "timeoutCounts",
+                    "timeoutHits",
+                    "processingTimeMS",
+                    "processingTimingsMS",
+                    "serverTimeMS"
+                  ]
+                },
+                "example": {
+                  "hits": [
+                    {
+                      "title": "Stephen Hawking has died",
+                      "url": "http://www.bbc.com/news/uk-43396008",
+                      "author": "Cogito",
+                      "points": 6015,
+                      "num_comments": 436,
+                      "story_id": 16582136,
+                      "created_at_i": 1520999430,
+                      "created_at": "2018-03-14T03:50:30Z",
+                      "updated_at": "2026-10-12T11:40:22Z",
+                      "_tags": [
+                        "story",
+                        "author_Cogito"
+                      ],
+                      "children": [
+                        16582146,
+                        16582152
+                      ],
+                      "objectID": "16582136",
+                      "_highlightResult": {
+                        "title": {
+                          "value": "Stephen Hawking has died",
+                          "matchLevel": "none",
+                          "matchedWords": []
+                        },
+                        "url": {
+                          "value": "http://www.bbc.com/news/uk-43396008",
+                          "matchLevel": "none",
+                          "matchedWords": []
+                        },
+                        "author": {
+                          "value": "Cogito",
+                          "matchLevel": "none",
+                          "matchedWords": []
+                        }
+                      },
+                      "_rankingInfo": {
+                        "nbTypos": 0,
+                        "firstMatchedWord": 0,
+                        "proximityDistance": 0,
+                        "userScore": 180,
+                        "geoDistance": 0,
+                        "geoPrecision": 1,
+                        "nbExactWords": 0,
+                        "words": 0,
+                        "filters": 1
+                      }
+                    },
+                    {
+                      "title": "A Message to Our Customers",
+                      "url": "http://www.apple.com/customer-letter/",
+                      "author": "epaga",
+                      "points": 5771,
+                      "num_comments": 967,
+                      "story_id": 11116274,
+                      "created_at_i": 1455698317,
+                      "created_at": "2016-02-17T08:38:37Z",
+                      "updated_at": "2026-09-21T08:00:13Z",
+                      "_tags": [
+                        "story",
+                        "author_epaga"
+                      ],
+                      "children": [
+                        11116340,
+                        11116349
+                      ],
+                      "objectID": "11116274",
+                      "_highlightResult": {
+                        "title": {
+                          "value": "A Message to Our Customers",
+                          "matchLevel": "none",
+                          "matchedWords": []
+                        },
+                        "url": {
+                          "value": "http://www.apple.com/customer-letter/",
+                          "matchLevel": "none",
+                          "matchedWords": []
+                        },
+                        "author": {
+                          "value": "epaga",
+                          "matchLevel": "none",
+                          "matchedWords": []
+                        }
+                      },
+                      "_rankingInfo": {
+                        "nbTypos": 0,
+                        "firstMatchedWord": 0,
+                        "proximityDistance": 0,
+                        "userScore": 179,
+                        "geoDistance": 0,
+                        "geoPrecision": 1,
+                        "nbExactWords": 0,
+                        "words": 0,
+                        "filters": 1
+                      }
+                    }
+                  ],
+                  "nbHits": 45283998,
+                  "page": 0,
+                  "nbPages": 34,
+                  "hitsPerPage": 30,
+                  "exhaustiveNbHits": false,
+                  "exhaustiveTypo": true,
+                  "exhaustive": {
+                    "nbHits": false,
+                    "typo": true
+                  },
+                  "query": "",
+                  "params": "analyticsTags=%5B%22web%22%5D&page=0&hitsPerPage=30&minWordSizefor1Typo=4&minWordSizefor2Typos=8&advancedSyntax=true&ignorePlurals=false&clickAnalytics=true&minProximity=7&numericFilters=%5B%5D&tagFilters=%5B%5B%22story%22%5D%2C%5B%5D%5D&typoTolerance=true&queryType=prefixNone&restrictSearchableAttr…",
+                  "queryID": "f564acc0514eca0180779341816690e3",
+                  "serverUsed": "t32-usw-1.algolia.net",
+                  "indexUsed": "Item_dev",
+                  "parsedQuery": "",
+                  "timeoutCounts": false,
+                  "timeoutHits": false,
+                  "processingTimeMS": 6,
+                  "processingTimingsMS": {
+                    "_request": {
+                      "roundTrip": 3
+                    },
+                    "afterFetch": {
+                      "format": {
+                        "highlighting": 1,
+                        "total": 1
+                      }
+                    },
+                    "fetch": {
+                      "total": 1
+                    },
+                    "getIdx": {
+                      "load": {
+                        "gens": 3,
+                        "total": 4
+                      },
+                      "total": 4
+                    },
+                    "total": 6
+                  },
+                  "serverTimeMS": 9
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "apiKeyQuery_x-algolia-api-key": []
+          }
+        ]
+      }
+    },
+    "/j/collect": {
+      "servers": [
+        {
+          "url": "https://www.google-analytics.com"
+        }
+      ],
+      "post": {
+        "summary": "POST /j/collect",
+        "description": "Seen 1× while DEA loaded https://hn.algolia.com/.\n\nThis looks like analytics/telemetry, not app data.\n\nCalled from: analytics.js:46:12 (wd), Chrome’s initiator stack shows only library code (Google Tag); the app code that asked is not in the stack",
+        "tags": [
+          "telemetry"
+        ],
+        "parameters": [
+          {
+            "name": "v",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          },
+          {
+            "name": "_v",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "j102"
+          },
+          {
+            "name": "a",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1347834378"
+          },
+          {
+            "name": "t",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "pageview"
+          },
+          {
+            "name": "_s",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          },
+          {
+            "name": "dl",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "https://hn.algolia.com/"
+          },
+          {
+            "name": "dp",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "/"
+          },
+          {
+            "name": "ul",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "en-us"
+          },
+          {
+            "name": "dt",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "All | Search powered by Algolia"
+          },
+          {
+            "name": "sr",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "1440x900"
+          },
+          {
+            "name": "vp",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "1440x900"
+          },
+          {
+            "name": "_u",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "YEBAAEABAAAAACAAI~"
+          },
+          {
+            "name": "jid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1339264183"
+          },
+          {
+            "name": "gjid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "2048336916"
+          },
+          {
+            "name": "cid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "465116202.1793715895"
+          },
+          {
+            "name": "tid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "UA-32446386-3"
+          },
+          {
+            "name": "_gid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "215498989.1793715895"
+          },
+          {
+            "name": "_r",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          },
+          {
+            "name": "_slc",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          },
+          {
+            "name": "z",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "674966304"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTTP 200"
+          }
+        }
+      }
+    },
+    "/g/collect": {
+      "servers": [
+        {
+          "url": "https://www.google-analytics.com"
+        }
+      ],
+      "post": {
+        "summary": "POST /g/collect",
+        "description": "Seen 2× while DEA loaded https://hn.algolia.com/.\n\nThis looks like analytics/telemetry, not app data.\n\nCalled from: js:299:391 (vd), Chrome’s initiator stack shows only library code (Google Tag); the app code that asked is not in the stack",
+        "tags": [
+          "telemetry"
+        ],
+        "parameters": [
+          {
+            "name": "v",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "2"
+          },
+          {
+            "name": "tid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "G-J377Z0GR6G"
+          },
+          {
+            "name": "gtm",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "45je6b20h2v9125898484za20gxf1"
+          },
+          {
+            "name": "_p",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1793715895232"
+          },
+          {
+            "name": "gcd",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "13l3l3l3l2l1"
+          },
+          {
+            "name": "npa",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "0"
+          },
+          {
+            "name": "dma",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "0"
+          },
+          {
+            "name": "_eu",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "EhAI"
+          },
+          {
+            "name": "cid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "465116202.1793715895"
+          },
+          {
+            "name": "frm",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "0"
+          },
+          {
+            "name": "ir",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          },
+          {
+            "name": "ngs",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          },
+          {
+            "name": "pscdl",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "noapi"
+          },
+          {
+            "name": "rcb",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "6"
+          },
+          {
+            "name": "sr",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "1440x900"
+          },
+          {
+            "name": "uaa",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "x86"
+          },
+          {
+            "name": "uab",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "64"
+          },
+          {
+            "name": "uafvl",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "Not%3AA-Brand;8.0.0.0|Chromium;156.0.8078.4|HeadlessChrome;156.0.8078.4"
+          },
+          {
+            "name": "uam",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": ""
+          },
+          {
+            "name": "uamb",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "0"
+          },
+          {
+            "name": "uap",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "Linux"
+          },
+          {
+            "name": "uapv",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": ""
+          },
+          {
+            "name": "uaw",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "0"
+          },
+          {
+            "name": "ul",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "en-us"
+          },
+          {
+            "name": "_s",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          },
+          {
+            "name": "tag_exp",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "115938465~115938468~118897920~118897930~120213116~120385422~120412527~120420414~120469145~120469153~121246026~121246034~123691370~123692836~123814944"
+          },
+          {
+            "name": "dl",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "https://hn.algolia.com/"
+          },
+          {
+            "name": "dp",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "/"
+          },
+          {
+            "name": "dt",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "All | Search powered by Algolia"
+          },
+          {
+            "name": "sid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "[redacted by dea]"
+          },
+          {
+            "name": "sct",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          },
+          {
+            "name": "seg",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "0"
+          },
+          {
+            "name": "en",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "page_view"
+          },
+          {
+            "name": "_fv",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          },
+          {
+            "name": "_ss",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          },
+          {
+            "name": "_ee",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          },
+          {
+            "name": "tfd",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "833"
+          },
+          {
+            "name": "_tu",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "example": "wAQ"
+          },
+          {
+            "name": "_c",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          },
+          {
+            "name": "epn.value",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "0"
+          },
+          {
+            "name": "_et",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "4"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "HTTP 204"
+          }
+        }
+      }
+    },
+    "/1/isalive": {
+      "servers": [
+        {
+          "url": "https://t5-eu-1.algolia.net"
+        }
+      ],
+      "get": {
+        "summary": "GET /1/isalive",
+        "description": "Seen 1× while DEA loaded https://hn.algolia.com/.\n\nCalled from: webpack://static/scripts/providers/SearchProvider.tsx:104 (SearchProvider), Chrome’s initiator stack (async callers included)",
+        "tags": [
+          "t5-eu-1.algolia.net"
+        ],
+        "parameters": [
+          {
+            "name": "probe",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTTP 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                },
+                "example": {
+                  "message": "server is alive"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/1/isalive#t32-usw-1.algolia.net": {
+      "servers": [
+        {
+          "url": "https://t32-usw-1.algolia.net"
+        }
+      ],
+      "get": {
+        "summary": "GET /1/isalive",
+        "description": "Seen 1× while DEA loaded https://hn.algolia.com/.\n\nCalled from: webpack://static/scripts/providers/SearchProvider.tsx:104 (SearchProvider), Chrome’s initiator stack (async callers included)",
+        "tags": [
+          "t32-usw-1.algolia.net"
+        ],
+        "parameters": [
+          {
+            "name": "probe",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTTP 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                },
+                "example": {
+                  "message": "server is alive"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/1/isalive#t6-eu-1.algolia.net": {
+      "servers": [
+        {
+          "url": "https://t6-eu-1.algolia.net"
+        }
+      ],
+      "get": {
+        "summary": "GET /1/isalive",
+        "description": "Seen 1× while DEA loaded https://hn.algolia.com/.\n\nCalled from: webpack module 832:2:7972 (h.enqueue.T.url), Chrome’s initiator stack shows only library code (@algolia/algolia-browser-telemetry); the app code that asked is not in the stack",
+        "tags": [
+          "t6-eu-1.algolia.net"
+        ],
+        "parameters": [
+          {
+            "name": "probe",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          }
+        ],
+        "responses": {
+          "-1": {
+            "description": "HTTP -1"
+          }
+        }
+      }
+    },
+    "/1/isalive#c3-de-1.algolia.net": {
+      "servers": [
+        {
+          "url": "https://c3-de-1.algolia.net"
+        }
+      ],
+      "get": {
+        "summary": "GET /1/isalive",
+        "description": "Seen 1× while DEA loaded https://hn.algolia.com/.\n\nCalled from: webpack module 832:2:7972 (h.enqueue.T.url), Chrome’s initiator stack shows only library code (@algolia/algolia-browser-telemetry); the app code that asked is not in the stack",
+        "tags": [
+          "c3-de-1.algolia.net"
+        ],
+        "parameters": [
+          {
+            "name": "probe",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTTP 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                },
+                "example": {
+                  "message": "server is alive"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/1/isalive#t5-in-1.algolia.net": {
+      "servers": [
+        {
+          "url": "https://t5-in-1.algolia.net"
+        }
+      ],
+      "get": {
+        "summary": "GET /1/isalive",
+        "description": "Seen 1× while DEA loaded https://hn.algolia.com/.\n\nCalled from: webpack module 832:2:7972 (h.enqueue.T.url), Chrome’s initiator stack shows only library code (@algolia/algolia-browser-telemetry); the app code that asked is not in the stack",
+        "tags": [
+          "t5-in-1.algolia.net"
+        ],
+        "parameters": [
+          {
+            "name": "probe",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "example": "1"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTTP 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                },
+                "example": {
+                  "message": "server is alive"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKeyQuery_x-algolia-api-key": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "x-algolia-api-key"
+      }
+    }
+  }
+}
