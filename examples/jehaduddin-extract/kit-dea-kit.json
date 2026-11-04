@@ -1,9 +1,10 @@
 {
   "url": "https://jehaduddin.vercel.app",
-  "extractedAt": "2026-11-03T14:20:25.230Z",
+  "extractedAt": "2026-11-04T06:06:35.008Z",
   "target": "react",
   "title": "Jehad Uddin — Creative Technologist & Design Engineer",
-  "score": 0.8805241753168402,
+  "score": 0.9496137482879725,
+  "canvasScore": 0.9310731955599265,
   "shaders": [
     {
       "name": "CoreStAxShader",
@@ -191,6 +192,25 @@
       }
     },
     {
+      "name": "PSrcShader",
+      "uniforms": [
+        "morphTexture",
+        "uP",
+        "uPend",
+        "uTime",
+        "uPix",
+        "uCloudY",
+        "uOn",
+        "uDstMix",
+        "uSrc",
+        "uDst",
+        "uDst2"
+      ],
+      "drivers": {
+        "uTime": "clock"
+      }
+    },
+    {
       "name": "ViewDprOnShader",
       "uniforms": [
         "morphTexture",
@@ -292,19 +312,6 @@
       "drivers": {
         "uTime": "clock"
       }
-    },
-    {
-      "name": "TimeShader",
-      "uniforms": [
-        "morphTexture",
-        "uTime",
-        "uFade",
-        "uSize",
-        "uDpr"
-      ],
-      "drivers": {
-        "uTime": "clock"
-      }
     }
   ],
   "eases": [],
@@ -328,5 +335,5 @@
     "Dissolve / disintegration effect",
     "Shader-sized point sprites"
   ],
-  "provenance": "Extracted from https://jehaduddin.vercel.app on 2026-11-03 by DEA. Third-party code, shaders, fonts and assets belong to their owners."
+  "provenance": "Extracted from https://jehaduddin.vercel.app on 2026-11-04 by DEA. Third-party code, shaders, fonts and assets belong to their owners."
 }

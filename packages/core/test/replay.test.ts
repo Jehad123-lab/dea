@@ -271,6 +271,8 @@ describe('replay: in-page code', () => {
     expect(REBUILD_RUNNER).toMatch(/export function createRebuild/);
     expect(REBUILD_RUNNER).toMatch(/export async function mountRebuild/);
     expect(REBUILD_RUNNER).toMatch(/RawShaderMaterial/);
+    // an opaque site canvas stays opaque: the context is made with the recorded attributes, not three.js's alpha default
+    expect(REBUILD_RUNNER).toMatch(/getContext\('webgl2', \{\n\s+alpha: at\.alpha !== false/);
   });
 });
 

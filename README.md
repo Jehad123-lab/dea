@@ -271,19 +271,30 @@ similarity of luminance at three scales) + 0.2 × edge correlation + 0.2 × tone
 picture itself gets closer. `dea score original.png rebuild.png --layout layout.json` scores any two screenshots the
 same way.
 
-From a real run on the author's portfolio (reference screenshot taken by DEA on a machine without a GPU):
+From real runs on the author's portfolio and on lusion.co (reference screenshots taken by DEA on a machine without a
+GPU, so the sites' WebGL ran in software):
 
 ```text
-$ dea extract https://jehaduddin.vercel.app --to react --verify-build --library jehad-hero
-Extracted https://jehaduddin.vercel.app for react: 42 files
-tokens: tokens.css, tailwind.preset.js, tokens.json · motion: 0 GSAP timelines/tweens, 16 keyframes · shaders: CoreStAxShader, BaseLCoreShader, … PosDtRoShader, TimeShader
-uniform drivers from the live trace: uST ← a clock: +0.0125 per second (wall time here); uTime ← a clock …
+$ dea extract https://jehaduddin.vercel.app --to react --verify-build
+Extracted https://jehaduddin.vercel.app for react: 113 files
 techniques: gpgpu, mipmap-bloom, smaa, blue-noise, heightmap, ripple-sim, dissolve, points
-build: npm run build passed (7 s)
-visual diff: 73.2% → 88.1% after analysis → 88.1% after research (searches found no new values to try)
-# the canvas-only score of that same rebuild (dea score): canvas 50.9% (SSIM 41%, edges 46.7%, tones 84.6%)
-open gaps: 3 (see "Gap → path to result" in the report)
+build: npm run build passed (6 s)
+visual diff (page): 50.7% → 95% after analysis
+visual diff (canvas 93.1% (SSIM 93.5%, edges 96%, tones 89.2%, 5% hidden under text)), from 1.6% at the start
+(a) capture replay, the recorded frames played back (ground truth, not editable): canvas 93.1%, page 95% · 54 passes, 106 draws, 28 programs, 24.2 MB (render-graph.md)
+(b) editable rebuild, three.js from the render graph (rebuild.md): canvas 93.1%, page 95%, 100% against (a) · 28 RawShaderMaterials, 4 cameras, 29 render targets; recorded bytes still used: 5.4 MB geometry, 18.8 MB textures · what the project runs
+scene: 18 meshes + camera in public/scene/scene.glb
+
+$ dea extract https://lusion.co --to react --verify-build
+visual diff (page): 20% → 99.8% after analysis
+visual diff (canvas 99.7% (SSIM 99.7%, edges 99.9%, tones 99.6%, 3.1% hidden under text)), from 16.8% at the start
+(b) editable rebuild, three.js from the render graph (rebuild.md): canvas 99.7%, page 99.8%, 99.9% against (a) · 14 RawShaderMaterials, 4 cameras, 18 render targets
 ```
+
+| Site | Hand-written rebuild (before) page / canvas | Editable rebuild from the recording page / canvas |
+|---|---|---|
+| jehaduddin.vercel.app | 88.1% / 50.9% | 95.0% / 93.1% |
+| lusion.co | 24.4% / 13.8% | 99.8% / 99.7% |
 
 **The site's own frames: a capture replay and an editable rebuild.** For WebGL heroes a hand-written stand-in is
 never the real thing. So right before the reference screenshot, `dea extract` records two consecutive frames of the
@@ -310,6 +321,19 @@ images for placeholders and large meshes for boxes, and leaves the capture repla
 removed); `--max-capture-mb` caps the recording (64 MB after compaction by default); `--no-replay` turns all of it off.
 
 The recorded bytes are the site's own: use them to study and prototype, and swap in your own before you ship.
+
+**The first screen's HTML around the canvas.** Extract reads the first screen as the browser laid it out at the moment
+of the reference: each text block (font, size, weight, colour, position), the flat shapes under them (pills, buttons,
+badges: background, gradient, border, rounded corners), see-through overlays over the picture (a fade or vignette on
+a positioned layer), and inline SVG logos with their computed paint. Labels hidden by their own overflow (a "Close"
+waiting below "Menu") are left out. Fonts the site loads are copied with their weight and style, so an italic file
+cannot stand in for the upright one. With `--own-assets`, logos and images become placeholders of the same size.
+
+**What moves and what is frozen.** `rb.start()` alternates the two recorded frames: every pass, the simulation passes
+included, runs again each frame on the live render targets, and the uniforms DEA saw change at a steady rate (time)
+follow the real clock. Pointer, scroll and window size are not wired yet: their uniforms keep the recorded values and
+the canvas keeps the recorded size, so a mouse-driven fluid or a hover reacts to nothing. The trace already knows which
+uniforms follow the pointer, scroll and viewport (`dea trace`); mapping them to live input is the next step.
 
 `--section <selector>` scrolls that part of the page into view for the reference, reads only its text, and keeps only
 the motion that touches it. `--reference shot.png` compares against your own screenshot (for example one taken on a

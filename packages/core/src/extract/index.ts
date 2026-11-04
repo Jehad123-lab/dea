@@ -297,7 +297,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
       }
       files.push(`public/fonts/${name}`);
       faces.push(
-        `@font-face {\n  font-family: "${fam.family}";\n  src: url("/fonts/${name}") format("${fmt}");\n  font-weight: ${weight};\n  font-display: swap;\n}`,
+        `@font-face {\n  font-family: "${fam.family}";\n  src: url("/fonts/${name}") format("${fmt}");\n  font-weight: ${weight};\n${/italic|oblique/i.test(name) ? '  font-style: italic;\n' : ''}  font-display: swap;\n}`,
       );
     }
   }
@@ -504,7 +504,14 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
         opts.reference
           ? await Promise.all([readLayout(browser, url, vp, opts.section ?? null, 8000, true), readLayout(browser, url, vp, opts.section ?? null, 8000, false)])
           : [ref.layout]
-      ).filter((l): l is HeroLayout => Boolean(l?.boxes.length || l?.canvas || l?.background));
+      )
+        .filter((l): l is HeroLayout => Boolean(l?.boxes.length || l?.canvas || l?.background))
+        // --own-assets: the site's logos and images on the first screen become placeholders of the same size
+        .map((l) =>
+          opts.ownAssets && l.graphics?.length
+            ? { ...l, graphics: l.graphics.map((g) => ({ kind: 'placeholder' as const, x: g.x, y: g.y, w: g.w, h: g.h, opacity: g.opacity })) }
+            : l,
+        );
       say('rendering the rebuild and comparing it with the original first screen');
       const server = await serveDir(out);
       const cmp = await browser.newPage();
@@ -537,11 +544,14 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
         // rebuild the site's text in the project and the preview with the reading that matches the original best,
         // and only when it beats the plain heading
         if (layoutCandidates.length) {
+          // the text is judged over the site's own picture when DEA recorded it (the capture replay), so a stand-in
+          // canvas does not decide which text layout reads closest
+          const judge: Params = recDoc && replay ? { program: '__replay' } : {};
           let pick: HeroLayout | null = null;
-          let pickScore = await render(params);
+          let pickScore = await render({ ...params, ...judge });
           for (const l of layoutCandidates) {
             await put('preview/index.html', previewHtml(mods, threeVersion, heroHtml(l)));
-            const sc = await render({ ...params, background: rgbHex(l.background) ?? params.background });
+            const sc = await render({ ...params, ...judge, background: rgbHex(l.background) ?? params.background });
             if (sc > pickScore) {
               pickScore = sc;
               pick = l;
@@ -903,7 +913,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
       ? [
           `(a) capture replay, the recorded frames played back (ground truth, not editable): canvas ${replay.canvas != null ? pct(replay.canvas) : 'n/a'}, page ${replay.page != null ? pct(replay.page) : 'n/a'} · ${replay.passes} passes, ${replay.draws} draws, ${replay.programs} programs, ${(replay.bytes / 1e6).toFixed(1)} MB (render-graph.md)${replay.shipped ? '' : ', scored but not in the kit (--own-assets)'}`,
           replay.rebuild
-            ? `(b) editable rebuild, three.js from the render graph (rebuild.md): canvas ${replay.rebuild.canvas != null ? pct(replay.rebuild.canvas) : 'n/a'}, page ${replay.rebuild.page != null ? pct(replay.rebuild.page) : 'n/a'}${replay.rebuild.vsReplay != null ? `, ${pct(replay.rebuild.vsReplay)} against (a)` : ''} · ${replay.rebuild.stats.materials} RawShaderMaterials, ${replay.rebuild.stats.cameras} cameras, ${replay.rebuild.stats.renderTargets} render targets; recorded bytes still used: ${(replay.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB geometry, ${(replay.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB textures${replay.rebuild.kept ? ' · what the project runs' : ''}`
+            ? `(b) editable rebuild, three.js from the render graph (rebuild.md): canvas ${replay.rebuild.canvas != null ? pct(replay.rebuild.canvas) : 'n/a'}, page ${replay.rebuild.page != null ? pct(replay.rebuild.page) : 'n/a'}${replay.rebuild.vsReplay != null ? `, ${pct(replay.rebuild.vsReplay)} against (a)` : ''} · ${replay.rebuild.stats.materials} RawShaderMaterials, ${replay.rebuild.stats.cameras} cameras, ${replay.rebuild.stats.renderTargets} render targets; recorded bytes still used: ${(replay.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB geometry, ${(replay.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB textures${opts.ownAssets ? ` (--own-assets: images are placeholders, ${replay.rebuild.stats.placeholders} mesh(es) are boxes)` : ''}${replay.rebuild.kept ? ' · what the project runs' : ''}`
             : '(b) editable rebuild: not made',
           ...(replay.scene
             ? [

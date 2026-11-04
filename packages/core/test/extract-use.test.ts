@@ -488,3 +488,44 @@ describe('extract: canvas placement and page background', () => {
     expect(heroJsx(l)).toContain('.dea-scene');
   });
 });
+
+describe('extract: shapes and graphics on the first screen', () => {
+  it('draws pills under the text and inline SVG logos, and placeholders for --own-assets', () => {
+    const l = {
+      viewport: { width: 1000, height: 500 },
+      boxes: [
+        {
+          tag: 'span',
+          text: "LET'S TALK",
+          x: 800,
+          y: 20,
+          w: 80,
+          h: 16,
+          fontFamily: 'Aeonik',
+          fontSize: 14,
+          fontWeight: '500',
+          letterSpacing: 'normal',
+          lineHeight: 'normal',
+          color: 'rgb(255, 255, 255)',
+          textTransform: 'uppercase',
+          textAlign: 'center',
+          opacity: 1,
+        },
+      ],
+      shapes: [{ x: 780, y: 10, w: 120, h: 36, background: 'rgb(0, 0, 0)', gradient: null, border: null, radius: '18px', opacity: 1 }],
+      graphics: [
+        { kind: 'svg' as const, x: 50, y: 20, w: 100, h: 20, svg: '<svg width="100%" height="100%"><rect width="10" height="10"></rect></svg>', opacity: 1 },
+      ],
+    };
+    const items = heroStyles(l);
+    expect(items.map((i) => i.tag)).toEqual(['div', 'div', 'span']);
+    expect(items[0].style).toMatchObject({ left: '78vw', top: '2vh', width: '12vw', height: '7.2vh', background: 'rgb(0, 0, 0)', borderRadius: '18px' });
+    const html = heroHtml(l);
+    expect(html.indexOf('background: rgb(0, 0, 0)')).toBeLessThan(html.indexOf("LET'S TALK"));
+    expect(html).toContain('<svg width="100%" height="100%"><rect');
+    expect(heroJsx(l)).toContain('dangerouslySetInnerHTML');
+    const own = heroHtml({ ...l, graphics: [{ kind: 'placeholder' as const, x: 50, y: 20, w: 100, h: 20, opacity: 1 }] });
+    expect(own).not.toContain('<svg');
+    expect(own).toContain('repeating-conic-gradient');
+  });
+});

@@ -47,8 +47,20 @@ export function createRebuild(canvas, data, options = {}) {
   const at = p.attrs || {};
   canvas.width = p.canvas.w;
   canvas.height = p.canvas.h;
+  // three.js (r163 on) always asks the browser for an alpha canvas; a site that drew into an opaque canvas
+  // (alpha: false) writes alpha values the page would then show through, so the context is made here as recorded
+  const context = canvas.getContext('webgl2', {
+    alpha: at.alpha !== false,
+    antialias: !!at.antialias,
+    premultipliedAlpha: at.premultipliedAlpha !== false,
+    preserveDrawingBuffer: !!options.preserveDrawingBuffer,
+    depth: at.depth !== false,
+    stencil: !!at.stencil,
+    powerPreference: at.powerPreference || 'default',
+  }) || undefined;
   const renderer = new THREE.WebGLRenderer({
     canvas,
+    context,
     alpha: at.alpha !== false,
     antialias: !!at.antialias,
     premultipliedAlpha: at.premultipliedAlpha !== false,

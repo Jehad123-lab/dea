@@ -303,7 +303,7 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
         let op = 1;
         for (let p = el; p && p !== document.documentElement; p = p.parentElement) op *= +getComputedStyle(p).opacity;
         if (op >= 0.05)
-          out.push({ tag: el.tagName.toLowerCase(), text: (el.innerText || own).trim().slice(0, 200), x: r.left, y: r.top, w: r.width, h: r.height,
+          out.push({ __el: el, tag: el.tagName.toLowerCase(), text: (el.innerText || own).trim().slice(0, 200), x: r.left, y: r.top, w: r.width, h: r.height,
             fontFamily: cs.fontFamily, fontSize: parseFloat(cs.fontSize), fontWeight: cs.fontWeight, letterSpacing: cs.letterSpacing,
             lineHeight: cs.lineHeight, color: cs.color, textTransform: cs.textTransform, textAlign: cs.textAlign, opacity: Math.round(op * 100) / 100 });
         return;
@@ -313,6 +313,82 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
   };
   walk(root);
   if (!out.length) { skip = false; walk(root); }
+  // the part of an element its overflow-clipping ancestors let through (0..1): a label slid out of its button is not seen
+  const shown = (el, r) => {
+    let x0 = Math.max(r.left, 0), y0 = Math.max(r.top, 0), x1 = Math.min(r.right, W), y1 = Math.min(r.bottom, H);
+    // only the containing-block chain clips: a fixed element escapes every ancestor, an absolute one the static ancestors
+    let mode = getComputedStyle(el).position;
+    for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+      const cs = getComputedStyle(p);
+      const holds = cs.transform !== 'none' || cs.perspective !== 'none' || cs.filter !== 'none' || /paint|layout|strict|content/.test(cs.contain || '');
+      if (mode === 'fixed' && !holds) continue;
+      if (mode === 'absolute' && cs.position === 'static' && !holds) continue;
+      mode = cs.position;
+      if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+      const pr = p.getBoundingClientRect();
+      if (cs.overflowX !== 'visible') { x0 = Math.max(x0, pr.left); x1 = Math.min(x1, pr.right); }
+      if (cs.overflowY !== 'visible') { y0 = Math.max(y0, pr.top); y1 = Math.min(y1, pr.bottom); }
+    }
+    return (Math.max(0, x1 - x0) * Math.max(0, y1 - y0)) / Math.max(1, r.width * r.height);
+  };
+  const opacityOf = (el) => { let op = 1; for (let p = el; p && p !== document.documentElement; p = p.parentElement) op *= +getComputedStyle(p).opacity; return Math.round(op * 100) / 100; };
+  const hiddenUp = (el) => { for (let p = el; p && p !== document.documentElement; p = p.parentElement) { const cs = getComputedStyle(p); if (cs.display === 'none' || cs.visibility === 'hidden') return true; if (p !== root && LOADER.test(String(p.className && p.className.baseVal !== undefined ? p.className.baseVal : p.className) + ' ' + p.id)) return true; } return false; };
+  const boxes = out.filter((b, i) => { const el = b.__el; delete b.__el; return !el || shown(el, el.getBoundingClientRect()) >= 0.5; });
+  // the first screen's flat shapes (pills, buttons, badges): a background colour or gradient, a border, rounded corners
+  const shapes = [];
+  const all = root.querySelectorAll('*');
+  for (let i = 0; i < all.length && i < 4000 && shapes.length < 30; i++) {
+    const el = all[i];
+    if (el.closest('svg') || el.tagName === 'CANVAS') continue;
+    const cs = getComputedStyle(el);
+    const bg = cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent' ? cs.backgroundColor : null;
+    const grad = /gradient\\(/.test(cs.backgroundImage) ? cs.backgroundImage : null;
+    const bw = parseFloat(cs.borderTopWidth) || 0;
+    const border = bw > 0 && cs.borderTopStyle !== 'none' && !/rgba\\(\\d+, \\d+, \\d+, 0\\)/.test(cs.borderTopColor) ? bw + 'px ' + cs.borderTopStyle + ' ' + cs.borderTopColor : null;
+    if (!bg && !grad && !border) continue;
+    const r = el.getBoundingClientRect();
+    if (!(r.width >= 3 && r.height >= 3 && r.bottom > 0 && r.right > 0 && r.top < H && r.left < W)) continue;
+    // a big shape counts only as an overlay over the picture: a gradient or a see-through colour on a positioned layer
+    // that does not hold the canvas (a vignette, a fade to black at the bottom)
+    const big = r.width * r.height > W * H * 0.25;
+    if (big && !((grad || (bg && /rgba\\(.*, 0?\\.\\d+\\)$/.test(bg))) && cs.position !== 'static' && !el.querySelector('canvas'))) continue;
+    if (hiddenUp(el) || shown(el, r) < 0.5) continue;
+    const op = opacityOf(el);
+    if (op < 0.05) continue;
+    shapes.push({ x: r.left, y: r.top, w: r.width, h: r.height, background: bg, gradient: grad, border, radius: cs.borderRadius, opacity: op });
+  }
+  // the first screen's graphics: inline SVG (a logo, an icon) with its computed paint inlined, and small images
+  const graphics = [];
+  const PAINT = ['fill', 'stroke', 'stroke-width', 'opacity', 'fill-opacity', 'stroke-opacity', 'fill-rule'];
+  for (const el of root.querySelectorAll('svg, img')) {
+    if (graphics.length >= 12) break;
+    if (el.tagName.toLowerCase() === 'svg' && el.parentElement && el.parentElement.closest('svg')) continue;
+    const r = el.getBoundingClientRect();
+    if (!(r.width >= 8 && r.height >= 8 && r.bottom > 0 && r.right > 0 && r.top < H && r.left < W)) continue;
+    if (r.width * r.height > W * H * 0.25) continue;
+    if (hiddenUp(el) || shown(el, r) < 0.5) continue;
+    const op = opacityOf(el);
+    if (op < 0.05) continue;
+    if (el.tagName.toLowerCase() === 'img') {
+      if (!el.complete || !el.naturalWidth || !/^https?:/.test(el.currentSrc || el.src)) continue;
+      graphics.push({ kind: 'img', x: r.left, y: r.top, w: r.width, h: r.height, src: el.currentSrc || el.src, fit: getComputedStyle(el).objectFit, opacity: op });
+      continue;
+    }
+    const clone = el.cloneNode(true);
+    const a = [el, ...el.querySelectorAll('*')], b = [clone, ...clone.querySelectorAll('*')];
+    for (let k = 0; k < a.length && k < 400; k++) {
+      const cs = getComputedStyle(a[k]);
+      b[k].setAttribute('style', PAINT.map((p) => p + ':' + cs.getPropertyValue(p)).join(';'));
+      b[k].removeAttribute('class');
+    }
+    clone.setAttribute('width', '100%');
+    clone.setAttribute('height', '100%');
+    clone.style.color = getComputedStyle(el).color;
+    clone.style.display = 'block';
+    const svg = clone.outerHTML;
+    if (svg.length > 40000) continue;
+    graphics.push({ kind: 'svg', x: r.left, y: r.top, w: r.width, h: r.height, svg, opacity: op });
+  }
   let canvas = null;
   for (const c of root.querySelectorAll('canvas')) {
     const r = c.getBoundingClientRect();
@@ -333,7 +409,7 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
   if (canvas) delete canvas.vis;
   const bgOf = (el) => { const b = el && getComputedStyle(el).backgroundColor; return b && b !== 'rgba(0, 0, 0, 0)' && b !== 'transparent' ? b : null; };
   const background = bgOf(document.body) || bgOf(document.documentElement);
-  return { viewport: { width: W, height: H }, boxes: out, canvas, background };
+  return { viewport: { width: W, height: H }, boxes, canvas, background, shapes, graphics };
 })()`;
 
 /** Open the page just to read the first screen's text layout (used when you bring your own reference screenshot). */

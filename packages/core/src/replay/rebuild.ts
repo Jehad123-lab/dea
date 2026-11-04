@@ -868,7 +868,8 @@ export function rebuildPipeline(
   if (opts.ownAssets) {
     for (const { step, pos } of meshDraws) {
       const B = doc.snap.buffers.find((b) => b.id === pos.buf);
-      if (!B || B.l < 65536) continue;
+      // anything bigger than a few hundred vertices is a model of the site's, not a helper quad or a gizmo
+      if (!B || B.l < 16384) continue;
       if (bufUse.get(pos.buf)?.other) continue;
       if (pos.type !== 0x1406) continue;
       const dv = new DataView(bin.buffer, bin.byteOffset + B.o, B.l);

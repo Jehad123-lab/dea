@@ -59,7 +59,7 @@
       "tag": "button",
       "text": "SCROLL",
       "x": 693.453125,
-      "y": 864.9745483398438,
+      "y": 861.1367797851562,
       "w": 53.09375,
       "h": 13,
       "fontFamily": "\"Timeless Sans Grotesk\", -apple-system, \"Segoe UI\", Helvetica, Arial, sans-serif",
@@ -72,5 +72,15 @@
       "textAlign": "center",
       "opacity": 1
     }
-  ]
+  ],
+  "canvas": {
+    "x": 0,
+    "y": 0,
+    "w": 1440,
+    "h": 900,
+    "radius": "0px"
+  },
+  "background": "rgb(0, 0, 0)",
+  "shapes": [],
+  "graphics": []
 }

@@ -440,6 +440,30 @@ export interface HeroLayout {
   canvas?: { x: number; y: number; w: number; h: number; radius: string } | null;
   /** ✔ the page's own background colour (body, else html) */
   background?: string | null;
+  /** ✔ flat shapes on the first screen (pills, buttons, badges): background, gradient, border, corners */
+  shapes?: Array<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    background: string | null;
+    gradient: string | null;
+    border: string | null;
+    radius: string;
+    opacity: number;
+  }>;
+  /** ✔ graphics on the first screen: inline SVG with its computed paint, or an image by URL (the site's own, for study) */
+  graphics?: Array<{
+    kind: 'svg' | 'img' | 'placeholder';
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    svg?: string;
+    src?: string;
+    fit?: string;
+    opacity: number;
+  }>;
 }
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -449,31 +473,63 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
  * hero. Verified: text, font, size, weight, colour and position at the reference size. Inferred: the units (the site's
  * own layout system, flex or grid, is not rebuilt).
  */
-export function heroStyles(l: HeroLayout): Array<{ tag: string; text: string; style: Record<string, string> }> {
+export function heroStyles(l: HeroLayout): Array<{ tag: string; text: string; html?: string; style: Record<string, string> }> {
   const vw = (px: number) => `${r2((px / l.viewport.width) * 100)}vw`;
   const vh = (px: number) => `${r2((px / l.viewport.height) * 100)}vh`;
   const tags = new Set(['h1', 'h2', 'h3', 'h4', 'p', 'span', 'a', 'li', 'small', 'strong', 'em', 'button', 'label']);
-  return l.boxes.map((b) => ({
-    tag: tags.has(b.tag) ? (b.tag === 'a' || b.tag === 'button' ? 'span' : b.tag) : 'div',
-    text: b.text,
+  const place = (b: { x: number; y: number; w: number; h: number; opacity: number }) => ({
+    position: 'absolute',
+    left: vw(b.x),
+    top: vh(b.y),
+    width: vw(b.w),
+    height: vh(b.h),
+    margin: '0',
+    ...(b.opacity < 1 ? { opacity: String(b.opacity) } : {}),
+  });
+  // shapes first (under), then graphics, then the text on top, as on the page
+  const shapes = (l.shapes ?? []).map((s) => ({
+    tag: 'div',
+    text: '',
     style: {
-      position: 'absolute',
-      left: vw(b.x),
-      top: vh(b.y),
-      width: vw(b.w + 2),
-      margin: '0',
-      fontFamily: b.fontFamily,
-      fontSize: `max(10px, ${vw(b.fontSize)})`,
-      fontWeight: b.fontWeight,
-      letterSpacing: b.letterSpacing === 'normal' ? 'normal' : b.letterSpacing,
-      lineHeight: /px$/.test(b.lineHeight) ? String(r2(Number.parseFloat(b.lineHeight) / b.fontSize)) : b.lineHeight,
-      color: b.color,
-      textTransform: b.textTransform,
-      textAlign: b.textAlign === 'start' ? 'left' : b.textAlign,
-      ...(b.opacity < 1 ? { opacity: String(b.opacity) } : {}),
-      whiteSpace: 'pre-wrap',
+      ...place(s),
+      ...(s.background ? { background: s.background } : {}),
+      ...(s.gradient ? { backgroundImage: s.gradient } : {}),
+      ...(s.border ? { border: s.border, boxSizing: 'border-box' } : {}),
+      ...(s.radius && s.radius !== '0px' ? { borderRadius: s.radius } : {}),
     },
   }));
+  const graphics = (l.graphics ?? []).map((gr) =>
+    gr.kind === 'svg'
+      ? { tag: 'div', text: '', html: gr.svg ?? '', style: place(gr) }
+      : gr.kind === 'img'
+        ? { tag: 'img', text: '', html: gr.src ?? '', style: { ...place(gr), objectFit: gr.fit || 'fill' } }
+        : { tag: 'div', text: '', style: { ...place(gr), background: 'repeating-conic-gradient(#8a8a8a 0 25%, #6e6e6e 0 50%) 0 0 / 8px 8px' } },
+  );
+  return [
+    ...shapes,
+    ...graphics,
+    ...l.boxes.map((b) => ({
+      tag: tags.has(b.tag) ? (b.tag === 'a' || b.tag === 'button' ? 'span' : b.tag) : 'div',
+      text: b.text,
+      style: {
+        position: 'absolute',
+        left: vw(b.x),
+        top: vh(b.y),
+        width: vw(b.w + 2),
+        margin: '0',
+        fontFamily: b.fontFamily,
+        fontSize: `max(10px, ${vw(b.fontSize)})`,
+        fontWeight: b.fontWeight,
+        letterSpacing: b.letterSpacing === 'normal' ? 'normal' : b.letterSpacing,
+        lineHeight: /px$/.test(b.lineHeight) ? String(r2(Number.parseFloat(b.lineHeight) / b.fontSize)) : b.lineHeight,
+        color: b.color,
+        textTransform: b.textTransform,
+        textAlign: b.textAlign === 'start' ? 'left' : b.textAlign,
+        ...(b.opacity < 1 ? { opacity: String(b.opacity) } : {}),
+        whiteSpace: 'pre-wrap',
+      },
+    })),
+  ];
 }
 
 const cssText = (st: Record<string, string>) =>
@@ -497,6 +553,9 @@ export default function Hero() {
       {sceneCss && <style>{sceneCss}</style>}
       {items.map((it, i) => {
         const Tag = it.tag;
+        // an image by URL, an inline SVG read from the page, or a text block
+        if (Tag === 'img') return <img key={i} src={it.html} alt="" style={it.style} />;
+        if (it.html) return <div key={i} style={it.style} dangerouslySetInnerHTML={{ __html: it.html }} />;
         return (
           <Tag key={i} style={it.style}>
             {it.text}
@@ -530,7 +589,11 @@ export function heroHtml(l: HeroLayout): string {
   return `${css ? `<style>\n${css}\n</style>\n` : ''}<section class="dea-hero" style="position: relative; width: 100vw; height: 100vh; overflow: hidden">\n${heroStyles(
     l,
   )
-    .map((it) => `  <${it.tag} style="${escHtml(cssText(it.style)).replace(/"/g, '&quot;')}">${escHtml(it.text)}</${it.tag}>`)
+    .map((it) => {
+      const st = escHtml(cssText(it.style)).replace(/"/g, '&quot;');
+      if (it.tag === 'img') return `  <img src="${escHtml(it.html ?? '').replace(/"/g, '&quot;')}" alt="" style="${st}">`;
+      return `  <${it.tag} style="${st}">${it.html ?? escHtml(it.text)}</${it.tag}>`;
+    })
     .join('\n')}\n</section>`;
 }
 

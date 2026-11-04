@@ -204,6 +204,8 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
     return { ok, done: () => { call(gl, 'bindFramebuffer', T, prevR); call(gl, 'deleteFramebuffer', fb); } };
   };
   const readPx = (gl, I, w, h, cls) => {
+    // an error the page left pending would be read as this read's error (and lose the image): drain it first
+    for (let k = 0; k < 8 && call(gl, 'getError'); k++);
     const prevPack = call(gl, 'getParameter', 0x0d05);
     call(gl, 'pixelStorei', 0x0d05, 1);
     let ppb = null;
