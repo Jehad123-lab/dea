@@ -458,7 +458,7 @@ export function createRebuild(canvas, data, options = {}) {
   const signalOf = (m) => {
     if (m.kind === 'pointer') return m.axis === 'y' ? live.y : live.x;
     if (m.kind === 'pointer-velocity') return m.axis === 'y' ? live.vy : live.vx;
-    if (m.kind === 'scroll') return live.scroll;
+    if (m.kind === 'scroll') return m.lo != null ? Math.min(m.hi, Math.max(m.lo, live.scroll)) : live.scroll;
     if (m.kind === 'viewport') return m.axis === 'height' ? live.height : m.axis === 'aspect' ? live.width / live.height : live.width;
     return 0;
   };

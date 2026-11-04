@@ -133,3 +133,38 @@ describe('matrix inputs (a camera or model that follows the pointer)', () => {
     expect(at(12)?.r).toBeGreaterThan(0.99);
   });
 });
+
+describe('scroll that moves a fixed stage (a wheel-driven scene)', () => {
+  // the page cannot scroll, so the probe's scroll signal is the sum of the wheel it was given: 8 steps down, then back up
+  function wheelProbe(): ProbeData {
+    const env: ProbeData['env'] = [];
+    const series: ProbeData['series'] = { '4|uProgress': [], '4|viewMatrix#0': [] };
+    let e = 0;
+    for (let i = 0; i < 160; i++) {
+      const wheel = i < 80 ? Math.min(2000, Math.round(i / 10) * 250) : Math.max(0, 2000 - Math.round((i - 80) / 10) * 250);
+      e += 0.14 * (wheel - e); // the stage eases toward the wheel
+      env.push([i * 40, wheel, 720, 450, 1440, 900]);
+      series['4|uProgress'].push([i * 40, e / 2000]);
+      // a camera on a rail: its z translation (m[14]) follows the eased scroll, the rest is constant
+      series['4|viewMatrix#0'].push([i * 40, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -6 + (4 * e) / 2000, 1]);
+    }
+    return { env, series };
+  }
+  const rep = fitInputs(wheelProbe());
+
+  it('counts the wheel as the scroll when the page itself does not scroll', () => {
+    expect(rep.exercised.scroll).toBe(true);
+    const u = rep.inputs.find((m) => m.uniform === 'uProgress');
+    expect(u).toMatchObject({ kind: 'scroll', k: 0.14 });
+    expect(u?.scale).toBeCloseTo(1 / 2000, 6);
+    expect([u?.lo, u?.hi]).toEqual([0, 2000]);
+  });
+
+  it('maps a camera matrix to the scroll and keeps it inside what the probe saw', () => {
+    const z = rep.inputs.find((m) => m.uniform === 'viewMatrix#0' && m.component === 14);
+    expect(z).toMatchObject({ kind: 'scroll', lo: 0, hi: 2000 });
+    expect(z?.scale).toBeCloseTo(4 / 2000, 5);
+    expect(z?.offset).toBeCloseTo(-6, 2);
+    expect(rep.inputs.filter((m) => m.uniform === 'viewMatrix#0')).toHaveLength(1);
+  });
+});

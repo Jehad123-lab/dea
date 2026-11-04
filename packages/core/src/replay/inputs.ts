@@ -35,6 +35,9 @@ export interface InputMap {
   /** how well the measured values follow the input (correlation), 1 for a name-based guess */
   r: number;
   source: 'measured' | 'name';
+  /** scroll: the range of the input the probe saw (px); live input is held inside it so a value is never extrapolated past what was measured */
+  lo?: number;
+  hi?: number;
   /** a second pointer axis the value also follows (matrices: both x and y turn the camera): value += scale2 × eased(axis2) */
   axis2?: 'x' | 'y';
   scale2?: number;
@@ -72,14 +75,15 @@ export async function probeInputs(page: Page): Promise<ProbeData | null> {
       await sleep(page, 160);
     }
     await sleep(page, 600);
-    for (let i = 0; i < 4; i++) {
+    // a wheel that moves a fixed stage (a scroll-driven scene) is followed as far as it goes: 8 steps down, then back up
+    for (let i = 0; i < 8; i++) {
       await page.mouse.wheel(0, 250);
-      await sleep(page, 300);
+      await sleep(page, 350);
     }
-    await sleep(page, 700);
-    for (let i = 0; i < 4; i++) {
+    await sleep(page, 900);
+    for (let i = 0; i < 8; i++) {
       await page.mouse.wheel(0, -250);
-      await sleep(page, 300);
+      await sleep(page, 350);
     }
     await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
     await sleep(page, 700);
@@ -249,6 +253,46 @@ function fitMatrix(program: number, uniform: string, rows: number[][], idx: numb
   return out;
 }
 
+/**
+ * A matrix that follows the scroll (a camera on a path): each component fitted to the eased scroll, value = a + b × scroll,
+ * the range of the scroll the probe saw kept so live scroll does not run past it.
+ */
+function fitMatrixScroll(program: number, uniform: string, rows: number[][], idx: number[], scroll: number[], minR: number): InputMap[] {
+  const out: InputMap[] = [];
+  const comps = Math.max(...rows.map((r) => r.length - 1));
+  for (let c = 0; c < comps; c++) {
+    const pick = rows.map((r, i) => (Number.isFinite(r[c + 1]) && idx[i] >= 0 ? i : -1)).filter((i) => i >= 0);
+    if (pick.length < 8) continue;
+    const y = pick.map((i) => rows[i][c + 1]);
+    const lo = Math.min(...y);
+    const hi = Math.max(...y);
+    if (hi - lo <= Math.max(1e-6, Math.max(Math.abs(lo), Math.abs(hi)) * 1e-4)) continue;
+    let best: { r: number; k: number; a: number; b: number } | null = null;
+    for (const k of EASES) {
+      const se = ease(scroll, k);
+      const x = pick.map((i) => se[idx[i]]);
+      if (Math.max(...x) - Math.min(...x) <= 1e-9) continue;
+      const f = corr(x, y);
+      if (!best || Math.abs(f.r) > Math.abs(best.r) + 0.002) best = { r: f.r, k, a: f.b, b: f.a };
+    }
+    if (!best || Math.abs(best.r) < minR) continue;
+    out.push({
+      program,
+      uniform,
+      component: c,
+      kind: 'scroll',
+      scale: round(best.b, 8),
+      offset: round(best.a, 6),
+      k: best.k,
+      r: round(Math.abs(best.r), 4),
+      source: 'measured',
+      lo: Math.min(...scroll),
+      hi: Math.max(...scroll),
+    });
+  }
+  return out;
+}
+
 /** Fit every uniform the probe saw move to the input it follows best. */
 export function fitInputs(probe: ProbeData, opts: { minR?: number } = {}): ProbeReport {
   const minR = opts.minR ?? 0.9;
@@ -294,7 +338,17 @@ export function fitInputs(probe: ProbeData, opts: { minR?: number } = {}): Probe
     if (!Number.isFinite(program) || rows.length < 8) continue;
     const idx = rows.map((r) => at.get(r[0]) ?? -1);
     if (uniform.includes('#')) {
-      if (exercised.pointer) inputs.push(...fitMatrix(program, uniform, rows, idx, sig, minR));
+      const byPointer = exercised.pointer ? fitMatrix(program, uniform, rows, idx, sig, minR) : [];
+      const byScroll = exercised.scroll ? fitMatrixScroll(program, uniform, rows, idx, sig.scroll, minR) : [];
+      // a component that both follow goes to the closer fit
+      for (const m of byPointer) {
+        const o = byScroll.find((x) => x.component === m.component);
+        if (!o || m.r >= o.r) inputs.push(m);
+      }
+      for (const m of byScroll) {
+        const o = byPointer.find((x) => x.component === m.component);
+        if (!o || m.r > o.r) inputs.push(m);
+      }
       continue;
     }
     const comps = Math.max(...rows.map((r) => r.length - 1));
@@ -351,8 +405,13 @@ export function fitInputs(probe: ProbeData, opts: { minR?: number } = {}): Probe
             };
         }
       }
-      if (best) inputs.push(best.m);
-      else unexplained.push(`${uniform}[${c}] (program ${program})`);
+      if (best) {
+        if (best.m.kind === 'scroll') {
+          best.m.lo = Math.min(...sig.scroll);
+          best.m.hi = Math.max(...sig.scroll);
+        }
+        inputs.push(best.m);
+      } else unexplained.push(`${uniform}[${c}] (program ${program})`);
     }
   }
   return { inputs, frames: env.length, exercised, unexplained };

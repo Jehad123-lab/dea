@@ -276,7 +276,7 @@ export function createReplay(canvas, data, options = {}) {
   const live = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, vx: 0, vy: 0, scroll: 0, width: doc.viewport ? doc.viewport.w : doc.canvas.cssW || doc.canvas.w, height: doc.viewport ? doc.viewport.h : doc.canvas.cssH || doc.canvas.h };
   const eased = new Map();
   let inputTouched = !!options.liveFromStart;
-  const signalOf = (m) => m.kind === 'pointer' ? (m.axis === 'y' ? live.y : live.x) : m.kind === 'pointer-velocity' ? (m.axis === 'y' ? live.vy : live.vx) : m.kind === 'scroll' ? live.scroll : m.kind === 'viewport' ? (m.axis === 'height' ? live.height : m.axis === 'aspect' ? live.width / live.height : live.width) : 0;
+  const signalOf = (m) => m.kind === 'pointer' ? (m.axis === 'y' ? live.y : live.x) : m.kind === 'pointer-velocity' ? (m.axis === 'y' ? live.vy : live.vx) : m.kind === 'scroll' ? (m.lo != null ? Math.min(m.hi, Math.max(m.lo, live.scroll)) : live.scroll) : m.kind === 'viewport' ? (m.axis === 'height' ? live.height : m.axis === 'aspect' ? live.width / live.height : live.width) : 0;
   const stepInputs = () => {
     live.vx = live.x - live.px; live.vy = live.y - live.py; live.px = live.x; live.py = live.y;
     for (const m of inputs) { const k = m.program + '|' + m.uniform + '|' + m.component; const s = signalOf(m); const e = eased.has(k) ? eased.get(k) : s; eased.set(k, e + (m.k == null ? 1 : m.k) * (s - e)); }

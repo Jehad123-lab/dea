@@ -492,7 +492,12 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
   CAP.probe = null;
   const onPointer = (e) => { if (CAP.probe) { CAP.probe.mx = e.clientX; CAP.probe.my = e.clientY; } };
   try { addEventListener('pointermove', onPointer, { capture: true, passive: true }); addEventListener('mousemove', onPointer, { capture: true, passive: true }); } catch (e) {}
-  CAP.probeStart = () => { CAP.probe = { t0: performance.now(), cur: {}, series: {}, env: [], mx: -1, my: -1, mats: new Map(), nkeys: 0 }; return true; };
+  // the scroll signal: the page's own scroll when it can scroll, else the sum of the wheel it was given (a fixed-stage site that
+  // moves its scene by wheel events scrolls nothing, and scrollY would stay 0)
+  CAP.wheel = 0;
+  try { addEventListener('wheel', (e) => { CAP.wheel = Math.max(0, CAP.wheel + e.deltaY); }, { capture: true, passive: true }); } catch (e) {}
+  const scrollSignal = () => (document.documentElement.scrollHeight > innerHeight + 2 ? Math.round(scrollY) : Math.round(CAP.wheel));
+  CAP.probeStart = () => { CAP.probe = { t0: performance.now(), cur: {}, series: {}, env: [], mx: -1, my: -1, mats: new Map(), nkeys: 0 }; CAP.wheel = 0; return true; };
   CAP.probeStop = () => { const P = CAP.probe; CAP.probe = null; return P ? { series: P.series, env: P.env } : null; };
   const probeNote = (I, name, a) => {
     const kind = name.slice(7);
@@ -532,7 +537,7 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
     const P = CAP.probe;
     if (P.env.length >= 4000) return;
     const t = Math.round(performance.now() - P.t0);
-    P.env.push([t, Math.round(scrollY), P.mx, P.my, innerWidth, innerHeight]);
+    P.env.push([t, scrollSignal(), P.mx, P.my, innerWidth, innerHeight]);
     for (const k in P.cur) { const s = P.series[k] || (P.series[k] = []); s.push([t].concat(P.cur[k])); }
   };
 
