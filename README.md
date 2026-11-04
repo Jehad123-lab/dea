@@ -329,11 +329,18 @@ a positioned layer), and inline SVG logos with their computed paint. Labels hidd
 waiting below "Menu") are left out. Fonts the site loads are copied with their weight and style, so an italic file
 cannot stand in for the upright one. With `--own-assets`, logos and images become placeholders of the same size.
 
-**What moves and what is frozen.** `rb.start()` alternates the two recorded frames: every pass, the simulation passes
-included, runs again each frame on the live render targets, and the uniforms DEA saw change at a steady rate (time)
-follow the real clock. Pointer, scroll and window size are not wired yet: their uniforms keep the recorded values and
-the canvas keeps the recorded size, so a mouse-driven fluid or a hover reacts to nothing. The trace already knows which
-uniforms follow the pointer, scroll and viewport (`dea trace`); mapping them to live input is the next step.
+**What moves and what is frozen.** Live (`rb.start()`, `replay.start()`) holds the recorded camera: the two recorded
+frames carry slightly different camera matrices (a dolly caught mid-move), and playing them one after the other made the
+picture shake, so every frame takes the float and matrix uniforms of the last recorded frame while every pass, the
+simulation passes included, still runs on the live render targets and the clocks follow the real time. Real pointer,
+touch, scroll and window size drive the uniforms the input probe measured following them, as value = scale × eased input
++ offset with the easing found per uniform. The probe moves the pointer across the page, wheels down and back up (the
+page's own scroll when it can scroll, the sum of the wheel when a fixed stage moves by wheel events), and resizes the
+window, while the recorder notes every float uniform and every matrix per frame; live scroll is held inside the range it
+probed. `extract.md` lists each input as ✔ verified live, ≈ inferred (from the uniform's name, not moved by the probe) or
+✖ frozen, and `preview/interaction.jpg` is the same scripted pointer and scroll on the site and on the kit, side by side.
+A uniform that changes without following any input (a sim seed, a noise offset) plays as recorded. The drawing buffer keeps
+the recorded size.
 
 **Where the time goes.** Every browser command (`extract`, `design`, `motion`, `assets`, `trace`, `inspect`, `score`)
 writes `timings.json` in its run: the wall time of each stage (browser launch, page load, network-idle and settle waits,

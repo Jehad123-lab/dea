@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -12,6 +13,7 @@ import { newRunId, RunWriter, resolveRun, runsDir } from '../evidence/run.ts';
 import { type Gap, renderGaps } from '../gaps.ts';
 import { decodeMotion, type GsapNode, gsapModule, type MotionDoc } from '../motion/index.ts';
 import { pool } from '../pool.ts';
+import { REPLAY_CAPTURE_SCRIPT } from '../replay/capture.ts';
 import { animateEntries, buildGraph, type CaptureDoc, compactCapture, placeholderTextures, renderGraphMd } from '../replay/graph.ts';
 import { fitInputs, type InputMap, inferInputs, inputsSummary, type ProbeData, type ProbeReport } from '../replay/inputs.ts';
 import { REPLAY_PLAYER } from '../replay/player.ts';
@@ -199,7 +201,10 @@ async function readJson<T>(p: string): Promise<T | null> {
 
 /** bump when a decoder's output changes shape, so older cached runs are not reused */
 const STAGE_CACHE_VERSION = 1;
-const CAPTURE_CACHE_VERSION = 2;
+// bumped when the probe or the capture's result format changes; the recorder's own source is hashed into the key too, so a change
+// to it never serves a recording made by the old one
+const CAPTURE_CACHE_VERSION = 3;
+const CAPTURE_CODE = createHash('sha1').update(REPLAY_CAPTURE_SCRIPT).digest('hex').slice(0, 12);
 
 type RefShot = Awaited<ReturnType<typeof referenceShot>>;
 
@@ -227,7 +232,20 @@ async function referenceFor(
   // the scripted pointer / scroll and the input probe run on the live site right after the recording (full mode)
   const interact = record && !quick;
   const cache = currentCache();
-  const key = cacheKey('capture', CAPTURE_CACHE_VERSION, url, vp, ms, smart, opts.section ?? null, record, frames, interact, opts.browser ?? 'auto');
+  const key = cacheKey(
+    'capture',
+    CAPTURE_CACHE_VERSION,
+    CAPTURE_CODE,
+    url,
+    vp,
+    ms,
+    smart,
+    opts.section ?? null,
+    record,
+    frames,
+    interact,
+    opts.browser ?? 'auto',
+  );
   const d = cache ? await cache.get('capture', key) : null;
   if (cache && d) {
     try {
@@ -975,6 +993,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             layout,
             replay: params.program === '__replay',
             rebuild: params.program === '__rebuild',
+            bothViews: params.program === '__rebuild' && Boolean(replay) && !opts.ownAssets,
           });
           for (const f of Object.keys(pf)) await put(f, pf[f]);
         }

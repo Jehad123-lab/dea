@@ -97,6 +97,18 @@ describe('extract: files you can use', () => {
     expect(framer).toContain('https://esm.sh/three@0.170.0');
   });
 
+  it('a kit with both the rebuild and the capture replay shows either one: ?view=replay, the rebuild by default, above the page background', () => {
+    const m = shaderModule(prog, { last: {}, textureDir: '/textures', ownAssets: false, textureName: () => 'noise.png' });
+    const o = { mods: [m], title: 'Site', site: 'https://x.test', threeVersion: '170', hasMotion: false, heading: 'Hello', rebuild: true };
+    expect(projectFiles('react', { ...o, bothViews: false })['src/Scene.jsx']).not.toContain('mountReplay');
+    const scene = projectFiles('react', { ...o, bothViews: true })['src/Scene.jsx'];
+    expect(scene).toContain("get('view') === 'replay'");
+    expect(scene).toContain('mountReplay');
+    expect(scene).toContain('mountRebuild');
+    // the canvas sits at z-index 0, never -1: a page background would paint over a layer below the body
+    expect(scene).toContain('zIndex: 0');
+  });
+
   it('rebuilds the render pipeline of one frame: targets, order, wiring, scene hooks', () => {
     const m = shaderModule(prog, { last: {}, textureDir: '/textures', ownAssets: false, textureName: () => 'noise.png' });
     const js = pipelineModule(

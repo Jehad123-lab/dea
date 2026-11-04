@@ -659,6 +659,8 @@ export function projectFiles(
     replay?: boolean;
     /** the editable three.js rebuild of the recorded render graph (rebuild/rebuild.js + public/rebuild/) */
     rebuild?: boolean;
+    /** the capture replay ships in the kit beside the rebuild (not with --own-assets): `?view=replay` shows it */
+    bothViews?: boolean;
   },
 ): Record<string, string> {
   const m = o.mods[0];
@@ -737,6 +739,9 @@ ${(m?.textures ?? []).map((t) => `    ${t.sampler}: { type: ControlType.String, 
   if (o.rebuild && target === 'react')
     files['src/Scene.jsx'] =
       `${rebuildNote}import { useEffect, useRef } from 'react';\nimport { mountRebuild } from '../rebuild/rebuild.js';\n\nexport default function Scene() {\n  const ref = useRef(null);\n  useEffect(() => {\n    let rb = null;\n    let dead = false;\n    mountRebuild(ref.current, { base: '/rebuild/' }).then((r) => {\n      rb = r;\n      if (dead) r.stop();\n    });\n    return () => {\n      dead = true;\n      if (rb) {\n        rb.stop();\n        rb.renderer.dispose();\n        rb.renderer.domElement.remove();\n      }\n    };\n  }, []);\n  return <div ref={ref} className="dea-scene" style={{ position: 'fixed', inset: 0, zIndex: 0 }} />;\n}\n`;
+  if (o.rebuild && o.bothViews && target === 'react')
+    files['src/Scene.jsx'] =
+      `${rebuildNote}// ?view=replay shows the capture replay instead: the site's recorded calls played back (replay/replay.js reads public/replay/).\nimport { useEffect, useRef } from 'react';\nimport { mountRebuild } from '../rebuild/rebuild.js';\nimport { mountReplay } from '../replay/replay.js';\n\nconst VIEW = new URLSearchParams(location.search).get('view') === 'replay' ? 'replay' : 'rebuild';\n\nexport default function Scene() {\n  const ref = useRef(null);\n  useEffect(() => {\n    let stop = null;\n    let dead = false;\n    const p =\n      VIEW === 'replay'\n        ? mountReplay(ref.current, { base: '/replay/' }).then((s) => {\n            window.dea = { view: 'replay', replay: s.replay };\n            return () => s();\n          })\n        : mountRebuild(ref.current, { base: '/rebuild/' }).then((rb) => {\n            window.dea = { view: 'rebuild', rebuild: rb };\n            return () => {\n              rb.stop();\n              rb.renderer.dispose();\n              rb.renderer.domElement.remove();\n            };\n          });\n    p.then((s) => {\n      stop = s;\n      if (dead) s();\n    }).catch((e) => console.error('scene failed to load', e));\n    return () => {\n      dead = true;\n      if (stop) stop();\n    };\n  }, []);\n  return <div ref={ref} className="dea-scene" style={{ position: 'fixed', inset: 0, zIndex: 0 }} />;\n}\n`;
   return files;
 }
 
