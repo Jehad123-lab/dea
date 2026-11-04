@@ -264,6 +264,13 @@ in the pipeline (GPGPU particles, mipmap bloom, SMAA, blue-noise dithering, heig
 point sprites) and cites free sources for each (Codrops, the three.js forum and docs, Shadertoy, CodePen, GitHub). No
 code is copied from any source. Anything still open goes into **Gap → path to result** with the next command to run.
 
+**Two scores, always side by side.** The page score above rewards matching text, layout and colour: a flat stand-in
+behind the right heading can score high while the 3D looks nothing like the site. So every extract also reports a
+**canvas-only score**: only the WebGL canvas region, every text box hidden, scored as 0.6 × SSIM (structural
+similarity of luminance at three scales) + 0.2 × edge correlation + 0.2 × tone histogram. It moves only when the
+picture itself gets closer. `dea score original.png rebuild.png --layout layout.json` scores any two screenshots the
+same way.
+
 From a real run on the author's portfolio (reference screenshot taken by DEA on a machine without a GPU):
 
 ```text
@@ -274,6 +281,7 @@ uniform drivers from the live trace: uST ← a clock: +0.0125 per second (wall t
 techniques: gpgpu, mipmap-bloom, smaa, blue-noise, heightmap, ripple-sim, dissolve, points
 build: npm run build passed (7 s)
 visual diff: 73.2% → 88.1% after analysis → 88.1% after research (searches found no new values to try)
+# the canvas-only score of that same rebuild (dea score): canvas 50.9% (SSIM 41%, edges 46.7%, tones 84.6%)
 open gaps: 3 (see "Gap → path to result" in the report)
 ```
 

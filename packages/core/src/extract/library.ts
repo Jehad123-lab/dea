@@ -14,7 +14,10 @@ export interface KitManifest {
   extractedAt: string;
   target: string;
   title?: string;
+  /** the page score (colour, light layout, edges over the whole first screen) */
   score: number | null;
+  /** the canvas-only perceptual score (the WebGL picture alone, text hidden); absent in kits made before it existed */
+  canvasScore?: number | null;
   shaders: Array<{ name: string; uniforms: string[]; drivers: Record<string, string> }>;
   eases: string[];
   colors: string[];

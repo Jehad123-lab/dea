@@ -202,7 +202,7 @@ export function createServer(opts: ServerOptions = {}): McpServer {
     async ({ url, browser, to, section, ownAssets, diff, verifyBuild }) => {
       try {
         const r = await extract(url, { browser, to, section, ownAssets, noDiff: diff === false, verifyBuild });
-        return { content: [text(`${DATA_NOTE}\n\n${clip(r.extractMd)}\n\nFiles: ${r.out}\nRun id: ${r.runId}`)] };
+        return { content: [text(`${DATA_NOTE}\n\n${r.summary}\n\n${clip(r.extractMd)}\n\nFiles: ${r.out}\nRun id: ${r.runId}`)] };
       } catch (e) {
         return fail(e);
       }

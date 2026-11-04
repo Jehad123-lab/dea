@@ -121,6 +121,7 @@ export {
   searxng,
   type Technique,
 } from './extract/research.ts';
+export { type CanvasScore, canvasLine, canvasScore, type ScoreFilesResult, scoreFiles } from './extract/score.ts';
 export { COVERS, type Gap, type ProbeStep, renderGaps } from './gaps.ts';
 export { dispatch, SESSION_METHODS, SessionClient, type SessionInfo, type SessionMethod, serveSession, sessionFile } from './hands/daemon.ts';
 export { type ActionResult, type ElementInfo, type HandsOptions, HandsSession, type LoggedAction, redactArgs, renderSessionReport } from './hands/session.ts';

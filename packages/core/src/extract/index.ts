@@ -41,6 +41,7 @@ import {
   type SearchProvider,
   type Technique,
 } from './research.ts';
+import { type CanvasScore, canvasLine, compareCanvas } from './score.ts';
 
 export interface ExtractOptions extends InspectOptions {
   to?: Target;
@@ -90,6 +91,8 @@ export interface ExtractResult {
     referenceAtMs?: number;
     referenceLoader?: boolean;
     standin?: Standin | null;
+    /** the canvas-only perceptual score (text masked out) at the start and at the end; null when there is no canvas */
+    canvas?: { start: CanvasScore | null; final: CanvasScore | null };
   };
   build: BuildCheck | null;
   gaps: Gap[];
@@ -438,6 +441,10 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
           }
         }
         const start = await render(params);
+        // the canvas-only score: the WebGL picture alone, with the site's text hidden
+        const textBoxes = (layout ?? layoutCandidates[0] ?? null)?.boxes ?? [];
+        const canvasBox = (layout ?? layoutCandidates[0] ?? null)?.canvas ?? null;
+        const canvasStart = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
         let best = start;
         // analysis first: DEA's own facts as candidates (the screen's mean colour, other palette colours, each shader, opacity)
         const meanOriginal = (await compareImages(cmp, original, original)).meanA;
@@ -527,8 +534,15 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
           await rm(join(out, 'standins'), { recursive: true, force: true });
           files.splice(files.indexOf('standins/particles.js'), 1);
         }
+        const canvasFinal = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
         await put('preview/final.png', Buffer.from(lastPng.slice(lastPng.indexOf(',') + 1), 'base64'));
-        await put('preview/side-by-side.png', await sideBySide(cmp, original, lastPng, [`original (${url})`, `DEA rebuild (${pct(final)} similar)`]));
+        await put(
+          'preview/side-by-side.png',
+          await sideBySide(cmp, original, lastPng, [
+            `original (${url})`,
+            `DEA rebuild: page ${pct(final)}, canvas ${canvasFinal ? pct(canvasFinal.score) : 'n/a'}`,
+          ]),
+        );
         diff = {
           start,
           afterAnalysis,
@@ -539,6 +553,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
           parts: lastCmp ?? undefined,
           referenceAtMs: ref.atMs,
           referenceLoader: ref.loader,
+          canvas: { start: canvasStart, final: canvasFinal },
         };
       } finally {
         await cmp.close();
@@ -595,6 +610,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
     target,
     title,
     score: diff?.final ?? null,
+    canvasScore: diff?.canvas?.final?.score ?? null,
     shaders: mods.map((m) => ({
       name: m.name,
       uniforms: m.uniforms.map((u) => u.name),
@@ -653,8 +669,13 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
       ? `build: ${build.skipped ? build.skipped : build.ok ? `npm run build passed (${Math.round(build.ms / 1000)} s)` : `failed at ${build.step}`}`
       : 'build: not checked (add --verify-build)',
     diff
-      ? `visual diff: ${pct(diff.start)} → ${pct(diff.afterAnalysis)} after analysis → ${pct(diff.final)} after research (${diff.research?.stoppedBecause ?? ''})`
+      ? `visual diff (page): ${pct(diff.start)} → ${pct(diff.afterAnalysis)} after analysis → ${pct(diff.final)} after research (${diff.research?.stoppedBecause ?? ''})`
       : 'visual diff: skipped',
+    ...(diff
+      ? [
+          `visual diff (${canvasLine(diff.canvas?.final)})${diff.canvas?.start && diff.canvas.final ? `, from ${pct(diff.canvas.start.score)} at the start` : ''}`,
+        ]
+      : []),
     gaps.length ? `open gaps: ${gaps.length} (see "Gap → path to result" in the report)` : 'open gaps: none',
   ].join('\n');
   w.emit({ type: 'run.finished', runId: w.id, dir: w.dir, summary, at: new Date().toISOString() });
@@ -870,6 +891,11 @@ function renderExtractMd(o: {
       ...(o.diff.parts
         ? [`- Final parts: colour ${pct(o.diff.parts.colour)}, brightness layout ${pct(o.diff.parts.layout)}, edges ${pct(o.diff.parts.edges)}`]
         : []),
+      `- **Canvas only** (the WebGL picture alone, the site's text hidden; 0.6 × SSIM at three scales + 0.2 × edges + 0.2 × tones): ${
+        o.diff.canvas?.final
+          ? `${pct(o.diff.canvas.start?.score ?? 0)} at the start → ${pct(o.diff.canvas.final.score)}; ${canvasLine(o.diff.canvas.final)}`
+          : 'no canvas on the first screen'
+      }`,
       `- Kept parameters: ${Object.entries(o.diff.params)
         .filter(([k]) => k !== 'heading')
         .map(([k, v]) => `${k} ${v}`)
@@ -899,7 +925,10 @@ function renderExtractMd(o: {
       for (const c of o.citations)
         L.push(`- [${c.title}](${c.url}) via ${c.source}${c.license ? `, licence ${c.license}` : ''}: ${(c as Finding & { used?: string }).used ?? ''}`);
     }
-    L.push('', 'The score compares colour layout, not text or motion: a high score means the first screen reads the same, not that the code is identical.');
+    L.push(
+      '',
+      'The page score compares colour layout, not text or motion: a high score means the first screen reads the same, not that the code is identical. The canvas score looks only at the 3D picture, so text and colour cannot carry it: read it to judge the effect itself.',
+    );
   } else L.push('Skipped (`--no-diff`).');
   if (o.build) {
     L.push('', '## Does it build?', '');

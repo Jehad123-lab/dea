@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
   type BrowserChoice,
+  canvasLine,
   decodeAssets,
   decodeCode,
   decodeDesign,
@@ -27,6 +28,7 @@ import {
   resolveRun,
   runInvestigation,
   type StepKind,
+  scoreFiles,
   stackSite,
   traceWebGL,
 } from '@dea/core';
@@ -191,6 +193,28 @@ common(
   }),
 );
 
+program
+  .command('score')
+  .description(
+    'score a rebuild against the original: the page score (colour, light layout, edges) and the canvas-only score (SSIM, edges and tones of the WebGL picture with the text hidden)',
+  )
+  .argument('<original>', 'screenshot of the original (PNG or JPEG)')
+  .argument('<rebuild>', 'screenshot of the rebuild, same size')
+  .option('--layout <file>', 'layout.json from an extract (names the canvas and the text boxes to hide)')
+  .addOption(new Option('-b, --browser <name>', 'browser to use').choices(['auto', 'chrome', 'msedge', 'chromium']).default('auto'))
+  .option('--json', 'print JSON')
+  .action((original: string, rebuild: string, flags: { layout?: string; browser: BrowserChoice; json?: boolean }) =>
+    run(async () => {
+      const layout = flags.layout ? JSON.parse(await readFile(flags.layout, 'utf8')) : null;
+      const r = await scoreFiles(original, rebuild, { layout, browser: flags.browser });
+      if (flags.json) return void process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
+      const p = (x: number) => `${Math.round(x * 1000) / 10}%`;
+      process.stdout.write(
+        `page ${p(r.page.similarity)} (colour ${p(r.page.colour)}, light layout ${p(r.page.layout)}, edges ${p(r.page.edges)})\n${canvasLine(r.canvas)}\n`,
+      );
+    }),
+  );
+
 common(
   program
     .command('extract')
@@ -201,7 +225,7 @@ common(
     .option('--to <target>', 'react, vanilla or framer', 'react')
     .option('--section <selector>', 'keep only motion that touches this CSS selector')
     .option('--own-assets', 'write same-size placeholders instead of the site textures')
-    .option('--from <runs>', 'reuse runs: design=<id>,motion=<id>,assets=<id>')
+    .option('--from <runs>', 'reuse runs: design=<id>,motion=<id>,assets=<id>,trace=<id>')
     .option('--no-diff', 'skip the visual diff and research loop')
     .option('--rounds <n>', 'research rounds when the rebuild does not match', '3')
     .option('--library <name>', 'save the result in the local library (~/.dea/library)')
@@ -267,7 +291,15 @@ common(
           noTrace: !flags.trace,
           noResearch: !flags.research,
         });
-        if (flags.json) rows.push(JSON.stringify({ url: u, out: r.out, files: r.files, diff: r.diff && { start: r.diff.start, final: r.diff.final } }));
+        if (flags.json)
+          rows.push(
+            JSON.stringify({
+              url: u,
+              out: r.out,
+              files: r.files,
+              diff: r.diff && { start: r.diff.start, final: r.diff.final, canvas: r.diff.canvas?.final?.score ?? null },
+            }),
+          );
         else process.stdout.write(`\n${r.summary}\nReport: ${r.dir}/extract.md\n`);
       }
       if (flags.json) process.stdout.write(`[${rows.join(',')}]\n`);
@@ -304,7 +336,7 @@ library
       if (!items.length) return void process.stdout.write(`The library is empty (${libraryHome()}). Save a kit with: dea extract <url> --library <name>\n`);
       for (const x of items)
         process.stdout.write(
-          `${x.name}  ${x.target}  ${x.score != null ? `${Math.round(x.score * 100)}% match  ` : ''}${x.url}${x.tags.length ? `  #${x.tags.join(' #')}` : ''}\n  shaders: ${x.shaders.map((s) => s.name).join(', ') || 'none'}\n`,
+          `${x.name}  ${x.target}  ${x.score != null ? `page ${Math.round(x.score * 100)}%  ` : ''}${x.canvasScore != null ? `canvas ${Math.round(x.canvasScore * 100)}%  ` : ''}${x.url}${x.tags.length ? `  #${x.tags.join(' #')}` : ''}\n  shaders: ${x.shaders.map((s) => s.name).join(', ') || 'none'}\n`,
         );
     }),
   );

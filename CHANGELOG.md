@@ -36,6 +36,8 @@ The first release: decode a website with evidence, use what comes out, and let A
   check, a visual diff against the original, technique stand-ins kept only when they improve the match, research in
   free sources with citations, and a provenance note.
 - `dea library add|list|search|use|remove`: decode once, reuse in every project; `dea extract --batch urls.txt`.
+- A canvas-only score beside the page score on every extract (SSIM at three scales, edges and tones of the WebGL
+  canvas with the text hidden), and `dea score` to score any two screenshots the same way.
 
 ### Act and connect
 
