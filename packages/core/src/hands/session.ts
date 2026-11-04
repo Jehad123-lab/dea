@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { appendFile } from 'node:fs/promises';
 import type { Browser, BrowserContext, Locator, Page } from 'playwright';
-import { type BrowserChoice, browserInfo, installObservers, launchBrowser, normalizeUrl } from '../browser/open.ts';
+import { type BrowserChoice, browserInfo, installObservers, launchBrowser, normalizeUrl, releaseBrowser } from '../browser/open.ts';
 import { newRunId, RunWriter, runsDir } from '../evidence/run.ts';
 import { redactText } from '../evidence/secrets.ts';
 import {
@@ -721,7 +721,7 @@ export class HandsSession {
     if (this.closed) return { runId: this.runId, dir: this.dir, actions: this.log.length, report: renderSessionReport(this) };
     this.closed = true;
     await this.context.close().catch(() => {}); // writes the HAR
-    await this.browser.close().catch(() => {});
+    await releaseBrowser(this.browser);
     const raw = this.writer.path('network.raw.har');
     try {
       const { summary } = await finishHar(raw, this.writer.path('network.har'), this.log.at(-1)?.urlAfter ?? 'about:blank');

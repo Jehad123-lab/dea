@@ -342,6 +342,36 @@ research, the build check, writing the kit), stages that ran inside others neste
 itself and of DEA plus the browsers it started (Linux reads the second from `/proc`; elsewhere it is left out).
 `--timings` also prints the table when the command ends.
 
+**Speed.** On a 4-core machine without a GPU (software WebGL), measured with `--timings`:
+
+| site | before (round 4) | cold (empty cache) | warm (cached) | page / canvas score, before → now |
+| --- | --- | --- | --- | --- |
+| lusion.co | 676 s | 327 s | 61 s | 99.6% / 99.0% → 99.8% / 99.6% |
+| jehaduddin.vercel.app (`--reference-ms 150000`) | 1046 s | 690 s | 142 s | 85.9% / 84.4% → 85.6% / 84.5% |
+
+What changed:
+
+- **Cache.** Pages and their files go through a per-URL cache (`~/.dea/cache`, or `--cache-dir`): static GETs answered
+  200 without `no-store`, each decoder's finished run, and the reference screenshot with its recorded frames. A second
+  extract of the same URL reuses them and says so in the summary ("reused from the cache: ..."). Entries older than 24
+  hours are dropped, and the least recently used go first once the cache passes `--cache-max-mb` (1024).
+  `--no-cache` observes everything again; `dea cache info` and `dea cache clear` show and empty it. A capture whose
+  recording failed is not kept.
+- **Browsers are reused.** One pool of browsers serves every stage of an extract and every URL of `--batch`; a stage
+  borrows an idle browser and closes only its own page. Stages that run side by side get a browser each, because a
+  browser draws all its pages' WebGL in one GPU process and they would queue behind each other.
+- **Stages run side by side.** The reference screenshot and WebGL capture run first, on their own (a heavy site's intro
+  on a machine without a GPU slows to a crawl when other pages render beside it, and the reference would catch the
+  loading screen; `--overlap` runs them together, which is faster with a GPU). Then design, motion and
+  assets → trace run in parallel (`--concurrency 3`).
+- **Shorter waits.** A page that is already drawing WebGL stops waiting for the network to go quiet (3D sites often
+  stream forever) once it has drawn 20 frames; the settle wait ends when the page draws frames and no loading screen
+  covers it; without `--reference-ms` the reference watch ends when the page has settled (no loader, the best frame not
+  beaten for a few samples, 45 s at most); the parameter sweep stops trying a knob whose first two values change
+  nothing on screen.
+- **`--quick`** (labelled QUICK MODE in the summary and the report): one recorded frame, a 20 s reference watch, no
+  motion, trace, sweep, research or build check. Rough, for a first look; run without it for the real result.
+
 `--section <selector>` scrolls that part of the page into view for the reference, reads only its text, and keeps only
 the motion that touches it. `--reference shot.png` compares against your own screenshot (for example one taken on a
 machine with a GPU). `--library <name> --tag hero` saves the kit; `--batch urls.txt` extracts a list of sites.

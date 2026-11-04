@@ -3,12 +3,14 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
   type BrowserChoice,
+  ContentCache,
   canvasLine,
   decodeAssets,
   decodeCode,
   decodeDesign,
   decodeMotion,
   extract,
+  fmtMb,
   type InspectOptions,
   type InspectResult,
   inspectSite,
@@ -33,6 +35,8 @@ import {
   stackSite,
   Timings,
   traceWebGL,
+  withCache,
+  withSharedBrowser,
   withTimings,
 } from '@dea/core';
 import { Command, Option } from 'commander';
@@ -262,7 +266,13 @@ common(
     .option('--no-research', 'do not search free sources for the techniques found')
     .option('--batch <file>', 'extract every URL in a text file (one per line)')
     .option('--reference <image>', 'your own screenshot of the original to compare against (e.g. taken on a machine with a GPU)')
-    .option('--reference-ms <ms>', 'how long to watch the original for the reference screenshot', '45000'),
+    .option('--reference-ms <ms>', 'watch the original this long for the reference screenshot (default: until the page settles, up to 45 s)')
+    .option('--quick', 'rough and fast: 1 recorded frame, no motion/trace/sweep/research/build check (labelled QUICK)')
+    .option('--no-cache', "do not read or write DEA's content cache (static files, stage runs, the reference capture)")
+    .option('--cache-dir <dir>', 'where the content cache lives (default <home>/cache)')
+    .option('--cache-max-mb <mb>', 'size cap of the content cache; the least recently used entries go first', '1024')
+    .option('--concurrency <n>', 'decoders run side by side (1 = one after another)', '3')
+    .option('--overlap', 'run the decoders while the reference is captured (faster with a GPU; on a CPU-only machine a heavy intro may not finish)'),
 ).action(
   (
     url: string | undefined,
@@ -281,8 +291,14 @@ common(
       replay: boolean;
       research: boolean;
       reference?: string;
-      referenceMs: string;
+      referenceMs?: string;
       maxCaptureMb: string;
+      quick?: boolean;
+      cache: boolean;
+      cacheDir?: string;
+      cacheMaxMb: string;
+      concurrency: string;
+      overlap?: boolean;
     },
   ) =>
     run(async () => {
@@ -303,41 +319,92 @@ common(
           : [];
       if (!urls.length) throw new Error('give a URL or --batch <file>');
       const rows: string[] = [];
-      for (const [i, u] of urls.entries()) {
-        const r = await extract(u, {
-          ...options(flags),
-          to: flags.to as 'react' | 'vanilla' | 'framer',
-          section: flags.section,
-          ownAssets: flags.ownAssets,
-          from: urls.length === 1 ? from : undefined,
-          noDiff: !flags.diff,
-          rounds: Number(flags.rounds),
-          reference: flags.reference,
-          referenceMs: Number(flags.referenceMs),
-          library: flags.library ? (urls.length > 1 ? `${flags.library}-${i + 1}` : flags.library) : undefined,
-          tags: flags.tag,
-          verifyBuild: flags.verifyBuild,
-          noTrace: !flags.trace,
-          noReplay: !flags.replay,
-          maxCaptureMb: Number(flags.maxCaptureMb) || 64,
-          noResearch: !flags.research,
-        });
-        if (flags.json)
-          rows.push(
-            JSON.stringify({
-              url: u,
-              out: r.out,
-              files: r.files,
-              diff: r.diff && { start: r.diff.start, final: r.diff.final, canvas: r.diff.canvas?.final?.score ?? null },
-              ...(flags.timings && r.timings ? { timings: r.timings } : {}),
-            }),
-          );
-        else process.stdout.write(`\n${r.summary}\nReport: ${r.dir}/extract.md\n`);
-        if (flags.timings && r.timings) process.stderr.write(`\n${renderTimings(r.timings)}\n`);
-      }
+      const base = options(flags);
+      // one browser and one cache for every URL of the batch
+      const cache = flags.cache ? new ContentCache({ dir: flags.cacheDir, maxMb: Number(flags.cacheMaxMb) || 1024 }) : null;
+      const t0 = Date.now();
+      await withCache(cache, () =>
+        withSharedBrowser(
+          base.browser ?? 'auto',
+          base.headless ?? true,
+          async () => {
+            for (const [i, u] of urls.entries()) {
+              const r = await extract(u, {
+                ...options(flags),
+                to: flags.to as 'react' | 'vanilla' | 'framer',
+                section: flags.section,
+                ownAssets: flags.ownAssets,
+                from: urls.length === 1 ? from : undefined,
+                noDiff: !flags.diff,
+                rounds: Number(flags.rounds),
+                reference: flags.reference,
+                referenceMs: flags.referenceMs != null ? Number(flags.referenceMs) : undefined,
+                quick: flags.quick,
+                noCache: !flags.cache,
+                cacheDir: flags.cacheDir,
+                cacheMaxMb: Number(flags.cacheMaxMb) || 1024,
+                concurrency: Math.max(1, Number(flags.concurrency) || 3),
+                overlap: flags.overlap,
+                library: flags.library ? (urls.length > 1 ? `${flags.library}-${i + 1}` : flags.library) : undefined,
+                tags: flags.tag,
+                verifyBuild: flags.verifyBuild,
+                noTrace: !flags.trace,
+                noReplay: !flags.replay,
+                maxCaptureMb: Number(flags.maxCaptureMb) || 64,
+                noResearch: !flags.research,
+              });
+              if (flags.json)
+                rows.push(
+                  JSON.stringify({
+                    url: u,
+                    out: r.out,
+                    files: r.files,
+                    diff: r.diff && { start: r.diff.start, final: r.diff.final, canvas: r.diff.canvas?.final?.score ?? null },
+                    ...(flags.timings && r.timings ? { timings: r.timings } : {}),
+                  }),
+                );
+              else process.stdout.write(`\n${r.summary}\nReport: ${r.dir}/extract.md\n`);
+              if (flags.timings && r.timings) process.stderr.write(`\n${renderTimings(r.timings)}\n`);
+            }
+          },
+          { max: Math.max(1, Number(flags.concurrency) || 3) + 1 },
+        ),
+      );
+      if (urls.length > 1 && !flags.json)
+        process.stdout.write(`\n${urls.length} URLs in ${Math.round((Date.now() - t0) / 1000)} s (the same browsers reused for all of them)\n`);
       if (flags.json) process.stdout.write(`[${rows.join(',')}]\n`);
     }),
 );
+
+const cacheCmd = program.command('cache').description("DEA's content cache: static files, stage runs and reference captures kept between runs");
+cacheCmd
+  .command('info', { isDefault: true })
+  .description('where the cache is and how big')
+  .option('--cache-dir <dir>', 'the cache folder (default <home>/cache)')
+  .option('--home <dir>', 'DEA home (default ./.dea, or $DEA_HOME)')
+  .action((flags: { cacheDir?: string; home?: string }) =>
+    run(async () => {
+      if (flags.home) process.env.DEA_HOME = flags.home;
+      const c = new ContentCache({ dir: flags.cacheDir });
+      const p = await c.prune();
+      process.stdout.write(
+        `${c.dir}: ${p.entries} entries, ${fmtMb(p.bytes)} of ${fmtMb(c.maxBytes)}${p.removed ? ` (${p.removed} old entries removed)` : ''}\n`,
+      );
+    }),
+  );
+cacheCmd
+  .command('clear')
+  .description('delete the cache')
+  .option('--cache-dir <dir>', 'the cache folder (default <home>/cache)')
+  .option('--home <dir>', 'DEA home (default ./.dea, or $DEA_HOME)')
+  .action((flags: { cacheDir?: string; home?: string }) =>
+    run(async () => {
+      if (flags.home) process.env.DEA_HOME = flags.home;
+      const c = new ContentCache({ dir: flags.cacheDir });
+      await c.clear();
+      process.stdout.write(`cleared ${c.dir}\n`);
+    }),
+  );
 
 const library = program
   .command('library')

@@ -2,13 +2,16 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import type { Browser } from 'playwright';
 import { decodeAssets } from '../assets/index.ts';
-import { launchBrowser } from '../browser/open.ts';
+import { launchBrowser, releaseBrowser, withSharedBrowser } from '../browser/open.ts';
+import { type CacheStats, ContentCache, cacheKey, currentCache, fmtMb, withCache } from '../cache.ts';
 import { type Driver, driverText, type TraceDoc, traceWebGL } from '../debug/trace.ts';
 import { type DesignDoc, decodeDesign } from '../design/index.ts';
 import { newRunId, RunWriter, resolveRun, runsDir } from '../evidence/run.ts';
 import { type Gap, renderGaps } from '../gaps.ts';
 import { decodeMotion, type GsapNode, gsapModule, type MotionDoc } from '../motion/index.ts';
+import { pool } from '../pool.ts';
 import { animateEntries, buildGraph, type CaptureDoc, compactCapture, placeholderTextures, renderGraphMd } from '../replay/graph.ts';
 import { REPLAY_PLAYER } from '../replay/player.ts';
 import { type RebuildStats, rebuildMd, rebuildPipeline } from '../replay/rebuild.ts';
@@ -51,6 +54,21 @@ import { type CanvasScore, canvasLine, compareCanvas } from './score.ts';
 
 export interface ExtractOptions extends InspectOptions {
   to?: Target;
+  /**
+   * rough and fast: one recorded frame, a reference watch that stops when the page settles (20 s cap), no motion
+   * decode, no trace, no parameter sweep, no research, no build check. Labelled QUICK in every report.
+   */
+  quick?: boolean;
+  /** do not read or write DEA's content cache (static files, stage runs, the reference capture) */
+  noCache?: boolean;
+  /** where the cache lives (default <DEA_HOME>/cache) */
+  cacheDir?: string;
+  /** the cache's size cap in MB (default 1024); the least recently used entries go first */
+  cacheMaxMb?: number;
+  /** how many decoders run side by side (default 3; 1 runs them one after another) */
+  concurrency?: number;
+  /** run the decoders while the reference is captured (faster with a GPU; without one a heavy intro may not finish) */
+  overlap?: boolean;
   /** a CSS selector: keep only motion whose targets or triggers mention it */
   section?: string;
   /** reference textures by path but write neutral placeholders of the same size instead of the site's files */
@@ -145,6 +163,10 @@ export interface ExtractResult {
   summary: string;
   /** wall time per stage and peak memory (also written to timings.json in the run) */
   timings?: TimingsDoc;
+  /** what the content cache served and kept in this run; absent with --no-cache */
+  cache?: CacheStats & { dir: string; sizeBytes: number | null; capBytes: number };
+  /** true in quick mode: a rough result */
+  quick?: boolean;
 }
 
 async function readJson<T>(p: string): Promise<T | null> {
@@ -153,6 +175,86 @@ async function readJson<T>(p: string): Promise<T | null> {
   } catch {
     return null;
   }
+}
+
+/** bump when a decoder's output changes shape, so older cached runs are not reused */
+const STAGE_CACHE_VERSION = 1;
+const CAPTURE_CACHE_VERSION = 2;
+
+type RefShot = Awaited<ReturnType<typeof referenceShot>>;
+
+/** The reference screenshot (with the recorded frames behind it): your own image, the cache, or a fresh watch. */
+async function referenceFor(
+  browser: Browser,
+  url: string,
+  vp: { width: number; height: number },
+  opts: ExtractOptions,
+  say: (s: string) => void,
+): Promise<RefShot> {
+  if (opts.reference)
+    return {
+      png: `data:image/${/\.png$/i.test(opts.reference) ? 'png' : 'jpeg'};base64,${(await readFile(opts.reference)).toString('base64')}`,
+      atMs: 0,
+      loader: false,
+      layout: null,
+    };
+  const quick = Boolean(opts.quick);
+  // no --reference-ms: watch until the page settles (45 s cap, 20 s in quick mode); a given --reference-ms watches that long
+  const smart = opts.referenceMs == null;
+  const ms = opts.referenceMs ?? (quick ? 20_000 : 45_000);
+  const frames = quick ? 1 : 2;
+  const record = !opts.noReplay;
+  const cache = currentCache();
+  const key = cacheKey('capture', CAPTURE_CACHE_VERSION, url, vp, ms, smart, opts.section ?? null, record, frames, opts.browser ?? 'auto');
+  const d = cache ? await cache.get('capture', key) : null;
+  if (cache && d) {
+    try {
+      const m = JSON.parse(await readFile(join(d, 'meta.json'), 'utf8')) as { atMs: number; loader: boolean; made: string; recordingError?: string };
+      const png = `data:image/png;base64,${(await readFile(join(d, 'ref.png'))).toString('base64')}`;
+      const layout = JSON.parse(await readFile(join(d, 'layout.json'), 'utf8'));
+      const recording = existsSync(join(d, 'capture.bin'))
+        ? { doc: JSON.parse(await readFile(join(d, 'capture.json'), 'utf8')) as CaptureDoc, bin: await readFile(join(d, 'capture.bin')) }
+        : null;
+      say(`reusing the reference screenshot and the recorded frames from ${m.made} (cache; --no-cache takes them again)`);
+      currentTimings()?.note(`from cache (made ${m.made})`);
+      cache.stats.reused.push({ what: 'reference + capture', at: m.made });
+      return {
+        png,
+        atMs: m.atMs,
+        loader: m.loader,
+        layout,
+        ...(record ? { recording, ...(m.recordingError ? { recordingError: m.recordingError } : {}) } : {}),
+      };
+    } catch {
+      /* a damaged entry: take it again */
+    }
+  }
+  say(
+    smart
+      ? `taking the reference screenshot: watching until the page settles (up to ${Math.round(ms / 1000)} s), the frame with the most detail`
+      : 'taking the reference screenshot (after the intro, the frame with the most detail)',
+  );
+  const r = await referenceShot(browser, url, vp, ms, opts.section ?? null, record, smart, frames);
+  // a capture whose recording failed is not kept: the next run tries again
+  if (cache && r.png && (!record || r.recording)) {
+    const files: Record<string, string | Uint8Array> = {
+      'ref.png': Buffer.from(r.png.slice(r.png.indexOf(',') + 1), 'base64'),
+      'layout.json': JSON.stringify(r.layout ?? null),
+    };
+    if (r.recording) {
+      files['capture.json'] = JSON.stringify(r.recording.doc);
+      files['capture.bin'] = r.recording.bin;
+    }
+    await cache
+      .put(
+        'capture',
+        key,
+        { url, atMs: r.atMs, loader: r.loader, made: new Date().toISOString(), ...(r.recordingError ? { recordingError: r.recordingError } : {}) },
+        files,
+      )
+      .catch(() => {});
+  }
+  return r;
 }
 
 const programsExist = (assetsDir: string) => existsSync(join(assetsDir, 'assets', 'programs.json'));
@@ -215,8 +317,20 @@ const easesOf = (nodes: GsapNode[]): string[] => {
  */
 export async function extract(url: string, opts: ExtractOptions = {}): Promise<ExtractResult> {
   const outer = currentTimings();
-  const tm = outer ?? new Timings('extract', url).start();
-  const r = await withTimings(tm, () => extractRun(url, opts));
+  const tm = outer ?? new Timings(opts.quick ? 'extract --quick' : 'extract', url).start();
+  const cache = opts.noCache ? null : (currentCache() ?? new ContentCache({ dir: opts.cacheDir, maxMb: opts.cacheMaxMb }));
+  const r = await withTimings(tm, () =>
+    withCache(cache, () =>
+      withSharedBrowser(opts.browser ?? 'auto', opts.headless ?? true, () => extractRun(url, opts), { max: Math.max(1, opts.concurrency ?? 3) + 1 }),
+    ),
+  );
+  if (cache) {
+    const kept = await cache.prune().catch(() => null);
+    r.cache = { ...cache.stats, dir: cache.dir, sizeBytes: kept?.bytes ?? null, capBytes: cache.maxBytes };
+    tm.notes.push(
+      `cache: ${cache.stats.hits} files served (${fmtMb(cache.stats.bytesServed)}), ${cache.stats.misses} fetched, ${cache.stats.reused.length} stage(s) reused; ${kept ? fmtMb(kept.bytes) : '?'} of ${fmtMb(cache.maxBytes)} in ${cache.dir}`,
+    );
+  } else tm.notes.push('cache: off (--no-cache)');
   if (!outer) {
     const doc = tm.stop();
     r.timings = doc;
@@ -239,28 +353,68 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   const say = (s: string) => opts.onProgress?.(s);
   const child = { browser: opts.browser, headless: opts.headless, runsRoot: opts.runsRoot, onProgress: opts.onProgress };
 
-  // 1. the three decoders (or earlier runs)
+  // 0. the reference watch (the longest wait) starts at once, beside the decoders
+  const quick = Boolean(opts.quick);
+  const cache = currentCache();
+  const vp0 = { width: 1440, height: 900 };
+  let browser: Browser | null = null;
+  if (!opts.noDiff || opts.ownAssets) browser = (await timed('browser launch', () => launchBrowser(opts.browser ?? 'auto', true))).browser;
+  const refP = !opts.noDiff && browser ? timed('reference screenshot + capture', () => referenceFor(browser as Browser, url, vp0, opts, say)) : null;
+  refP?.catch(() => {}); // awaited below; a failure is read there
+  // the reference capture runs on its own unless --overlap: a heavy site's intro on a machine without a GPU slows to a
+  // crawl when other pages render beside it, and the reference would catch the loading screen
+  if (refP && !opts.overlap) await refP.catch(() => {});
+
+  // 1. the decoders (or earlier runs, or the cache), side by side
   const dirOf = async (id?: string) => (id ? resolveRun(id) : null);
-  let designDir = await dirOf(opts.from?.design);
-  if (!designDir) {
-    say('decoding the design (tokens, fonts, first screen)');
-    designDir = (await timed('design', () => decodeDesign(url, child))).dir;
-  }
-  let motionDir = await dirOf(opts.from?.motion);
-  if (!motionDir) {
-    say('decoding the motion (GSAP, ScrollTrigger, CSS, recordings)');
-    motionDir = (await timed('motion', () => decodeMotion(url, child))).dir;
-  }
-  let assetsDir = await dirOf(opts.from?.assets);
-  if (!assetsDir) {
-    say('collecting the assets (textures, shader programs, models)');
-    assetsDir = (await timed('assets', () => decodeAssets(url, child))).dir;
-  }
-  let traceDir = await dirOf(opts.from?.trace);
-  if (!traceDir && !opts.noTrace && programsExist(assetsDir)) {
-    say('tracing the live WebGL calls (uniform values and what drives them)');
-    traceDir = (await timed('trace', () => traceWebGL(url, { ...child, ms: 10_000 }).catch(() => null)))?.dir ?? null;
-  }
+  const stage = async (name: string, fromId: string | undefined, run: () => Promise<string | null>): Promise<string | null> => {
+    const given = await dirOf(fromId);
+    if (given) return given;
+    const key = cacheKey('stage', STAGE_CACHE_VERSION, name, url, opts.browser ?? 'auto', opts.headless ?? true);
+    const hit = cache ? await cache.meta<{ dir: string; made: string }>('stage', key) : null;
+    if (hit && existsSync(hit.dir)) {
+      currentTimings()?.record(name, currentTimings()?.now() ?? 0, 0, `from cache (made ${hit.made})`);
+      cache?.stats.reused.push({ what: name, at: hit.made });
+      say(`${name}: reusing the run from ${hit.made} (cache)`);
+      return hit.dir;
+    }
+    const dir = await timed(name, run);
+    if (dir && cache) await cache.put('stage', key, { dir, made: new Date().toISOString() }).catch(() => {});
+    return dir;
+  };
+  const limit = pool(Math.max(1, opts.concurrency ?? 3));
+  const [designDir0, motionDir, [assetsDir0, traceDir]] = await Promise.all([
+    limit(() =>
+      stage('design', opts.from?.design, async () => {
+        say('decoding the design (tokens, fonts, first screen)');
+        return (await decodeDesign(url, quick ? { ...child, scrollSteps: 2, scrollBudgetMs: 20_000 } : child)).dir;
+      }),
+    ),
+    quick && !opts.from?.motion
+      ? Promise.resolve(null)
+      : limit(() =>
+          stage('motion', opts.from?.motion, async () => {
+            say('decoding the motion (GSAP, ScrollTrigger, CSS, recordings)');
+            return (await decodeMotion(url, child)).dir;
+          }),
+        ),
+    limit(async () => {
+      const a = await stage('assets', opts.from?.assets, async () => {
+        say('collecting the assets (textures, shader programs, models)');
+        return (await decodeAssets(url, quick ? { ...child, scrollSteps: 6 } : child)).dir;
+      });
+      if ((opts.noTrace || quick) && !opts.from?.trace) return [a, null] as const;
+      if (!opts.from?.trace && !(a && programsExist(a))) return [a, null] as const;
+      const t = await stage('trace', opts.from?.trace, async () => {
+        say('tracing the live WebGL calls (uniform values and what drives them)');
+        return (await traceWebGL(url, { ...child, ms: 10_000 }).catch(() => null))?.dir ?? null;
+      });
+      return [a, t] as const;
+    }),
+  ]);
+  if (!designDir0 || !assetsDir0) throw new Error('the design or assets decode did not finish');
+  const designDir = designDir0;
+  const assetsDir = assetsDir0;
   const trace = traceDir ? await readJson<TraceDoc>(join(traceDir, 'trace.json')) : null;
   const observed = observedFrom(trace);
   const design = await readJson<DesignDoc & { tokens: Record<string, Record<string, { $type: string; $value: unknown }>> }>(join(designDir, 'design.json'));
@@ -268,7 +422,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     page?: { headings?: Array<{ level: number; text: string }>; title?: string };
     meta?: { title?: string; finalUrl?: string };
   }>(join(designDir, 'run.json'));
-  const motion = await readJson<MotionDoc>(join(motionDir, 'motion.json'));
+  const motion = motionDir ? await readJson<MotionDoc>(join(motionDir, 'motion.json')) : null;
   const programs = (await readJson<ProgramSource[]>(join(assetsDir, 'assets', 'programs.json'))) ?? [];
 
   // 2. the extract run
@@ -400,8 +554,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   let techniques: Technique[] = detectTechniques(techText);
 
   // 3. textures: the site's files, or placeholders of the same size
-  const browserNeeded = Boolean(opts.ownAssets && texNames.size) || !opts.noDiff;
-  const { browser } = browserNeeded ? await timed('browser launch', () => launchBrowser(opts.browser ?? 'auto', true)) : { browser: null };
+
   let diff: ExtractResult['diff'] = null;
   let replay: ReplayInfo | null = null;
   let replayError: string | null = null;
@@ -442,16 +595,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     if (!opts.noDiff && browser) {
       const vp = design?.layout?.viewport ? { width: design.layout.viewport.width, height: design.layout.viewport.height } : { width: 1440, height: 900 };
       say('taking the reference screenshot (after the intro, the frame with the most detail)');
-      const ref = opts.reference
-        ? {
-            png: `data:image/${/\.png$/i.test(opts.reference) ? 'png' : 'jpeg'};base64,${(await readFile(opts.reference)).toString('base64')}`,
-            atMs: 0,
-            loader: false,
-            layout: null,
-          }
-        : await timed('reference screenshot + capture', () =>
-            referenceShot(browser, url, vp, opts.referenceMs ?? 45_000, opts.section ?? null, !opts.noReplay),
-          );
+      const ref = await (refP as Promise<RefShot>);
       const original = ref.png;
       await put('preview/original.png', Buffer.from(original.slice(original.indexOf(',') + 1), 'base64'));
       // the site's own frames, recorded right before that screenshot: the render graph, the replay, the 3D scene
@@ -690,18 +834,29 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           ['opacity', [0.6, 0.3]],
           ['text', palette],
         ];
-        for (const [k, vals] of candidates.filter(([k]) => !replayKept || (k !== 'program' && k !== 'opacity')))
-          for (const v of vals) {
+        let skipped = 0;
+        for (const [k, vals] of quick ? [] : candidates.filter(([k]) => !replayKept || (k !== 'program' && k !== 'opacity'))) {
+          // a knob whose first two values change nothing on screen (the background under an opaque full-screen canvas)
+          // is not swept further
+          let unseen = 0;
+          for (const [vi, v] of vals.entries()) {
             if (params[k] === v) continue;
             const s = await render({ ...params, [k]: v });
+            if (Math.abs(s - best) < 0.0003) unseen++;
             if (s > best + 0.002) {
               best = s;
               params = { ...params, [k]: v };
             }
+            if (unseen >= 2 && unseen === vi + 1 - (vals.slice(0, vi + 1).includes(params[k] as never) ? 1 : 0)) {
+              skipped += vals.length - vi - 1;
+              break;
+            }
           }
+        }
+        if (skipped) currentTimings()?.note(`sweep: ${skipped} renders skipped (knobs that changed nothing on screen)`);
         // a technique stand-in where the site runs a system DEA does not rebuild (a GPGPU particle simulation): try it,
         // keep it only when the diff improves
-        if (!replayKept && techniques.some((t) => t.id === 'gpgpu' || t.id === 'points')) {
+        if (!quick && !replayKept && techniques.some((t) => t.id === 'gpgpu' || t.id === 'points')) {
           await put('standins/particles.js', particlesStandin());
           const light = [...palette].sort((a, b) => lum(b) - lum(a))[0] ?? '#ffffff';
           let tp: Params = { ...params, standin: 'particles', spread: 0.8, standinX: 0, standinY: 0, standinColor: light };
@@ -742,7 +897,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           render,
           knobs,
           providers,
-          rounds: opts.rounds ?? 3,
+          rounds: quick ? 0 : (opts.rounds ?? 3),
           target: 0.92,
           onStep: say,
           relevant: (f) => {
@@ -815,7 +970,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       }
     }
   } finally {
-    await browser?.close();
+    await releaseBrowser(browser);
   }
 
   // with --own-assets the capture replay was only a yardstick: its recorded bytes leave the kit
@@ -827,14 +982,14 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
 
   // 5. techniques behind it, researched in free sources (cited; values and pointers only, no code copied)
   const providersT = opts.providers ?? providersFromEnv();
-  if (techniques.length && providersT.length && !opts.noResearch) {
+  if (techniques.length && providersT.length && !opts.noResearch && !quick) {
     say(`researching ${techniques.length} technique(s) seen in the pipeline`);
     techniques = await timed('technique research', () => researchTechniques(techniques, providersT, { onStep: say }));
   }
 
   // 6. does the project build?
   let build: BuildCheck | null = null;
-  if (opts.verifyBuild) {
+  if (opts.verifyBuild && !quick) {
     if (target === 'framer') build = { ok: true, skipped: 'Framer components build inside Framer', ms: 0, log: '' };
     else {
       say('checking the project builds (npm install, npm run build)');
@@ -870,6 +1025,8 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     assets: assetsDir,
     trace: traceDir,
     ownAssets: Boolean(opts.ownAssets),
+    quick,
+    reused: cache?.stats.reused ?? [],
     section: opts.section,
     hasMotion,
     techniques,
@@ -936,6 +1093,10 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   if (opts.library) await libraryAdd(out, { name: opts.library, tags: opts.tags });
   const driven = mods.flatMap((m) => m.uniforms.filter((u) => u.driverFrom === 'trace').map((u) => `${u.name} ← ${driverText(u.driver as Driver)}`));
   const summary = [
+    ...(quick ? ['QUICK MODE (rough): 1 frame, no motion/trace/sweep/research/build check; run without --quick for the full result'] : []),
+    ...(cache?.stats.reused.length
+      ? [`reused from the cache: ${cache.stats.reused.map((r) => `${r.what} (${r.at})`).join(', ')} · --no-cache observes everything again`]
+      : []),
     `Extracted ${url} for ${target}: ${files.length} files in ${out}`,
     `tokens: tokens.css, tailwind.preset.js, tokens.json · motion: ${mdoc?.gsap?.tree.length ?? 0} GSAP timelines/tweens, ${mdoc?.gsap?.scrollTriggers.length ?? 0} ScrollTriggers, ${motion?.css?.keyframes.length ?? 0} keyframes · shaders: ${mods.map((m) => m.name).join(', ') || 'none'}`,
     ...(driven.length ? [`uniform drivers from the live trace: ${driven.slice(0, 6).join('; ')}`] : []),
@@ -968,7 +1129,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   ].join('\n');
   w.emit({ type: 'run.finished', runId: w.id, dir: w.dir, summary, at: new Date().toISOString() });
   doneWrite();
-  return { runId: w.id, dir: w.dir, out, target, files, shaders: mods, diff, replay, build, gaps, techniques, extractMd: md, summary };
+  return { runId: w.id, dir: w.dir, out, target, files, shaders: mods, diff, replay, build, gaps, techniques, extractMd: md, summary, quick };
 }
 
 const pct = (x: number) => `${Math.round(x * 1000) / 10}%`;
@@ -1150,9 +1311,11 @@ function renderExtractMd(o: {
   diff: ExtractResult['diff'];
   citations: Finding[];
   design: string;
-  motion: string;
+  motion: string | null;
   assets: string;
   ownAssets: boolean;
+  quick?: boolean;
+  reused?: Array<{ what: string; at: string }>;
   section?: string;
   hasMotion: boolean;
   trace?: string | null;
@@ -1167,6 +1330,12 @@ function renderExtractMd(o: {
   const L = [
     `# Extracted from ${o.url} (${o.target})`,
     '',
+    ...(o.quick
+      ? [
+          '> **QUICK MODE: a rough result.** One recorded frame, no motion decode, no live trace, no parameter sweep, no research, no build check. Run without `--quick` for the full extract and its scores.',
+          '',
+        ]
+      : []),
     'Made by DEA from what the site actually rendered. ✔ Verified = read from the live page. ≈ Inferred = DEA filled a gap.',
     '',
     `> **Provenance.** Source: ${o.url} · extracted ${(o.extractedAt ?? new Date().toISOString()).slice(0, 10)} with DEA.`,
@@ -1317,7 +1486,8 @@ function renderExtractMd(o: {
     '## Where it came from',
     '',
     `- design run: ${basename(o.design)}`,
-    `- motion run: ${basename(o.motion)}`,
+    `- motion run: ${o.motion ? basename(o.motion) : 'skipped (quick mode)'}`,
+    ...(o.reused?.length ? [`- reused from the cache (not observed again in this run): ${o.reused.map((r) => `${r.what} (${r.at})`).join(', ')}`] : []),
     `- assets run: ${basename(o.assets)}`,
     ...(o.trace ? [`- live trace run: ${basename(o.trace)}`] : []),
     '',

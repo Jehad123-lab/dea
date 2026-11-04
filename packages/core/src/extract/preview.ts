@@ -3,7 +3,8 @@ import { createServer, type Server } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import type { Browser, Page } from 'playwright';
 import { NAME_SHIM } from '../browser/init.ts';
-import { installObservers } from '../browser/open.ts';
+import { installObservers, LOADER_VISIBLE } from '../browser/open.ts';
+import { currentCache } from '../cache.ts';
 import { pullRecording, REPLAY_CAPTURE_SCRIPT, type Recording, recordFrames, releaseFrames } from '../replay/capture.ts';
 import { currentTimings, timed } from '../timings.ts';
 import type { ShaderModule } from './generate.ts';
@@ -430,6 +431,7 @@ export async function readLayout(
   // without the GPU mask a site on a machine without a GPU often takes a fast, static path (and sometimes another layout);
   // with it, the site runs its WebGL path as on a real GPU, slowly. Extract reads both and keeps the one that matches.
   const context = await browser.newContext({ viewport });
+  await currentCache()?.attach(context);
   if (gpuMask) await installObservers(context, true);
   const page = await context.newPage();
   type L = {
@@ -461,13 +463,7 @@ export async function readLayout(
   }
 }
 
-/** Is a loading screen covering the page? A visible progressbar or busy element, or a big element named like a loader. */
-export const LOADER_VISIBLE = `(() => {
-  const big = (el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05 && r.width * r.height > innerWidth * innerHeight * 0.4; };
-  for (const el of document.querySelectorAll('[role=progressbar],[aria-busy=true]')) { const cs = getComputedStyle(el); if (cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05 && el.getBoundingClientRect().width > 0) { const v = el.getAttribute('aria-valuenow'); if (v == null || +v < (+el.getAttribute('aria-valuemax') || 100)) return true; } }
-  for (const el of document.querySelectorAll('[class*=loader i],[id*=loader i],[class*=preload i],[id*=preload i],[class*=loading i]')) if (big(el)) return true;
-  return false;
-})()`;
+export { LOADER_VISIBLE } from '../browser/open.ts';
 
 export async function referenceShot(
   browser: Browser,
@@ -476,6 +472,10 @@ export async function referenceShot(
   ms = 20_000,
   section: string | null = null,
   record = false,
+  /** stop watching once the page has settled (no loader, the most detailed frame not beaten for 10 s); `ms` is then a cap */
+  smart = false,
+  /** recorded frames (2 lets the replay alternate and read clocks; 1 is the quick mode) */
+  frames = 2,
 ): Promise<{
   png: string;
   atMs: number;
@@ -492,6 +492,7 @@ export async function referenceShot(
 }> {
   // the same observers and GPU answer DEA's decoders use, so the site shows its real 3D on a GPU-less machine
   const context = await browser.newContext({ viewport });
+  await currentCache()?.attach(context);
   await installObservers(context, true);
   if (record) await context.addInitScript({ content: REPLAY_CAPTURE_SCRIPT });
   const page = await context.newPage();
@@ -504,7 +505,12 @@ export async function referenceShot(
     const hardCap = Math.min(Math.max(ms * 2.5, ms), 180_000);
     let loader = false;
     const watchStart = currentTimings()?.now() ?? 0;
+    let quiet = 0;
     while (Date.now() - t0 < ms || (loader && Date.now() - t0 < hardCap)) {
+      if (smart && !loader && best.score > 0 && quiet >= 4 && Date.now() - t0 >= 8000) {
+        currentTimings()?.note(`settled after ${Math.round((Date.now() - t0) / 1000)} s (cap ${Math.round(ms / 1000)} s)`);
+        break;
+      }
       await page.waitForTimeout(2500);
       if (section) await page.evaluate(`document.querySelector(${JSON.stringify(section)})?.scrollIntoView({ block: 'start' })`).catch(() => {});
       const buf = await page.screenshot({ type: 'png' }).catch(() => null);
@@ -536,6 +542,7 @@ export async function referenceShot(
       loader = (await page.evaluate(LOADER_VISIBLE).catch(() => false)) as boolean;
       // frames behind a loader only count when nothing better comes
       const s2 = loader ? score * 0.25 : score;
+      quiet = s2 > best.score * 1.02 || loader ? 0 : quiet + 1;
       if (s2 > best.score) {
         best = { png, score: s2, atMs: Date.now() - t0, loader };
         layout = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
@@ -546,7 +553,7 @@ export async function referenceShot(
       // record two frames, hold the page on the last one, and use that moment as the reference: the replay then has the
       // exact frame to match
       if (section) await page.evaluate(`document.querySelector(${JSON.stringify(section)})?.scrollIntoView({ block: 'start' })`).catch(() => {});
-      const r = await timed('record WebGL frames', () => recordFrames(page, { frames: 2 }));
+      const r = await timed('record WebGL frames', () => recordFrames(page, { frames }));
       if (r.ok) {
         await page.waitForTimeout(400);
         const buf = await page.screenshot({ type: 'png' }).catch(() => null);

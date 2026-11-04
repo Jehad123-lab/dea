@@ -54,6 +54,13 @@ The first release: decode a website with evidence, use what comes out, and let A
 - `--timings` on every browser command (`extract`, `design`, `motion`, `assets`, `trace`, `inspect`, `score`): the wall
   time of each stage, nested, and the peak memory of DEA and of DEA plus its browsers. Always saved as `timings.json` in
   the run.
+- Faster extracts: a per-URL content cache (`--no-cache`, `--cache-dir`, `--cache-max-mb`, `dea cache info|clear`)
+  for files, finished decoder runs and the reference capture; one pool of browsers reused across stages and `--batch`;
+  design, motion and assets → trace side by side after the reference capture (`--concurrency`, `--overlap`); waits that
+  end when the page is drawing and no loader covers it; a sweep that skips knobs which change nothing on screen; and
+  `--quick`, a clearly labelled rough mode. lusion.co 676 s → 327 s cold, 61 s warm; jehaduddin.vercel.app 1046 s →
+  690 s cold, 142 s warm, on a 4-core machine without a GPU, full-mode scores within 0.3 points of before.
+
 ### Act and connect
 
 - Hands (`dea session`, MCP `browse` / `interact` / `submit`): a browser that stays open, with a policy file; submits

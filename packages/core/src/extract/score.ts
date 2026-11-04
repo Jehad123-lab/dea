@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 import type { Page } from 'playwright';
 import { NAME_SHIM } from '../browser/init.ts';
-import { type BrowserChoice, launchBrowser } from '../browser/open.ts';
+import { type BrowserChoice, launchBrowser, releaseBrowser } from '../browser/open.ts';
 import { compareImages, type Similarity } from './preview.ts';
 
 /**
@@ -335,6 +335,6 @@ export async function scoreFiles(
     const canvas = await compareCanvas(page, a, b, canvasBox, opts.layout?.boxes ?? [], vp);
     return { page: sim, canvas };
   } finally {
-    await browser.close();
+    await releaseBrowser(browser);
   }
 }
