@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
   type BrowserChoice,
@@ -25,12 +25,15 @@ import {
   type RunDoc,
   readRun,
   renderReport,
+  renderTimings,
   resolveRun,
   runInvestigation,
   type StepKind,
   scoreFiles,
   stackSite,
+  Timings,
   traceWebGL,
+  withTimings,
 } from '@dea/core';
 import { Command, Option } from 'commander';
 import { launchers, registerHub } from './hub.ts';
@@ -46,6 +49,7 @@ interface CommonFlags {
   home?: string;
   gpuMask: boolean;
   viewport: string;
+  timings?: boolean;
 }
 
 function common(cmd: Command): Command {
@@ -56,7 +60,8 @@ function common(cmd: Command): Command {
     .option('--timeout <seconds>', 'page load timeout', '45')
     .option('--home <dir>', 'where runs are saved (default ./.dea, or $DEA_HOME)')
     .option('--viewport <WxH>', 'browser window size', '1440x900')
-    .option('--no-gpu-mask', 'do not present a GPU name to the page when WebGL runs in software');
+    .option('--no-gpu-mask', 'do not present a GPU name to the page when WebGL runs in software')
+    .option('--timings', 'print the wall time of each stage and the peak memory (always saved as timings.json in the run)');
 }
 
 function options(flags: CommonFlags): InspectOptions {
@@ -82,9 +87,20 @@ function where(r: InspectResult): string {
   return rel.startsWith('..') ? r.dir : rel;
 }
 
+/** set before each command runs: the timings that command reports to (extract keeps its own, one per URL) */
+let pendingTimings: { t: Timings; print: boolean } | null = null;
+
 async function run(fn: () => Promise<void>): Promise<void> {
+  const pt = pendingTimings;
+  pendingTimings = null;
   try {
-    await fn();
+    if (!pt) await fn();
+    else {
+      await withTimings(pt.t, fn);
+      const doc = pt.t.stop();
+      if (pt.t.dir) await writeFile(join(pt.t.dir, 'timings.json'), `${JSON.stringify(doc, null, 2)}\n`).catch(() => {});
+      if (pt.print) process.stderr.write(`\n${renderTimings(doc)}\n`);
+    }
   } catch (e) {
     process.stderr.write(`dea: ${(e as Error).message}\n`);
     process.exitCode = 1;
@@ -94,6 +110,15 @@ async function run(fn: () => Promise<void>): Promise<void> {
 const program = new Command('dea')
   .description('DEA decodes any website and proves it: stack, network, page tree and design, every fact labelled Verified, Inferred or Unknown.')
   .version(VERSION);
+
+// every browser command measures its stages (timings.json in the run); --timings also prints them
+const MEASURED = new Set(['inspect', 'stack', 'design', 'motion', 'assets', 'trace', 'code', 'score']);
+program.hook('preAction', (_cmd, action) => {
+  const name = action.name();
+  if (!MEASURED.has(name)) return;
+  const arg = action.args.find((a) => /^(https?:\/\/|[\w-]+\.[\w.-]+)/i.test(a)) ?? null;
+  pendingTimings = { t: new Timings(name, arg).start(), print: Boolean(action.opts().timings) };
+});
 
 common(program.command('inspect').description('open a site in a real browser and save the evidence').argument('<url>', 'site to inspect')).action(
   (url: string, flags: CommonFlags) =>
@@ -304,9 +329,11 @@ common(
               out: r.out,
               files: r.files,
               diff: r.diff && { start: r.diff.start, final: r.diff.final, canvas: r.diff.canvas?.final?.score ?? null },
+              ...(flags.timings && r.timings ? { timings: r.timings } : {}),
             }),
           );
         else process.stdout.write(`\n${r.summary}\nReport: ${r.dir}/extract.md\n`);
+        if (flags.timings && r.timings) process.stderr.write(`\n${renderTimings(r.timings)}\n`);
       }
       if (flags.json) process.stdout.write(`[${rows.join(',')}]\n`);
     }),

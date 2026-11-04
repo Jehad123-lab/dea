@@ -5,6 +5,7 @@ import type { Browser, Page } from 'playwright';
 import { NAME_SHIM } from '../browser/init.ts';
 import { installObservers } from '../browser/open.ts';
 import { pullRecording, REPLAY_CAPTURE_SCRIPT, type Recording, recordFrames, releaseFrames } from '../replay/capture.ts';
+import { currentTimings, timed } from '../timings.ts';
 import type { ShaderModule } from './generate.ts';
 import type { Params } from './research.ts';
 
@@ -495,13 +496,14 @@ export async function referenceShot(
   if (record) await context.addInitScript({ content: REPLAY_CAPTURE_SCRIPT });
   const page = await context.newPage();
   try {
-    await page.goto(url, { waitUntil: 'load', timeout: 60_000 }).catch(() => {});
+    await timed('page load', () => page.goto(url, { waitUntil: 'load', timeout: 60_000 }).catch(() => {}));
     let best = { png: '', score: -1, atMs: 0, loader: false };
     let layout: unknown = null;
     const t0 = Date.now();
     // a loader still covering the page at the end buys more time (up to 2.5× or 3 minutes): software WebGL is slow
     const hardCap = Math.min(Math.max(ms * 2.5, ms), 180_000);
     let loader = false;
+    const watchStart = currentTimings()?.now() ?? 0;
     while (Date.now() - t0 < ms || (loader && Date.now() - t0 < hardCap)) {
       await page.waitForTimeout(2500);
       if (section) await page.evaluate(`document.querySelector(${JSON.stringify(section)})?.scrollIntoView({ block: 'start' })`).catch(() => {});
@@ -539,16 +541,17 @@ export async function referenceShot(
         layout = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
       }
     }
+    currentTimings()?.record('watch for the reference frame', watchStart, (currentTimings()?.now() ?? 0) - watchStart);
     if (record) {
       // record two frames, hold the page on the last one, and use that moment as the reference: the replay then has the
       // exact frame to match
       if (section) await page.evaluate(`document.querySelector(${JSON.stringify(section)})?.scrollIntoView({ block: 'start' })`).catch(() => {});
-      const r = await recordFrames(page, { frames: 2 });
+      const r = await timed('record WebGL frames', () => recordFrames(page, { frames: 2 }));
       if (r.ok) {
         await page.waitForTimeout(400);
         const buf = await page.screenshot({ type: 'png' }).catch(() => null);
         const nowLoader = (await page.evaluate(LOADER_VISIBLE).catch(() => false)) as boolean;
-        const recording = await pullRecording(page).catch(() => null);
+        const recording = await timed('read the recording out of the page', () => pullRecording(page).catch(() => null));
         await releaseFrames(page);
         if (buf && recording) {
           const l = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);

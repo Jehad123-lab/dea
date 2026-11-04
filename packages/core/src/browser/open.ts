@@ -1,4 +1,5 @@
 import { type Browser, type BrowserContext, type CDPSession, chromium, type Page, type Response } from 'playwright';
+import { timed } from '../timings.ts';
 import type { BrowserInfo } from '../types.ts';
 import { INIT_SCRIPT, NAME_SHIM } from './init.ts';
 
@@ -85,7 +86,7 @@ export async function openSite(url: string, opts: OpenOptions = {}): Promise<Ses
   const target = normalizeUrl(url);
   const headless = opts.headless ?? true;
   const viewport = opts.viewport ?? { width: 1440, height: 900 };
-  const { browser, channel } = await launchBrowser(opts.browser ?? 'auto', headless);
+  const { browser, channel } = await timed('browser launch', () => launchBrowser(opts.browser ?? 'auto', headless));
   const warnings: string[] = [];
   const context = await browser.newContext({
     viewport,
@@ -101,7 +102,7 @@ export async function openSite(url: string, opts: OpenOptions = {}): Promise<Ses
 
   let response: Response | null = null;
   try {
-    response = await page.goto(target, { waitUntil: 'load', timeout: opts.timeoutMs ?? 45_000 });
+    response = await timed('page load', () => page.goto(target, { waitUntil: 'load', timeout: opts.timeoutMs ?? 45_000 }));
   } catch (e) {
     const msg = (e as Error).message.split('\n')[0];
     if (/Timeout/i.test(msg) && page.url() !== 'about:blank') {
@@ -111,10 +112,12 @@ export async function openSite(url: string, opts: OpenOptions = {}): Promise<Ses
       throw new Error(`Could not open ${target}: ${msg}`);
     }
   }
-  await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {
-    warnings.push('The network never went quiet (normal for sites that stream or poll); DEA waited 8 s and moved on.');
-  });
-  await page.waitForTimeout(opts.settleMs ?? 2_500);
+  await timed('network idle wait', () =>
+    page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {
+      warnings.push('The network never went quiet (normal for sites that stream or poll); DEA waited 8 s and moved on.');
+    }),
+  );
+  await timed('settle wait', () => page.waitForTimeout(opts.settleMs ?? 2_500));
 
   const info = browserInfo(browser, channel, headless);
   let closed = false;

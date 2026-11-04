@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { currentTimings } from '../timings.ts';
 import type { EventSink, RunMeta } from '../types.ts';
 import { redactText } from './secrets.ts';
 
@@ -61,6 +62,8 @@ export class RunWriter {
 
   async init(): Promise<this> {
     await mkdir(this.dir, { recursive: true });
+    const t = currentTimings();
+    if (t && !t.dir) t.dir = this.dir;
     await writeFile(join(this.dir, 'progress.md'), `# Progress for run ${this.id}\n\n`);
     return this;
   }

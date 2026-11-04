@@ -51,6 +51,9 @@ The first release: decode a website with evidence, use what comes out, and let A
   `--no-replay`; `--own-assets` keeps the site's recorded bytes out of the kit.
 - Headings keep the space where they break onto a new line; uniform "set by" names the line that assigns `.value`.
 
+- `--timings` on every browser command (`extract`, `design`, `motion`, `assets`, `trace`, `inspect`, `score`): the wall
+  time of each stage, nested, and the peak memory of DEA and of DEA plus its browsers. Always saved as `timings.json` in
+  the run.
 ### Act and connect
 
 - Hands (`dea session`, MCP `browse` / `interact` / `submit`): a browser that stays open, with a policy file; submits

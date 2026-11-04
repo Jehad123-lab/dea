@@ -335,6 +335,13 @@ follow the real clock. Pointer, scroll and window size are not wired yet: their 
 the canvas keeps the recorded size, so a mouse-driven fluid or a hover reacts to nothing. The trace already knows which
 uniforms follow the pointer, scroll and viewport (`dea trace`); mapping them to live input is the next step.
 
+**Where the time goes.** Every browser command (`extract`, `design`, `motion`, `assets`, `trace`, `inspect`, `score`)
+writes `timings.json` in its run: the wall time of each stage (browser launch, page load, network-idle and settle waits,
+each decoder, the reference watch, the WebGL capture, building the replay and the rebuild, rendering and scoring,
+research, the build check, writing the kit), stages that ran inside others nested under them, and the peak memory of DEA
+itself and of DEA plus the browsers it started (Linux reads the second from `/proc`; elsewhere it is left out).
+`--timings` also prints the table when the command ends.
+
 `--section <selector>` scrolls that part of the page into view for the reference, reads only its text, and keeps only
 the motion that touches it. `--reference shot.png` compares against your own screenshot (for example one taken on a
 machine with a GPU). `--library <name> --tag hero` saves the kit; `--batch urls.txt` extracts a list of sites.

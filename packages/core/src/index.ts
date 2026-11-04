@@ -179,4 +179,14 @@ export {
 export { collect, type InspectOptions, type InspectResult, inspectSite, type RunDoc, stackSite, summarize } from './see/inspect.ts';
 export { classify, fmtBytes, type NetworkSummary, summarize as summarizeHar } from './see/network.ts';
 export { detectStack, KNOWN_TECH, type StackHit, type StackSignals } from './see/stack.ts';
+export {
+  currentTimings,
+  renderTimings,
+  type StageTiming,
+  Timings,
+  type TimingsDoc,
+  timed,
+  treeRss,
+  withTimings,
+} from './timings.ts';
 export type { DeaEvent, EventSink, Evidence, Fact, Label, RunMeta } from './types.ts';

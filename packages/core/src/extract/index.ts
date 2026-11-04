@@ -15,6 +15,7 @@ import { type RebuildStats, rebuildMd, rebuildPipeline } from '../replay/rebuild
 import { REBUILD_RUNNER } from '../replay/runner.ts';
 import { recoverScene, sceneGlb, sceneMd, sceneModule } from '../replay/scene.ts';
 import type { InspectOptions } from '../see/inspect.ts';
+import { currentTimings, type StageTiming, Timings, type TimingsDoc, timed, withTimings } from '../timings.ts';
 import {
   type HeroLayout,
   heroHtml,
@@ -142,6 +143,8 @@ export interface ExtractResult {
   techniques: Technique[];
   extractMd: string;
   summary: string;
+  /** wall time per stage and peak memory (also written to timings.json in the run) */
+  timings?: TimingsDoc;
 }
 
 async function readJson<T>(p: string): Promise<T | null> {
@@ -211,6 +214,27 @@ const easesOf = (nodes: GsapNode[]): string[] => {
  * it with the original's first screen, and when it does not match, research and retry (up to 3 rounds).
  */
 export async function extract(url: string, opts: ExtractOptions = {}): Promise<ExtractResult> {
+  const outer = currentTimings();
+  const tm = outer ?? new Timings('extract', url).start();
+  const r = await withTimings(tm, () => extractRun(url, opts));
+  if (!outer) {
+    const doc = tm.stop();
+    r.timings = doc;
+    await writeFile(join(r.dir, 'timings.json'), `${JSON.stringify(doc, null, 2)}\n`).catch(() => {});
+  }
+  return r;
+}
+
+type Mark = (() => void) & { row?: StageTiming };
+/** time a block that does not fit in one call: returns the function that ends it (`under` nests it) */
+function mark(name: string, under?: Mark): Mark {
+  const t = currentTimings();
+  if (!t) return () => {};
+  const { row, end } = t.begin(name, under?.row);
+  return Object.assign(end, { row });
+}
+
+async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractResult> {
   const target = opts.to ?? 'react';
   const say = (s: string) => opts.onProgress?.(s);
   const child = { browser: opts.browser, headless: opts.headless, runsRoot: opts.runsRoot, onProgress: opts.onProgress };
@@ -220,22 +244,22 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
   let designDir = await dirOf(opts.from?.design);
   if (!designDir) {
     say('decoding the design (tokens, fonts, first screen)');
-    designDir = (await decodeDesign(url, child)).dir;
+    designDir = (await timed('design', () => decodeDesign(url, child))).dir;
   }
   let motionDir = await dirOf(opts.from?.motion);
   if (!motionDir) {
     say('decoding the motion (GSAP, ScrollTrigger, CSS, recordings)');
-    motionDir = (await decodeMotion(url, child)).dir;
+    motionDir = (await timed('motion', () => decodeMotion(url, child))).dir;
   }
   let assetsDir = await dirOf(opts.from?.assets);
   if (!assetsDir) {
     say('collecting the assets (textures, shader programs, models)');
-    assetsDir = (await decodeAssets(url, child)).dir;
+    assetsDir = (await timed('assets', () => decodeAssets(url, child))).dir;
   }
   let traceDir = await dirOf(opts.from?.trace);
   if (!traceDir && !opts.noTrace && programsExist(assetsDir)) {
     say('tracing the live WebGL calls (uniform values and what drives them)');
-    traceDir = (await traceWebGL(url, { ...child, ms: 10_000 }).catch(() => null))?.dir ?? null;
+    traceDir = (await timed('trace', () => traceWebGL(url, { ...child, ms: 10_000 }).catch(() => null)))?.dir ?? null;
   }
   const trace = traceDir ? await readJson<TraceDoc>(join(traceDir, 'trace.json')) : null;
   const observed = observedFrom(trace);
@@ -377,7 +401,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
 
   // 3. textures: the site's files, or placeholders of the same size
   const browserNeeded = Boolean(opts.ownAssets && texNames.size) || !opts.noDiff;
-  const { browser } = browserNeeded ? await launchBrowser(opts.browser ?? 'auto', true) : { browser: null };
+  const { browser } = browserNeeded ? await timed('browser launch', () => launchBrowser(opts.browser ?? 'auto', true)) : { browser: null };
   let diff: ExtractResult['diff'] = null;
   let replay: ReplayInfo | null = null;
   let replayError: string | null = null;
@@ -425,7 +449,9 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
             loader: false,
             layout: null,
           }
-        : await referenceShot(browser, url, vp, opts.referenceMs ?? 45_000, opts.section ?? null, !opts.noReplay);
+        : await timed('reference screenshot + capture', () =>
+            referenceShot(browser, url, vp, opts.referenceMs ?? 45_000, opts.section ?? null, !opts.noReplay),
+          );
       const original = ref.png;
       await put('preview/original.png', Buffer.from(original.slice(original.indexOf(',') + 1), 'base64'));
       // the site's own frames, recorded right before that screenshot: the render graph, the replay, the 3D scene
@@ -436,6 +462,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
       let rebuildDoc: { pipeline: import('../replay/rebuild.ts').PipelineDoc; stats: RebuildStats } | null = null;
       if (recording) {
         say('recorded the WebGL frames behind that screenshot; building the render graph and the replay');
+        const doneBuild = mark('build the replay, editable rebuild and scene');
         const c = compactCapture(recording.doc, new Uint8Array(recording.bin.buffer, recording.bin.byteOffset, recording.bin.byteLength));
         const capMb = opts.maxCaptureMb ?? 64;
         if (c.bin.length > capMb * 1e6) {
@@ -498,11 +525,14 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
             `replay: ${replay.passes} passes, ${replay.draws} draws, ${replay.programs} programs, ${(c.bin.length / 1e6).toFixed(1)} MB${sc.meshes.length ? `; scene: ${sc.meshes.length} meshes` : ''}; editable rebuild: ${rb.stats.draws} draws, ${rb.stats.materials} materials, ${rb.stats.cameras} cameras`,
           );
         }
+        doneBuild();
       }
       // the first screen's text as laid out on the site (with your own screenshot, read on both of the site's paths)
       const layoutCandidates = (
         opts.reference
-          ? await Promise.all([readLayout(browser, url, vp, opts.section ?? null, 8000, true), readLayout(browser, url, vp, opts.section ?? null, 8000, false)])
+          ? await timed('read the text layout', () =>
+              Promise.all([readLayout(browser, url, vp, opts.section ?? null, 8000, true), readLayout(browser, url, vp, opts.section ?? null, 8000, false)]),
+            )
           : [ref.layout]
       )
         .filter((l): l is HeroLayout => Boolean(l?.boxes.length || l?.canvas || l?.background))
@@ -513,6 +543,8 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
             : l,
         );
       say('rendering the rebuild and comparing it with the original first screen');
+      const doneScore = mark('render and score');
+      let renders = 0;
       const server = await serveDir(out);
       const cmp = await browser.newPage();
       let lastPng = '';
@@ -520,6 +552,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
       let lastErr: string | undefined;
       let lastCmp: Similarity | null = null;
       const render = async (p: Params) => {
+        renders++;
         const r = await renderPreview(browser, server.url, p, vp);
         renderError ??= r.error;
         lastErr = r.error;
@@ -580,6 +613,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
         let best = start;
         // the replay of the site's own frames, and the recovered 3D scene: kept when the canvas gets closer
         let replayKept = false;
+        const doneRR = mark('score the replay and the rebuild', doneScore);
         if (recDoc && replay) {
           const sR = await render({ ...params, program: '__replay' });
           const cR = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
@@ -646,6 +680,8 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
           } else say(`neither the rebuild nor the replay beat the start on the canvas; keeping the shader rebuild`);
         }
         // analysis first: DEA's own facts as candidates (the screen's mean colour, other palette colours, each shader, opacity)
+        doneRR();
+        const doneSweep = mark('parameter sweep (+ stand-in search)', doneScore);
         const meanOriginal = (await compareImages(cmp, original, original)).meanA;
         const palette = Object.values(design?.tokens?.color ?? {}).map((v) => String((v as { $value?: string }).$value));
         const candidates: Array<[string, Array<string | number>]> = [
@@ -698,7 +734,9 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
           { name: 'background', kind: 'color', near: /background|bg|dark|theme/i },
           ...(layout ? [] : [{ name: 'text', kind: 'color', near: /text|foreground|font colou?r|ink/i } as Knob, { name: 'font', kind: 'font' } as Knob]),
         ];
+        doneSweep();
         const providers = opts.providers ?? providersFromEnv();
+        const doneResearch = mark('research loop', doneScore);
         const research = await researchLoop({
           params,
           render,
@@ -722,6 +760,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
               [`${mods[0]?.name ?? 'webgl'} three.js shader background color`, `${host} design system`],
             ][round - 1] ?? [],
         });
+        doneResearch();
         citations.push(...research.citations);
         params = research.params;
         const final = research.best;
@@ -769,6 +808,8 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
           canvas: { start: canvasStart, final: canvasFinal },
         };
       } finally {
+        doneScore();
+        currentTimings()?.note(`${renders} preview renders`);
         await cmp.close();
         await server.close();
       }
@@ -788,7 +829,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
   const providersT = opts.providers ?? providersFromEnv();
   if (techniques.length && providersT.length && !opts.noResearch) {
     say(`researching ${techniques.length} technique(s) seen in the pipeline`);
-    techniques = await researchTechniques(techniques, providersT, { onStep: say });
+    techniques = await timed('technique research', () => researchTechniques(techniques, providersT, { onStep: say }));
   }
 
   // 6. does the project build?
@@ -797,12 +838,13 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
     if (target === 'framer') build = { ok: true, skipped: 'Framer components build inside Framer', ms: 0, log: '' };
     else {
       say('checking the project builds (npm install, npm run build)');
-      build = await verifyBuild(out);
+      build = await timed('verify build (npm install + build)', () => verifyBuild(out));
       say(build.ok ? `npm run build passed in ${Math.round(build.ms / 1000)} s` : `npm run build failed (${build.step})`);
     }
   }
 
   // 7. README + extract.md + dea-kit.json
+  const doneWrite = mark('write the kit and report');
   const extractedAt = new Date().toISOString();
   const gaps = extractGaps({
     url,
@@ -925,6 +967,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
     gaps.length ? `open gaps: ${gaps.length} (see "Gap → path to result" in the report)` : 'open gaps: none',
   ].join('\n');
   w.emit({ type: 'run.finished', runId: w.id, dir: w.dir, summary, at: new Date().toISOString() });
+  doneWrite();
   return { runId: w.id, dir: w.dir, out, target, files, shaders: mods, diff, replay, build, gaps, techniques, extractMd: md, summary };
 }
 
