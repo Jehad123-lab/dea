@@ -45,7 +45,7 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
         shadow: new Map(), // buf id -> Uint8Array (WebGL1 only)
         rb: new Map(), // rb id -> { internalformat, w, h, samples }
         locs: new WeakMap(), // loc -> { p, n }
-        draws: 0, drawsLast: 0, frames: 0,
+        draws: 0, drawsLast: 0, frames: 0, curProg: 0,
         rec: null,
       };
       infos.set(gl, I);
@@ -488,7 +488,56 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
   };
 
   let lastTs = -1;
+  // ---- input probe: the float uniforms' values at every animation frame, beside the pointer, scroll and window size --------
+  CAP.probe = null;
+  const onPointer = (e) => { if (CAP.probe) { CAP.probe.mx = e.clientX; CAP.probe.my = e.clientY; } };
+  try { addEventListener('pointermove', onPointer, { capture: true, passive: true }); addEventListener('mousemove', onPointer, { capture: true, passive: true }); } catch (e) {}
+  CAP.probeStart = () => { CAP.probe = { t0: performance.now(), cur: {}, series: {}, env: [], mx: -1, my: -1, mats: new Map(), nkeys: 0 }; return true; };
+  CAP.probeStop = () => { const P = CAP.probe; CAP.probe = null; return P ? { series: P.series, env: P.env } : null; };
+  const probeNote = (I, name, a) => {
+    const kind = name.slice(7);
+    const isMat = kind.startsWith('Matrix');
+    if (!isMat && kind.indexOf('f') < 0) return;
+    const L = a[0] && I.locs.get(a[0]);
+    if (!L) return;
+    const v = [];
+    if (isMat) {
+      // matrices (model, view, projection, a custom one) are noted per draw: see probeDraw
+      const arr = a[2];
+      if (!arr || typeof arr.length !== 'number') return;
+      for (let i = 0; i < Math.min(arr.length, 16); i++) v.push(+arr[i]);
+      let m = CAP.probe.mats.get(L.p);
+      if (!m) CAP.probe.mats.set(L.p, (m = new Map()));
+      m.set(L.n.replace(/\[0\]$/, ''), v);
+      return;
+    }
+    if (kind.endsWith('v')) { const arr = a[1]; if (!arr || typeof arr.length !== 'number') return; for (let i = 0; i < Math.min(arr.length, 4); i++) v.push(+arr[i]); }
+    else for (let i = 1; i < a.length && i <= 4; i++) v.push(+a[i]);
+    CAP.probe.cur[L.p + '|' + L.n] = v;
+  };
+  // at every draw: the matrices set for the current program, under "program|name#drawIndexInFrame"
+  const probeDraw = (I) => {
+    const P = CAP.probe;
+    const m = I.curProg && P.mats.get(I.curProg);
+    if (!m) return;
+    const ord = I.draws - 1;
+    for (const [n, v] of m) {
+      const k = I.curProg + '|' + n + '#' + ord;
+      if (!(k in P.cur)) { if (P.nkeys >= 700) continue; P.nkeys++; }
+      P.cur[k] = v;
+    }
+  };
+
+  const probeSample = () => {
+    const P = CAP.probe;
+    if (P.env.length >= 4000) return;
+    const t = Math.round(performance.now() - P.t0);
+    P.env.push([t, Math.round(scrollY), P.mx, P.my, innerWidth, innerHeight]);
+    for (const k in P.cur) { const s = P.series[k] || (P.series[k] = []); s.push([t].concat(P.cur[k])); }
+  };
+
   const boundary = () => {
+    if (CAP.probe) { try { probeSample(); } catch (e) {} }
     for (const r of CAP.contexts) { const gl = r.deref(); if (!gl) continue; const I = infos.get(gl); I.drawsLast = I.draws; I.draws = 0; I.frames++; }
     if (CAP.state === 'armed') {
       const I = pick();
@@ -559,7 +608,8 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
   const track = (I, gl, name, a, ret) => {
     switch (name) {
       case 'drawArrays': case 'drawElements': case 'drawArraysInstanced': case 'drawElementsInstanced': case 'drawRangeElements':
-        I.draws++; break;
+        I.draws++; if (CAP.probe) { try { probeDraw(I); } catch (e) {} } break;
+      case 'useProgram': I.curProg = a[0] ? keep(a[0]) : 0; break;
       case 'getUniformLocation': if (ret) I.locs.set(ret, { p: keep(a[0]), n: a[1] }); break;
       case 'getExtension': if (ret) { I.exts.set(a[0], ret); wrapExt(I, a[0], ret); } break;
       case 'bindBuffer': if (a[1]) { const id = keep(a[1]); if (!I.bufKind.has(id)) I.bufKind.set(id, a[0] === 0x8893 ? 'element' : 'array'); } break;
@@ -591,7 +641,7 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
       case 'copyTexImage2D': noteLevel(I, gl, a[0], a[1], a[2], a[2], 0x1401, a[5], a[6], 1); break;
       case 'renderbufferStorage': { const rb = call(gl, 'getParameter', 0x8ca7); if (rb) I.rb.set(keep(rb), { internalformat: a[1], w: a[2], h: a[3], samples: 0 }); break; }
       case 'renderbufferStorageMultisample': { const rb = call(gl, 'getParameter', 0x8ca7); if (rb) I.rb.set(keep(rb), { internalformat: a[2], w: a[3], h: a[4], samples: a[1] }); break; }
-      default:
+      default: if (CAP.probe && name.startsWith('uniform')) probeNote(I, name, a);
     }
   };
   const keepSrc = (T, fn, a, at, gl) => {

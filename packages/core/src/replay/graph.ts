@@ -73,6 +73,10 @@ export interface CaptureDoc {
   at: string;
   contexts: number;
   animate?: AnimateEntry[];
+  /** uniforms that follow the pointer, scroll or window size (measured by the input probe, or read from names) */
+  inputs?: import('./inputs.ts').InputMap[];
+  /** the window size (CSS px) when the recording was made */
+  viewport?: { w: number; h: number } | null;
   graph?: RenderGraph;
 }
 

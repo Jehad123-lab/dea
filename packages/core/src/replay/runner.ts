@@ -11,7 +11,11 @@ export const REBUILD_RUNNER = String.raw`// DEA editable rebuild (three.js). Bui
 //   const data = await loadPipeline('/rebuild/');
 //   const rb = createRebuild(canvas, data);         // or mountRebuild(element)
 //   rb.renderFrames();                              // the recorded frames once (the picture DEA scored)
-//   rb.start();                                     // animate: frames alternate, clock uniforms follow real time
+//   rb.start();                                     // live: the simulation runs on from the recorded moment, clock
+//                                                   // uniforms follow real time, the camera holds the scored frame,
+//                                                   // pointer / scroll / window-size uniforms follow live input
+//   rb.setInput({ x: 0.7, y: 0.4 });                // drive the input yourself (x, y in 0..1, scroll in px, width, height)
+//   rb.resize(1280, 720);                           // drawing buffer, screen-sized render targets and camera aspect
 //   rb.materials[3].uniforms.uIntensity.value = 2;  // any uniform; blend, depth and side are material properties
 //   rb.setPassEnabled(5, false);                    // switch a pass off
 //   rb.cameras[0]                                   // the site's camera (matrixWorld / projectionMatrix)
@@ -443,6 +447,171 @@ export function createRebuild(canvas, data, options = {}) {
     renderer.setRenderTarget(rt);
   };
 
+  // ---- live input: uniforms DEA measured following the pointer, the scroll or the window size -----------------------------
+  // value = scale × input + offset, the input eased per frame the way the site eased it (pipeline.json "inputs")
+  const inputs = (p.inputs || []).filter((m) => m.kind !== 'clock');
+  const inputsOf = new Map();
+  for (const m of inputs) { if (!inputsOf.has(m.program)) inputsOf.set(m.program, []); inputsOf.get(m.program).push(m); }
+  const live = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, vx: 0, vy: 0, scroll: 0, width: p.viewport ? p.viewport.w : p.canvas.cssW || p.canvas.w, height: p.viewport ? p.viewport.h : p.canvas.cssH || p.canvas.h };
+  // start where the recording was: the eased state of each input begins at its recorded value
+  const eased = new Map();
+  const signalOf = (m) => {
+    if (m.kind === 'pointer') return m.axis === 'y' ? live.y : live.x;
+    if (m.kind === 'pointer-velocity') return m.axis === 'y' ? live.vy : live.vx;
+    if (m.kind === 'scroll') return live.scroll;
+    if (m.kind === 'viewport') return m.axis === 'height' ? live.height : m.axis === 'aspect' ? live.width / live.height : live.width;
+    return 0;
+  };
+  let inputTouched = !!options.liveFromStart;
+  const stepInputs = () => {
+    live.vx = live.x - live.px; live.vy = live.y - live.py; live.px = live.x; live.py = live.y;
+    for (const m of inputs) {
+      const k = m.program + '|' + m.uniform + '|' + m.component;
+      const s = signalOf(m);
+      const e = eased.has(k) ? eased.get(k) : s;
+      eased.set(k, e + (m.k == null ? 1 : m.k) * (s - e));
+      if (m.axis2) {
+        const s2 = m.axis2 === 'y' ? live.y : live.x;
+        const e2 = eased.has(k + '|2') ? eased.get(k + '|2') : s2;
+        eased.set(k + '|2', e2 + (m.k == null ? 1 : m.k) * (s2 - e2));
+      }
+    }
+  };
+  // matrices followed per draw ("name#drawIndex"): the model, view and projection matrices of one draw of the frame
+  const matIn = new Map();
+  for (const m of inputs) {
+    const h = m.uniform.indexOf('#');
+    if (h < 0) continue;
+    const ord = Number(m.uniform.slice(h + 1));
+    if (!matIn.has(ord)) matIn.set(ord, { program: m.program, items: [] });
+    matIn.get(ord).items.push({ name: m.uniform.slice(0, h), m });
+  }
+  for (const fr of p.frames) { let n = 0; for (const s of fr.steps) if (s.op === 'draw') s._ord = n++; }
+  const applyMatrices = (step, obj, U, dirtySet) => {
+    if (!inputTouched || !matIn.size) return;
+    const L = matIn.get(step._ord);
+    if (!L || L.program !== p.materials[step.material].program) return;
+    const val = (m) => { const k = m.program + '|' + m.uniform + '|' + m.component; const e = eased.get(k); if (e == null) return NaN; let v = m.scale * e + m.offset; if (m.axis2) v += m.scale2 * (eased.get(k + '|2') ?? 0); return v; };
+    const cam = step.camera != null ? cameras[step.camera] : null;
+    const mv = (name) => L.items.filter((x) => x.name === name);
+    if (cam) {
+      for (const x of mv('viewMatrix')) { const v = val(x.m); if (Number.isFinite(v)) cam.matrixWorldInverse.elements[x.m.component] = v; }
+      if (mv('viewMatrix').length) { cam.matrixWorld.copy(cam.matrixWorldInverse).invert(); cam.matrix.copy(cam.matrixWorld); }
+      for (const x of mv('projectionMatrix')) { const v = val(x.m); if (Number.isFinite(v)) cam.projectionMatrix.elements[x.m.component] = v; }
+      if (mv('projectionMatrix').length) cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+    }
+    for (const x of mv('modelMatrix')) { const v = val(x.m); if (Number.isFinite(v)) obj.matrixWorld.elements[x.m.component] = v; }
+    if (cam && mv('modelViewMatrix').length) {
+      const MVm = new THREE.Matrix4().multiplyMatrices(cam.matrixWorldInverse, obj.matrixWorld);
+      for (const x of mv('modelViewMatrix')) { const v = val(x.m); if (Number.isFinite(v)) MVm.elements[x.m.component] = v; }
+      obj.matrixWorld.multiplyMatrices(cam.matrixWorld, MVm);
+    }
+    if (mv('modelMatrix').length || mv('modelViewMatrix').length) obj.matrix.copy(obj.matrixWorld);
+    for (const x of L.items) {
+      if (/^(modelMatrix|viewMatrix|projectionMatrix|modelViewMatrix)$/.test(x.name)) continue;
+      const u = U[x.name];
+      const v = val(x.m);
+      if (!u || !Number.isFinite(v)) continue;
+      if (Array.isArray(u.value)) { u.value = u.value.slice(); u.value[x.m.component] = v; }
+      else if (u.value && u.value.elements) u.value.elements[x.m.component] = v;
+      dirtySet.add(x.name);
+    }
+  };
+  const applyInputs = (programId, U, dirtySet) => {
+    if (!inputTouched) return;
+    const list = inputsOf.get(programId);
+    if (!list) return;
+    for (const m of list) {
+      const u = U[m.uniform];
+      if (!u) continue;
+      const v = m.scale * eased.get(m.program + '|' + m.uniform + '|' + m.component) + m.offset;
+      if (!Number.isFinite(v)) continue;
+      if (Array.isArray(u.value)) { u.value = u.value.slice(); u.value[m.component] = v; }
+      else if (u.value && typeof u.value === 'object' && 'x' in u.value) u.value.setComponent(m.component, v);
+      else u.value = v;
+      dirtySet.add(m.uniform);
+    }
+  };
+  const setInput = (o) => {
+    inputTouched = true;
+    for (const k of ['x', 'y', 'scroll', 'width', 'height']) if (o[k] != null && Number.isFinite(+o[k])) live[k] = +o[k];
+  };
+
+  // ---- resize: the drawing buffer, the screen-sized render targets (full, half, quarter ... size) and their viewports ----
+  const base = { w: p.canvas.w, h: p.canvas.h };
+  const size = { w: base.w, h: base.h };
+  const ratioOf = (w, h) => { for (let n = 0; n <= 8; n++) { const d = 2 ** n; if (Math.abs(w - base.w / d) <= 1.01 && Math.abs(h - base.h / d) <= 1.01) return d; } return 0; };
+  const screenTex = [];
+  for (const T of R.textures) {
+    if (T.missing || T.target !== 0x0de1 || T.levels.length !== 1 || T.levels[0].level !== 0) continue;
+    const d = ratioOf(T.levels[0].w, T.levels[0].h);
+    if (d) screenTex.push({ T, d });
+  }
+  const screenRb = R.renderbuffers.filter((r) => r.w && ratioOf(r.w, r.h)).map((r) => ({ r, d: ratioOf(r.w, r.h) }));
+  const screenTexIds = new Set(screenTex.map((s) => s.T.id));
+  const screenFb = new Set(R.framebuffers.filter((F) => F.atts.some((a) => (a.tex && screenTexIds.has(a.tex)) || (a.rb && screenRb.some((s) => s.r.id === a.rb)))).map((F) => F.id));
+  const scaleVp = (target, v) => {
+    if (!v || (size.w === base.w && size.h === base.h) || (target && !screenFb.has(target))) return v;
+    const sx = size.w / base.w; const sy = size.h / base.h;
+    return [Math.round(v[0] * sx), Math.round(v[1] * sy), Math.round(v[2] * sx), Math.round(v[3] * sy)];
+  };
+  const resize = (W, H) => {
+    W = Math.max(1, Math.round(W)); H = Math.max(1, Math.round(H));
+    if (W === size.w && H === size.h) return;
+    size.w = W; size.h = H;
+    canvas.width = W; canvas.height = H;
+    renderer.setSize(W, H, false);
+    gl.bindVertexArray(null);
+    gl.activeTexture(gl.TEXTURE0);
+    resetUnpack();
+    for (const s of screenTex) {
+      const L = s.T.levels[0];
+      const al = L.alloc || [L.upFmt, L.upType];
+      if (!al[0]) continue;
+      const [i, f, ty] = sized(L.ifmt, al[0], al[1]);
+      gl.bindTexture(gl.TEXTURE_2D, get('tex', s.T.id));
+      try { gl.texImage2D(gl.TEXTURE_2D, 0, i, Math.max(1, Math.round(W / s.d)), Math.max(1, Math.round(H / s.d)), 0, f, ty, null); } catch (e) { fail('resize texture ' + s.T.id + ': ' + e.message); }
+    }
+    for (const s of screenRb) {
+      gl.bindRenderbuffer(gl.RENDERBUFFER, get('rb', s.r.id));
+      const w = Math.max(1, Math.round(W / s.d)); const h = Math.max(1, Math.round(H / s.d));
+      if (s.r.samples) gl.renderbufferStorageMultisample(gl.RENDERBUFFER, s.r.samples, s.r.internalformat, w, h);
+      else gl.renderbufferStorage(gl.RENDERBUFFER, s.r.internalformat, w, h);
+    }
+    // the site's cameras keep their field of view: only the horizontal scale follows the new aspect
+    const k = (base.w / base.h) / (W / H);
+    p.cameras.forEach((c, ci) => {
+      const cam = cameras[ci];
+      cam.projectionMatrix.fromArray(c.projection);
+      cam.projectionMatrix.elements[0] *= k;
+      cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+    });
+    renderer.resetState();
+  };
+
+  // ---- live mode holds the recorded moment still --------------------------------------------------------------------
+  // The recording has two frames so ping-pong simulations keep their read/write order; but values that differ between the
+  // two (a camera mid-move, an intro fading in) would flip back and forth every frame and the picture would shake. Live,
+  // every frame takes those values from the last recorded frame (the one DEA scored); clocks still follow real time and
+  // the simulation passes still run forward on the live render targets.
+  if (options.animate !== false && options.steady !== false && p.frames.length > 1) {
+    const last = p.frames[p.frames.length - 1].steps;
+    const keyed = (steps) => { const seen = new Map(); return steps.map((s) => { if (s.op !== 'draw') return null; const k = s.material + '#' + (seen.get(s.material) || 0); seen.set(s.material, (seen.get(s.material) || 0) + 1); return k; }); };
+    const lastKeys = keyed(last);
+    const byKey = new Map(lastKeys.map((k, i) => [k, last[i]]).filter(([k]) => k));
+    const plain = (v) => typeof v === 'number' || (Array.isArray(v) && v.every((x) => typeof x === 'number'));
+    for (const fr of p.frames.slice(0, -1)) {
+      const ks = keyed(fr.steps);
+      fr.steps.forEach((s, i) => {
+        const L = ks[i] && byKey.get(ks[i]);
+        if (!L) return;
+        for (const [k, v] of Object.entries(L.uniforms)) if (plain(v) && (k in s.uniforms ? plain(s.uniforms[k]) : true)) s.uniforms[k] = v;
+        if (L.camera != null) s.camera = L.camera;
+        if (L.model) s.model = L.model;
+      });
+    }
+  }
+
   // ---- steps -----------------------------------------------------------------------------------------------------------
   const clocks = p.clocks || [];
   const animate = options.animate !== false;
@@ -456,20 +625,23 @@ export function createRebuild(canvas, data, options = {}) {
     dirty[mi].clear();
     for (const [k, v] of Object.entries(step.uniforms)) { setUniform(U, k, v); dirty[mi].add(k); }
     if (animate) for (const c of clocks) if (c.program === m.program && U[c.uniform]) { U[c.uniform].value = c.base + c.rate * (performance.now() - t0); dirty[mi].add(c.uniform); }
+    if (animate) applyInputs(m.program, U, dirty[mi]);
     const obj = objectOf(step);
+    if (animate) applyMatrices(step, obj, U, dirty[mi]);
     obj.material.uniformsNeedUpdate = true;
     const cm = m.state.colorMask;
     maskOverride = cm.some(Boolean) && !cm.every(Boolean) ? cm : null;
-    setTarget(step.target, step.viewport, step.scissor);
+    setTarget(step.target, scaleVp(step.target, step.viewport), scaleVp(step.target, step.scissor));
     renderer.render(obj, step.camera == null ? plainCamera : cameras[step.camera]);
     maskOverride = null;
   };
   const clear = (step) => {
-    setTarget(step.target, [0, 0, p.canvas.w, p.canvas.h], step.scissor);
+    setTarget(step.target, [0, 0, size.w, size.h], scaleVp(step.target, step.scissor));
     gl.colorMask(step.colorMask[0], step.colorMask[1], step.colorMask[2], step.colorMask[3]);
     gl.depthMask(step.depthMask);
     gl.stencilMask(step.stencilMask);
-    if (step.scissor) { gl.enable(gl.SCISSOR_TEST); gl.scissor(step.scissor[0], step.scissor[1], step.scissor[2], step.scissor[3]); } else gl.disable(gl.SCISSOR_TEST);
+    const sc = scaleVp(step.target, step.scissor);
+    if (sc) { gl.enable(gl.SCISSOR_TEST); gl.scissor(sc[0], sc[1], sc[2], sc[3]); } else gl.disable(gl.SCISSOR_TEST);
     gl.clearColor(step.color[0], step.color[1], step.color[2], step.color[3]);
     gl.clearDepth(step.depth);
     gl.clearStencil(step.stencil);
@@ -529,6 +701,7 @@ export function createRebuild(canvas, data, options = {}) {
   };
   let frame = 0;
   let raf = 0;
+  let unlisten = null;
   const api = {
     renderer,
     gl,
@@ -539,9 +712,35 @@ export function createRebuild(canvas, data, options = {}) {
     get materials() { return [...materialVariants.values()]; },
     uniforms: uniformSets,
     passes: p.passes,
-    renderFrames(n = p.frames.length) { for (let k = 0; k < n; k++) { runFrame(frame); frame = (frame + 1) % p.frames.length; } },
-    start() { const loop = () => { api.renderFrames(1); raf = requestAnimationFrame(loop); }; raf = requestAnimationFrame(loop); },
-    stop() { cancelAnimationFrame(raf); },
+    inputs,
+    renderFrames(n = p.frames.length) { for (let k = 0; k < n; k++) { if (animate) stepInputs(); runFrame(frame); frame = (frame + 1) % p.frames.length; } },
+    start() {
+      const loop = () => { api.renderFrames(1); raf = requestAnimationFrame(loop); };
+      raf = requestAnimationFrame(loop);
+      if (options.listen !== false && typeof window !== 'undefined') {
+        // real pointer, touch, scroll and window size drive the measured uniforms
+        const onMove = (e) => { const t = e.touches ? e.touches[0] : e; if (t) setInput({ x: t.clientX / innerWidth, y: t.clientY / innerHeight }); };
+        const canScroll = () => document.documentElement.scrollHeight > innerHeight + 2;
+        let wheel = 0;
+        const onWheel = (e) => { if (!canScroll()) { wheel = Math.max(0, wheel + e.deltaY); setInput({ scroll: wheel }); } };
+        const onScroll = () => setInput({ scroll: scrollY });
+        const onResize = () => { setInput({ width: innerWidth, height: innerHeight }); if (options.resize !== false) api.fit(); };
+        addEventListener('pointermove', onMove, { passive: true });
+        addEventListener('touchmove', onMove, { passive: true });
+        addEventListener('wheel', onWheel, { passive: true });
+        addEventListener('scroll', onScroll, { passive: true });
+        addEventListener('resize', onResize);
+        unlisten = () => { for (const [n, f] of [['pointermove', onMove], ['touchmove', onMove], ['wheel', onWheel], ['scroll', onScroll], ['resize', onResize]]) removeEventListener(n, f); };
+      }
+    },
+    stop() { cancelAnimationFrame(raf); if (unlisten) unlisten(); unlisten = null; },
+    /** drive the input yourself: x, y (0..1 of the window), scroll (px), width, height (CSS px) */
+    setInput,
+    /** resize the drawing buffer, the screen-sized render targets and the cameras' aspect */
+    resize,
+    /** fit the canvas to its element's size on screen (what a window resize calls) */
+    fit() { const r = canvas.getBoundingClientRect(); if (r.width && r.height) resize(r.width * (options.pixelRatio || 1), r.height * (options.pixelRatio || 1)); },
+    get size() { return { w: size.w, h: size.h }; },
     setPassEnabled(i, on) { if (on) passOff.delete(i); else passOff.add(i); },
     setUniform(materialIndex, name, v) { setUniform(uniformSets[materialIndex], name, v); p.materials[materialIndex].uniforms[name] = v; },
   };
@@ -552,9 +751,16 @@ export async function mountRebuild(el = document.body, options = {}) {
   const data = await loadPipeline(options.base || './rebuild/');
   const b = data.pipeline.canvas;
   const c = document.createElement('canvas');
-  c.style.cssText = 'position:absolute;pointer-events:none;left:' + b.x + 'px;top:' + b.y + 'px;width:' + b.cssW + 'px;height:' + b.cssH + 'px';
+  const vp = data.pipeline.viewport;
+  // a canvas that filled the window when DEA recorded it fills the window here too, and follows its size
+  const full = vp && b.x <= 1 && b.y <= 1 && Math.abs(b.cssW - vp.w) <= 2 && Math.abs(b.cssH - vp.h) <= 2;
+  c.style.cssText = full
+    ? 'position:fixed;pointer-events:none;left:0;top:0;width:100vw;height:100vh'
+    : 'position:absolute;pointer-events:none;left:' + b.x + 'px;top:' + b.y + 'px;width:' + b.cssW + 'px;height:' + b.cssH + 'px';
+  if (!full) options = Object.assign({ resize: false }, options);
   el.appendChild(c);
   const rb = createRebuild(c, data, options);
+  if (full && !options.once) rb.fit();
   if (options.once) rb.renderFrames();
   else rb.start();
   return rb;

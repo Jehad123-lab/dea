@@ -6,8 +6,10 @@ import { NAME_SHIM } from '../browser/init.ts';
 import { installObservers, LOADER_VISIBLE } from '../browser/open.ts';
 import { currentCache } from '../cache.ts';
 import { pullRecording, REPLAY_CAPTURE_SCRIPT, type Recording, recordFrames, releaseFrames } from '../replay/capture.ts';
+import { type ProbeData, probeInputs } from '../replay/inputs.ts';
 import { currentTimings, timed } from '../timings.ts';
 import type { ShaderModule } from './generate.ts';
+import { runInteraction } from './interaction.ts';
 import type { Params } from './research.ts';
 
 const MIME: Record<string, string> = {
@@ -83,8 +85,9 @@ try {
     const el = document.getElementById('scene');
     el.style.opacity = String(P.opacity ?? 1);
     el.appendChild(c);
-    const r = createReplay(c, d, { animate: false, preserveDrawingBuffer: true });
+    const r = createReplay(c, d, { animate: !!P.live, steady: P.steady !== false, preserveDrawingBuffer: true });
     r.renderFrames();
+    if (P.live) { r.start(); window.__deaKit = r; }
     window.__deaReplayErrors = r.errors;
   } else if (P.program === '__rebuild') {
     // the editable rebuild: the recorded render graph as three.js objects (rebuild/rebuild.js, public/rebuild/)
@@ -97,8 +100,9 @@ try {
     const el = document.getElementById('scene');
     el.style.opacity = String(P.opacity ?? 1);
     el.appendChild(c);
-    const r = createRebuild(c, d, { THREE, animate: false, preserveDrawingBuffer: true });
+    const r = createRebuild(c, d, { THREE, animate: !!P.live, steady: P.steady !== false, preserveDrawingBuffer: true });
     r.renderFrames();
+    if (P.live) { r.start(); window.__deaKit = r; }
     window.__deaReplayErrors = r.errors;
   } else if (P.program === '__scene') {
     // the 3D scene recovered from the recording (scene/scene.glb): geometry, transforms, camera; a plain material
@@ -476,7 +480,13 @@ export async function referenceShot(
   smart = false,
   /** recorded frames (2 lets the replay alternate and read clocks; 1 is the quick mode) */
   frames = 2,
+  /** after the recording: run the scripted pointer and scroll (frames for the interaction check) and the input probe */
+  interact = false,
 ): Promise<{
+  /** a frame after each step of the interaction script, on the live site */
+  interaction?: Buffer[];
+  /** every float uniform per frame beside the pointer, scroll and window size, while the probe moved them */
+  probe?: ProbeData | null;
   png: string;
   atMs: number;
   loader: boolean;
@@ -562,12 +572,22 @@ export async function referenceShot(
         await releaseFrames(page);
         if (buf && recording) {
           const l = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
+          const atMs = Date.now() - t0;
+          let interaction: Buffer[] | undefined;
+          let probe: ProbeData | null | undefined;
+          if (interact) {
+            interaction = await timed('scripted pointer and scroll on the site', () => runInteraction(page).catch(() => undefined));
+            await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
+            probe = await timed('input probe (pointer, scroll, resize)', () => probeInputs(page).catch(() => null));
+          }
           return {
             png: `data:image/png;base64,${buf.toString('base64')}`,
-            atMs: Date.now() - t0,
+            atMs,
             loader: nowLoader,
             layout: (l ?? layout) as never,
             recording,
+            interaction,
+            probe,
           };
         }
         return {
@@ -635,6 +655,110 @@ export async function renderPreview(
     const error = (await page.evaluate('window.__deaError || null')) as string | null;
     const png = `data:image/png;base64,${(await page.screenshot({ type: 'png' })).toString('base64')}`;
     return { png, error: error ?? undefined };
+  } finally {
+    await page.close();
+  }
+}
+
+/** Open the kit's replay or rebuild running live (pointer, scroll and clocks drive it) and run the interaction script. */
+export async function kitInteraction(
+  browser: Browser,
+  base: string,
+  program: '__replay' | '__rebuild',
+  viewport: { width: number; height: number },
+  extra: Params = {},
+): Promise<{ frames: Buffer[]; error?: string }> {
+  const page = await browser.newPage({ viewport });
+  try {
+    await page.goto(`${base}/preview/index.html#${encodeURIComponent(JSON.stringify({ ...extra, program, live: true }))}`, {
+      waitUntil: 'load',
+      timeout: 30_000,
+    });
+    await page.waitForFunction('window.__deaReady === true', undefined, { timeout: 120_000 }).catch(() => {});
+    const error = (await page.evaluate('window.__deaError || null')) as string | null;
+    const frames = await runInteraction(page);
+    return { frames, error: error ?? undefined };
+  } finally {
+    await page.close();
+  }
+}
+
+export interface Steadiness {
+  frames: number;
+  /** mean change between consecutive frames (0..255 on a small grey image) */
+  step: number;
+  /** mean change between frames two apart */
+  skip: number;
+  /** step / skip: about 0.5 for smooth motion, about 1 for a still picture with noise, well above 1 when the picture flips
+   *  back and forth between two states (shaking) */
+  flip: number;
+  shaking: boolean;
+}
+
+/**
+ * Is the live kit steady? Opens the replay or rebuild running live, then renders `frames` consecutive frames by hand
+ * and compares them: a picture that flips between two states every frame changes a lot from one frame to the next and
+ * little across two.
+ */
+export async function kitSteadiness(
+  browser: Browser,
+  base: string,
+  program: '__replay' | '__rebuild',
+  viewport: { width: number; height: number },
+  opts: { frames?: number; steady?: boolean } = {},
+): Promise<Steadiness | null> {
+  const page = await browser.newPage({ viewport });
+  // the code below runs in the page: a bundler's keep-names helper (__name) must exist there, or every call throws
+  await page.addInitScript(() => {
+    (globalThis as unknown as { __name?: (f: unknown) => unknown }).__name ??= (f: unknown) => f;
+  });
+  try {
+    await page.goto(`${base}/preview/index.html#${encodeURIComponent(JSON.stringify({ program, live: true, steady: opts.steady !== false }))}`, {
+      waitUntil: 'load',
+      timeout: 30_000,
+    });
+    await page.waitForFunction('window.__deaReady === true && !!window.__deaKit', undefined, { timeout: 120_000 }).catch(() => {});
+    return (await page.evaluate(async (n) => {
+      const kit = (window as unknown as { __deaKit?: { stop: () => void; renderFrames: (k: number) => void } }).__deaKit;
+      const src = document.querySelector('#scene canvas') as HTMLCanvasElement | null;
+      if (!kit || !src) return null;
+      kit.stop();
+      const W = 160;
+      const H = Math.max(1, Math.round((src.height / src.width) * W));
+      const c = document.createElement('canvas');
+      c.width = W;
+      c.height = H;
+      const x = c.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D;
+      const grab = () => {
+        x.drawImage(src, 0, 0, W, H);
+        const d = x.getImageData(0, 0, W, H).data;
+        const g = new Float32Array(W * H);
+        for (let i = 0; i < g.length; i++) g[i] = 0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2];
+        return g;
+      };
+      const F: Float32Array[] = [];
+      for (let i = 0; i < n; i++) {
+        kit.renderFrames(1);
+        await new Promise((r) => setTimeout(r, 16));
+        F.push(grab());
+      }
+      const md = (a: Float32Array, b: Float32Array) => {
+        let s = 0;
+        for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]);
+        return s / a.length;
+      };
+      const mean = (v: number[]) => v.reduce((s, y) => s + y, 0) / Math.max(1, v.length);
+      const step = mean(F.slice(1).map((f, i) => md(F[i], f)));
+      const skip = mean(F.slice(2).map((f, i) => md(F[i], f)));
+      const flip = step / Math.max(skip, 0.05);
+      return {
+        frames: n,
+        step: Math.round(step * 100) / 100,
+        skip: Math.round(skip * 100) / 100,
+        flip: Math.round(flip * 100) / 100,
+        shaking: step > 1 && flip > 1.5,
+      };
+    }, opts.frames ?? 8)) as Steadiness | null;
   } finally {
     await page.close();
   }

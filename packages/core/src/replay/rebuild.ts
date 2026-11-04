@@ -128,6 +128,10 @@ export interface PipelineDoc {
   passes: Array<{ index: number; frame: number; role: string; why: string; target: string; programs: string[] }>;
   frames: Array<{ steps: Step[] }>;
   clocks: Array<{ program: number; uniform: string; base: number; rate: number }>;
+  /** uniforms that follow the pointer, scroll or window size: value = scale × eased input + offset */
+  inputs: import('./inputs.ts').InputMap[];
+  /** the window size (CSS px) when the recording was made */
+  viewport: { w: number; h: number } | null;
   toneMappingExposure: number | null;
   labels: Record<string, string>;
 }
@@ -954,6 +958,8 @@ export function rebuildPipeline(
     })),
     frames,
     clocks,
+    inputs: (doc.inputs ?? []).filter((m) => m.kind !== 'clock'),
+    viewport: doc.viewport ?? null,
     toneMappingExposure: exposure,
     labels: {
       structure: 'Verified: passes, order, render targets, programs, draw state, uniform values, cameras and model matrices are read from the recording',

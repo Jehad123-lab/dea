@@ -13,6 +13,7 @@ import { type Gap, renderGaps } from '../gaps.ts';
 import { decodeMotion, type GsapNode, gsapModule, type MotionDoc } from '../motion/index.ts';
 import { pool } from '../pool.ts';
 import { animateEntries, buildGraph, type CaptureDoc, compactCapture, placeholderTextures, renderGraphMd } from '../replay/graph.ts';
+import { fitInputs, type InputMap, inferInputs, inputsSummary, type ProbeData, type ProbeReport } from '../replay/inputs.ts';
 import { REPLAY_PLAYER } from '../replay/player.ts';
 import { type RebuildStats, rebuildMd, rebuildPipeline } from '../replay/rebuild.ts';
 import { REBUILD_RUNNER } from '../replay/runner.ts';
@@ -36,8 +37,21 @@ import {
   type Target,
   tokenFiles,
 } from './generate.ts';
+import { classifyInputs, framesStrip, INTERACTION_SCRIPT, type InteractionResult, interactionMd, meanResponse, scoreInteraction } from './interaction.ts';
 import { type KitManifest, libraryAdd } from './library.ts';
-import { compareImages, placeholderPng, previewHtml, readLayout, referenceShot, renderPreview, type Similarity, serveDir, sideBySide } from './preview.ts';
+import {
+  compareImages,
+  kitInteraction,
+  kitSteadiness,
+  placeholderPng,
+  previewHtml,
+  readLayout,
+  referenceShot,
+  renderPreview,
+  type Similarity,
+  serveDir,
+  sideBySide,
+} from './preview.ts';
 import {
   detectTechniques,
   type Finding,
@@ -118,6 +132,10 @@ export interface ReplayInfo {
   placeholders?: number;
   /** false with --own-assets: the capture replay was scored but its recorded bytes are not in the kit */
   shipped: boolean;
+  /** uniforms the replay and the rebuild drive from live pointer, scroll and window size */
+  inputs?: InputMap[];
+  /** clock uniforms that advance with real time */
+  clocks?: number;
   /**
    * The editable rebuild: the recorded render graph as a three.js project (rebuild/rebuild.js + public/rebuild/), scored
    * on its own. Unlike the capture replay above (the recorded calls played back), this is code you can change.
@@ -163,6 +181,8 @@ export interface ExtractResult {
   summary: string;
   /** wall time per stage and peak memory (also written to timings.json in the run) */
   timings?: TimingsDoc;
+  /** the interaction check: scripted pointer and scroll, site vs kit, and what each input does in the kit */
+  interaction?: InteractionResult | null;
   /** what the content cache served and kept in this run; absent with --no-cache */
   cache?: CacheStats & { dir: string; sizeBytes: number | null; capBytes: number };
   /** true in quick mode: a rough result */
@@ -204,8 +224,10 @@ async function referenceFor(
   const ms = opts.referenceMs ?? (quick ? 20_000 : 45_000);
   const frames = quick ? 1 : 2;
   const record = !opts.noReplay;
+  // the scripted pointer / scroll and the input probe run on the live site right after the recording (full mode)
+  const interact = record && !quick;
   const cache = currentCache();
-  const key = cacheKey('capture', CAPTURE_CACHE_VERSION, url, vp, ms, smart, opts.section ?? null, record, frames, opts.browser ?? 'auto');
+  const key = cacheKey('capture', CAPTURE_CACHE_VERSION, url, vp, ms, smart, opts.section ?? null, record, frames, interact, opts.browser ?? 'auto');
   const d = cache ? await cache.get('capture', key) : null;
   if (cache && d) {
     try {
@@ -215,6 +237,9 @@ async function referenceFor(
       const recording = existsSync(join(d, 'capture.bin'))
         ? { doc: JSON.parse(await readFile(join(d, 'capture.json'), 'utf8')) as CaptureDoc, bin: await readFile(join(d, 'capture.bin')) }
         : null;
+      const probe = existsSync(join(d, 'probe.json')) ? (JSON.parse(await readFile(join(d, 'probe.json'), 'utf8')) as ProbeData) : null;
+      const interaction: Buffer[] = [];
+      for (let i = 0; existsSync(join(d, `interaction-${i}.png`)); i++) interaction.push(await readFile(join(d, `interaction-${i}.png`)));
       say(`reusing the reference screenshot and the recorded frames from ${m.made} (cache; --no-cache takes them again)`);
       currentTimings()?.note(`from cache (made ${m.made})`);
       cache.stats.reused.push({ what: 'reference + capture', at: m.made });
@@ -224,6 +249,7 @@ async function referenceFor(
         loader: m.loader,
         layout,
         ...(record ? { recording, ...(m.recordingError ? { recordingError: m.recordingError } : {}) } : {}),
+        ...(interact ? { probe, interaction: interaction.length ? interaction : undefined } : {}),
       };
     } catch {
       /* a damaged entry: take it again */
@@ -234,7 +260,7 @@ async function referenceFor(
       ? `taking the reference screenshot: watching until the page settles (up to ${Math.round(ms / 1000)} s), the frame with the most detail`
       : 'taking the reference screenshot (after the intro, the frame with the most detail)',
   );
-  const r = await referenceShot(browser, url, vp, ms, opts.section ?? null, record, smart, frames);
+  const r = await referenceShot(browser, url, vp, ms, opts.section ?? null, record, smart, frames, interact);
   // a capture whose recording failed is not kept: the next run tries again
   if (cache && r.png && (!record || r.recording)) {
     const files: Record<string, string | Uint8Array> = {
@@ -245,6 +271,8 @@ async function referenceFor(
       files['capture.json'] = JSON.stringify(r.recording.doc);
       files['capture.bin'] = r.recording.bin;
     }
+    if (r.probe) files['probe.json'] = JSON.stringify(r.probe);
+    for (const [i, b] of (r.interaction ?? []).entries()) files[`interaction-${i}.png`] = b;
     await cache
       .put(
         'capture',
@@ -558,6 +586,8 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   let diff: ExtractResult['diff'] = null;
   let replay: ReplayInfo | null = null;
   let replayError: string | null = null;
+  let probeReport: ProbeReport | null = null;
+  let interaction: InteractionResult | null = null;
   let layout: HeroLayout | null = null;
   let standin: Standin | null = null;
   const rgbHex = (c: string | null | undefined): string | null => {
@@ -617,6 +647,16 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           const binU8 = new Uint8Array(c.bin.buffer, c.bin.byteOffset, c.bin.byteLength);
           recDoc.animate = animateEntries(recDoc);
           recDoc.graph = buildGraph(recDoc, binU8);
+          // live input: what the probe measured on the site, and what the uniforms' names suggest beyond it
+          recDoc.viewport = { w: vp0.width, h: vp0.height };
+          probeReport = 'probe' in ref && ref.probe ? fitInputs(ref.probe) : null;
+          const measured = probeReport?.inputs ?? [];
+          const FLOATS = new Set([0x1406, 0x8b50, 0x8b51, 0x8b52]);
+          const named = recDoc.snap.programs.flatMap((P) =>
+            P.uniforms.filter((u) => FLOATS.has(u.type)).map((u) => ({ program: P.id, name: u.name, value: Array.isArray(u.v) ? u.v : [u.v] })),
+          );
+          recDoc.inputs = [...measured, ...inferInputs(named, recDoc.canvas, measured)];
+          if (recDoc.inputs.length) say(`live input: ${inputsSummary(recDoc.inputs)}`);
           const models = (manifest?.network ?? [])
             .filter((a) => a.kind === 'glb' || a.kind === 'gltf')
             .flatMap((m) => (m.details?.meshes ?? []).map((x) => ({ name: `${basename(m.url.split('?')[0])} › ${x.name}`, vertices: x.vertices })));
@@ -663,6 +703,10 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             errors: recDoc.errors.slice(0, 10),
             placeholders,
             shipped: !opts.ownAssets,
+            inputs: (recDoc.inputs ?? []).filter((m) => m.kind !== 'clock'),
+            clocks: new Set((recDoc.animate ?? []).map((a) => `${a.frame}|${a.cmd}`)).size
+              ? new Set(rb.pipeline.clocks.map((x) => `${x.program}|${x.uniform}`)).size || 1
+              : 0,
             rebuild: { canvas: null, page: null, kept: false, stats: rb.stats, errors: [] },
           };
           say(
@@ -962,6 +1006,50 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           referenceLoader: ref.loader,
           canvas: { start: canvasStart, final: canvasFinal },
         };
+        // live interaction: the same scripted pointer and scroll on the kit (replay and rebuild, running live) as on the site
+        if (!quick && replay && 'interaction' in ref && ref.interaction?.length) {
+          const doneI = mark('interaction check (scripted pointer + scroll, site vs kit)', doneScore);
+          try {
+            say('interaction check: the same pointer and scroll script on the kit, running live');
+            const siteFrames = ref.interaction;
+            const rows: Array<{ label: string; frames: Buffer[] }> = [{ label: 'original', frames: siteFrames }];
+            const { program: _p, ...rest } = params;
+            const res: InteractionResult = {
+              script: INTERACTION_SCRIPT.map((x) => ({ name: x.name, does: x.does })),
+              replay: null,
+              rebuild: null,
+              inputs: [],
+              unexplained: probeReport?.unexplained ?? [],
+            };
+            for (const prog of ['__replay', '__rebuild'] as const) {
+              if (prog === '__rebuild' && !replay.rebuild) continue;
+              const k = await kitInteraction(browser, server.url, prog, vp, rest);
+              const steps = await scoreInteraction(cmp, siteFrames, k.frames);
+              // is the live picture steady? 8 consecutive frames, held (the kit's default) and alternating (the old way)
+              const steady = await kitSteadiness(browser, server.url, prog, vp).catch(() => null);
+              const alternating = await kitSteadiness(browser, server.url, prog, vp, { steady: false }).catch(() => null);
+              res[prog === '__replay' ? 'replay' : 'rebuild'] = {
+                steps,
+                response: meanResponse(steps),
+                steady,
+                alternating,
+                ...(k.error ? { error: k.error } : {}),
+              };
+              rows.push({ label: prog === '__replay' ? '(a) replay' : '(b) rebuild', frames: k.frames });
+            }
+            const siteSteps = (res.rebuild ?? res.replay)?.steps ?? null;
+            res.inputs = classifyInputs(replay.inputs ?? [], probeReport, replay.clocks ?? 0, siteSteps);
+            await put('preview/interaction.jpg', await framesStrip(cmp, rows));
+            await put('interaction.json', JSON.stringify(res, null, 2));
+            interaction = res;
+            const fmt = (x: { response: number | null } | null) => (x?.response != null ? pct(x.response) : 'n/a');
+            say(`interaction (where the picture changed after each move, site vs kit): replay ${fmt(res.replay)}, rebuild ${fmt(res.rebuild)}`);
+          } catch (e) {
+            say(`interaction check failed: ${(e as Error).message.split('\n')[0]}`);
+          } finally {
+            doneI();
+          }
+        }
       } finally {
         doneScore();
         currentTimings()?.note(`${renders} preview renders`);
@@ -1013,7 +1101,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     replay,
     replayError,
   });
-  const md = renderExtractMd({
+  const mdBase = renderExtractMd({
     url,
     target,
     files,
@@ -1036,6 +1124,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     replay,
     replayError,
   });
+  const md = interaction ? `${mdBase.trimEnd()}\n\n${interactionMd(interaction)}\n` : mdBase;
   const kit: KitManifest = {
     url,
     extractedAt,
@@ -1125,11 +1214,17 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             : []),
         ]
       : [`replay: not recorded${replayError ? ` (${replayError})` : ''}`]),
+    ...(interaction
+      ? [
+          `interaction (scripted pointer + scroll, where the picture changed, site vs kit): replay ${interaction.replay?.response != null ? pct(interaction.replay.response) : 'n/a'}, rebuild ${interaction.rebuild?.response != null ? pct(interaction.rebuild.response) : 'n/a'} (preview/interaction.jpg)`,
+          `inputs: ${interaction.inputs.map((v) => `${v.input} ${v.status === 'verified' ? '✔ verified' : v.status === 'inferred' ? '≈ inferred' : v.status === 'frozen' ? '✖ frozen' : '– not used'}`).join(' · ')}`,
+        ]
+      : []),
     gaps.length ? `open gaps: ${gaps.length} (see "Gap → path to result" in the report)` : 'open gaps: none',
   ].join('\n');
   w.emit({ type: 'run.finished', runId: w.id, dir: w.dir, summary, at: new Date().toISOString() });
   doneWrite();
-  return { runId: w.id, dir: w.dir, out, target, files, shaders: mods, diff, replay, build, gaps, techniques, extractMd: md, summary, quick };
+  return { runId: w.id, dir: w.dir, out, target, files, shaders: mods, diff, replay, build, gaps, techniques, extractMd: md, summary, quick, interaction };
 }
 
 const pct = (x: number) => `${Math.round(x * 1000) / 10}%`;

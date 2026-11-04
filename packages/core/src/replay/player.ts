@@ -20,7 +20,9 @@ const DRAWS = new Set(['drawArrays', 'drawElements', 'drawArraysInstanced', 'dra
  * createReplay(canvas, { doc, bin }, options)
  *  options.animate      advance clock uniforms with real time (default true); false replays the recorded values exactly
  *  options.preserveDrawingBuffer
- * returns { gl, renderFrames(n), start(), stop(), setUniform(program, name, value), setPassEnabled(index, on), passes, errors }
+ *  options.steady       live, hold the last recorded frame's camera and other non-clock values instead of alternating them (default true)
+ *  options.listen       let the real pointer, scroll and window size drive the uniforms DEA measured following them (default true)
+ * returns { gl, renderFrames(n), start(), stop(), setUniform(program, name, value), setInput({ x, y, scroll, width, height }), setPassEnabled(index, on), inputs, passes, errors }
  */
 export function createReplay(canvas, data, options = {}) {
   const { doc, bin } = data;
@@ -267,6 +269,51 @@ export function createReplay(canvas, data, options = {}) {
   const skipDraw = new Set(); // "frame:cmd"
   const anim = new Map(); // "frame:cmd" -> [{ arg, base, rate }]
   for (const a of doc.animate || []) { const k = a.frame + ':' + a.cmd; if (!anim.has(k)) anim.set(k, []); anim.get(k).push(a); }
+  // ---- live input: uniforms that follow the pointer, scroll or window size (capture.json "inputs") -------------------------
+  const inputs = (doc.inputs || []).filter((m) => m.kind !== 'clock');
+  const inputBy = new Map(); // "progId|name" -> maps
+  for (const m of inputs) { const k = m.program + '|' + m.uniform; if (!inputBy.has(k)) inputBy.set(k, []); inputBy.get(k).push(m); }
+  const live = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, vx: 0, vy: 0, scroll: 0, width: doc.viewport ? doc.viewport.w : doc.canvas.cssW || doc.canvas.w, height: doc.viewport ? doc.viewport.h : doc.canvas.cssH || doc.canvas.h };
+  const eased = new Map();
+  let inputTouched = !!options.liveFromStart;
+  const signalOf = (m) => m.kind === 'pointer' ? (m.axis === 'y' ? live.y : live.x) : m.kind === 'pointer-velocity' ? (m.axis === 'y' ? live.vy : live.vx) : m.kind === 'scroll' ? live.scroll : m.kind === 'viewport' ? (m.axis === 'height' ? live.height : m.axis === 'aspect' ? live.width / live.height : live.width) : 0;
+  const stepInputs = () => {
+    live.vx = live.x - live.px; live.vy = live.y - live.py; live.px = live.x; live.py = live.y;
+    for (const m of inputs) { const k = m.program + '|' + m.uniform + '|' + m.component; const s = signalOf(m); const e = eased.has(k) ? eased.get(k) : s; eased.set(k, e + (m.k == null ? 1 : m.k) * (s - e)); }
+  };
+  // the input's value written into a copy of the uniform's value
+  const withInputs = (list, v) => {
+    const out = Array.from(v && typeof v.length === 'number' ? v : [v]);
+    for (const m of list) { const x = m.scale * eased.get(m.program + '|' + m.uniform + '|' + m.component) + m.offset; if (Number.isFinite(x)) out[m.component] = x; }
+    return out;
+  };
+  // three.js sets a uniform only when its value changes, so the recorded frames may not set it at all: set it on the
+  // program before each frame too
+  const applyInputs = () => {
+    if (!inputTouched || !animate) return;
+    for (const [k, list] of inputBy) {
+      const [p, n] = k.split('|');
+      const P = (S.programs.find((x) => String(x.id) === p) || { uniforms: [] }).uniforms.find((u) => u.name === n);
+      const prog = get('prog', +p);
+      if (!prog || !P) continue;
+      gl.useProgram(prog);
+      setUniformValue(loc(+p, n), P.type, withInputs(list, P.v));
+    }
+  };
+  const setInput = (o) => { inputTouched = true; for (const k of ['x', 'y', 'scroll', 'width', 'height']) if (o[k] != null && Number.isFinite(+o[k])) live[k] = +o[k]; };
+
+  // live mode holds the recorded moment still: values that differ between the two recorded frames (a camera mid-move, an
+  // intro fading in) would flip back and forth every frame and the picture would shake, so every frame takes the float
+  // and matrix uniforms of the last recorded frame (the one DEA scored); clocks still follow real time, and the
+  // simulation passes still run forward on the live render targets
+  const steadyOf = new Map(); // "frame:cmd" -> { raw args from the last frame, that command's "frame:cmd" }
+  if (animate && options.steady !== false && doc.frames.length > 1) {
+    const isFloat = (n) => n.startsWith('uniformMatrix') || (n.startsWith('uniform') && n.slice(7).indexOf('f') >= 0);
+    const occ = (f) => { const seen = new Map(); const out = new Map(); doc.frames[f].cmds.forEach((c, i) => { const a = c[1]; if (!isFloat(c[0]) || !a || a.$ !== 'loc') return; const k = a.p + '|' + a.n; const n = seen.get(k) || 0; seen.set(k, n + 1); out.set(k + '#' + n, i); }); return out; };
+    const L = doc.frames.length - 1;
+    const lastOcc = occ(L);
+    for (let f = 0; f < L; f++) for (const [k, i] of occ(f)) { const j = lastOcc.get(k); if (j != null && doc.frames[L].cmds[j][0] === doc.frames[f].cmds[i][0]) steadyOf.set(f + ':' + i, { raw: doc.frames[L].cmds[j].slice(1), at: L + ':' + j }); }
+  }
   let t0 = 0;
   const exec = (f) => {
     const cmds = doc.frames[f].cmds;
@@ -280,8 +327,20 @@ export function createReplay(canvas, data, options = {}) {
       const last = raw[raw.length - 1];
       if (last && typeof last === 'object' && last.$ret) { ret = last.$ret; raw = raw.slice(0, -1); }
       if (DRAWS.has(name) && skipDraw.has(f + ':' + i)) continue;
-      const A = anim.get(f + ':' + i);
+      const held = steadyOf.get(f + ':' + i);
+      if (held) { raw = held.raw; const lr = raw[raw.length - 1]; if (lr && typeof lr === 'object' && lr.$ret) raw = raw.slice(0, -1); }
+      // a clock held from the last frame advances from the last frame's value too, so time does not step back and forth
+      const A = anim.get(held ? held.at : f + ':' + i);
       if (animate && A && t0) { raw = raw.slice(); for (const x of A) raw[x.arg] = x.base + x.rate * (now - t0); }
+      if (inputTouched && animate && name.startsWith('uniform') && !name.startsWith('uniformMatrix') && raw[0] && raw[0].$ === 'loc') {
+        const list = inputBy.get(raw[0].p + '|' + raw[0].n);
+        if (list) {
+          const l = loc(raw[0].p, raw[0].n);
+          if (name.endsWith('v')) { const v = arg(raw[1]); gl[name](l, new Float32Array(withInputs(list, v))); }
+          else gl[name](l, ...withInputs(list, raw.slice(1)));
+          continue;
+        }
+      }
       if (name.startsWith('uniform') && raw[0] && raw[0].$ === 'loc') {
         const o = overrides.get(raw[0].p + '|' + raw[0].n);
         if (o) { const l = loc(raw[0].p, raw[0].n); if (name.startsWith('uniformMatrix')) gl[name](l, false, o); else if (name.endsWith('v')) gl[name](l, o); else gl[name](l, ...o); continue; }
@@ -315,8 +374,10 @@ export function createReplay(canvas, data, options = {}) {
 
   let frame = 0;
   let raf = 0;
+  let unlisten = null;
   const step = () => {
     if (!t0) t0 = performance.now();
+    if (animate && inputs.length) { stepInputs(); applyInputs(); }
     applyState(doc.frames[frame].state);
     exec(frame);
     frame = (frame + 1) % doc.frames.length;
@@ -327,8 +388,25 @@ export function createReplay(canvas, data, options = {}) {
     errors,
     passes: (doc.graph && doc.graph.passes) || [],
     renderFrames(n = doc.frames.length) { for (let i = 0; i < n; i++) step(); gl.flush(); },
-    start() { const tick = () => { step(); raf = requestAnimationFrame(tick); }; raf = requestAnimationFrame(tick); },
-    stop() { cancelAnimationFrame(raf); },
+    start() {
+      const tick = () => { step(); raf = requestAnimationFrame(tick); };
+      raf = requestAnimationFrame(tick);
+      if (options.listen !== false && typeof window !== 'undefined' && inputs.length) {
+        // real pointer, touch and scroll drive the measured uniforms; the drawing buffer keeps the recorded size
+        const onMove = (e) => { const t = e.touches ? e.touches[0] : e; if (t) setInput({ x: t.clientX / innerWidth, y: t.clientY / innerHeight }); };
+        let wheel = 0;
+        const onWheel = (e) => { if (document.documentElement.scrollHeight <= innerHeight + 2) { wheel = Math.max(0, wheel + e.deltaY); setInput({ scroll: wheel }); } };
+        const onScroll = () => setInput({ scroll: scrollY });
+        const onResize = () => setInput({ width: innerWidth, height: innerHeight });
+        const L = [['pointermove', onMove], ['touchmove', onMove], ['wheel', onWheel], ['scroll', onScroll], ['resize', onResize]];
+        for (const [n, f] of L) addEventListener(n, f, { passive: true });
+        unlisten = () => { for (const [n, f] of L) removeEventListener(n, f); };
+      }
+    },
+    stop() { cancelAnimationFrame(raf); if (unlisten) unlisten(); unlisten = null; },
+    /** uniforms that follow live input, and a way to drive them: x, y (0..1 of the window), scroll (px), width, height */
+    inputs,
+    setInput,
     /** set a uniform of one program by the program's label or id (see render-graph.md) and keep it set */
     setUniform(program, name, value) {
       const P = (doc.graph && doc.graph.programs || []).find((x) => x.label === program || x.id === program);
