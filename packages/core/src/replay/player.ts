@@ -382,7 +382,10 @@ export function createReplay(canvas, data, options = {}) {
     }
   };
 
-  let frame = 0;
+  // two recorded frames whose pictures differ (instances placed by simulation state, not by a uniform) flip back and forth
+  // even with every uniform held: DEA then plays the last recorded frame alone (doc.hold = 'last', set after it measured the flip)
+  const holdLast = animate && options.steady !== false && (options.steady === 'last' || doc.hold === 'last');
+  let frame = holdLast ? doc.frames.length - 1 : 0;
   let raf = 0;
   let unlisten = null;
   const step = () => {
@@ -390,7 +393,7 @@ export function createReplay(canvas, data, options = {}) {
     if (animate && inputs.length) { stepInputs(); applyInputs(); }
     applyState(doc.frames[frame].state);
     exec(frame);
-    frame = (frame + 1) % doc.frames.length;
+    frame = holdLast ? doc.frames.length - 1 : (frame + 1) % doc.frames.length;
   };
   return {
     gl,

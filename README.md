@@ -334,11 +334,22 @@ frames carry slightly different camera matrices (a dolly caught mid-move), and p
 picture shake, so every frame takes the float and matrix uniforms of the last recorded frame while every pass, the
 simulation passes included, still runs on the live render targets and the clocks follow the real time. Real pointer,
 touch, scroll and window size drive the uniforms the input probe measured following them, as value = scale × eased input
-+ offset with the easing found per uniform. The probe moves the pointer across the page, wheels down and back up (the
-page's own scroll when it can scroll, the sum of the wheel when a fixed stage moves by wheel events), and resizes the
-window, while the recorder notes every float uniform and every matrix per frame; live scroll is held inside the range it
-probed. `extract.md` lists each input as ✔ verified live, ≈ inferred (from the uniform's name, not moved by the probe) or
-✖ frozen, and `preview/interaction.jpg` is the same scripted pointer and scroll on the site and on the kit, side by side.
++ offset with the easing found per uniform, applied as a move from the recorded value (recorded + scale × (input − input
+at rest)), so an input that has not moved leaves the picture as recorded. The probe moves the pointer across the page,
+wheels down and back up (the page's own scroll when it can scroll, the sum of the wheel when a fixed stage moves by wheel
+events), and resizes the window, while the recorder notes every float uniform and every matrix per frame. A fit has to earn
+its place: it must predict the way back of the pointer's path as well as the way out (a smooth value that merely drifts
+with time fits a short pointer path by luck), it may not be steeper than the values it was fitted to, live input is held
+inside the range it was measured over and never moves a value by more than the value moved during the probe, a matrix's
+3×3 block is made orthogonal again after the move, and a projection keeps its depth range and moves its two scales by at
+most 15%. `extract.md` lists each input as ✔ verified live, ≈ inferred (from the uniform's name, not moved by the probe) or
+✖ frozen, and `preview/interaction.jpg` is the same scripted pointer and scroll on the site and on the kit, side by side,
+with an interaction score (how well the places where the picture changed agree). What the kit does not do: effects that
+live in CPU state the page never hands to WebGL as a uniform (a pointer trail drawn from the pointer's history, a physics
+simulation of objects) and DOM that moves with scroll (a hero card that shrinks); those play as recorded. When the two
+recorded frames differ in more than uniforms (lusion.co places its instances from simulation state), alternating them
+flips the picture even with every uniform held; DEA measures that on 8 live frames and, if the replay flips, the replay
+plays the last recorded frame alone (`doc.hold = "last"`, said in `extract.md`): steady, and a still picture.
 A uniform that changes without following any input (a sim seed, a noise offset) plays as recorded. The drawing buffer keeps
 the recorded size.
 
@@ -355,6 +366,20 @@ itself and of DEA plus the browsers it started (Linux reads the second from `/pr
 | --- | --- | --- | --- | --- |
 | lusion.co | 676 s | 327 s | 61 s | 99.6% / 99.0% → 99.8% / 99.6% |
 | jehaduddin.vercel.app (`--reference-ms 150000`) | 1046 s | 690 s | 142 s | 85.9% / 84.4% → 85.6% / 84.5% |
+
+Round 5 adds the input probe (wheel, pointer sweeps, resizes) and a scripted interaction check that runs the kit live,
+both on a software GPU at 0.3–0.8 frames per second, so a full extract is slower than the table above: lusion.co 856 s
+with a new reference capture (353 s with the capture reused), jehaduddin.vercel.app 1163 s with design, motion, assets and
+the reference reused (1709 s the first time). `--quick` skips both. Scores now, page / canvas, each measured on its own:
+
+| site | (a) capture replay | (b) editable rebuild | (b) with `--own-assets` | interaction (replay / rebuild) |
+| --- | --- | --- | --- | --- |
+| lusion.co | 99.8% / 99.5% | 99.8% / 99.5% | 85.0% / 52.3% | 0% (a still frame, see below) / 24.4% |
+| jehaduddin.vercel.app | 99.9% / 100% | 99.9% / 100% | 92.1% / 69.1% | 4.0% / 3.7% |
+
+The interaction score is how well the places where the picture changed after a scripted pointer move or wheel turn agree
+between the site and the kit (0–100%); the first two columns are scores of the recorded reference frame, which both
+kits reproduce by construction, so the last column is the one that says how alive the kit is.
 
 What changed:
 

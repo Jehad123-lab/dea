@@ -207,6 +207,8 @@ export interface KitInteraction {
   steady?: import('./preview.ts').Steadiness | null;
   /** ... and alternating the two recorded frames, as round 4 did */
   alternating?: import('./preview.ts').Steadiness | null;
+  /** the replay plays the last recorded frame alone, because holding the uniforms was not enough to stop the flip */
+  heldLast?: boolean;
   error?: string;
 }
 
@@ -330,7 +332,9 @@ export function interactionMd(r: InteractionResult): string {
       if (!x?.steady) return [];
       const f = (s: import('./preview.ts').Steadiness | null | undefined) =>
         s ? `${s.step} / ${s.skip} (flip ${s.flip}${s.shaking ? ', shaking' : ''})` : 'n/a';
-      return [`- ${k}: held (shipped) ${f(x.steady)}; alternating the two recorded frames ${f(x.alternating)}`];
+      return [
+        `- ${k}: held (shipped${x.heldLast ? ', the last recorded frame alone' : ''}) ${f(x.steady)}; alternating the two recorded frames ${f(x.alternating)}`,
+      ];
     }),
     '',
     '| input | status | replay | rebuild | uniforms | evidence |',

@@ -1042,16 +1042,33 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             };
             for (const prog of ['__replay', '__rebuild'] as const) {
               if (prog === '__rebuild' && !replay.rebuild) continue;
+              // is the live picture steady? 8 consecutive frames, held (the kit's default) and alternating (the old way)
+              let steady = await kitSteadiness(browser, server.url, prog, vp).catch(() => null);
+              let heldLast = false;
+              if (prog === '__replay' && steady?.shaking && recDoc) {
+                // the two recorded frames differ in more than uniforms (lusion.co places instances from simulation state):
+                // play the last recorded frame alone and check again
+                recDoc.hold = 'last';
+                await put('public/replay/capture.json', JSON.stringify(recDoc));
+                const again = await kitSteadiness(browser, server.url, prog, vp).catch(() => null);
+                if (again && !again.shaking) {
+                  steady = again;
+                  heldLast = true;
+                  say('the replay flipped between its two recorded frames even with held uniforms: it now plays the last recorded frame alone (steady)');
+                } else {
+                  recDoc.hold = undefined;
+                  await put('public/replay/capture.json', JSON.stringify(recDoc));
+                }
+              }
+              const alternating = await kitSteadiness(browser, server.url, prog, vp, { steady: false }).catch(() => null);
               const k = await kitInteraction(browser, server.url, prog, vp, rest);
               const steps = await scoreInteraction(cmp, siteFrames, k.frames);
-              // is the live picture steady? 8 consecutive frames, held (the kit's default) and alternating (the old way)
-              const steady = await kitSteadiness(browser, server.url, prog, vp).catch(() => null);
-              const alternating = await kitSteadiness(browser, server.url, prog, vp, { steady: false }).catch(() => null);
               res[prog === '__replay' ? 'replay' : 'rebuild'] = {
                 steps,
                 response: meanResponse(steps),
                 steady,
                 alternating,
+                ...(heldLast ? { heldLast } : {}),
                 ...(k.error ? { error: k.error } : {}),
               };
               rows.push({ label: prog === '__replay' ? '(a) replay' : '(b) rebuild', frames: k.frames });

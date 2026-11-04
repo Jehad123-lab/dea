@@ -61,6 +61,27 @@ The first release: decode a website with evidence, use what comes out, and let A
   `--quick`, a clearly labelled rough mode. lusion.co 676 s → 327 s cold, 61 s warm; jehaduddin.vercel.app 1046 s →
   690 s cold, 142 s warm, on a 4-core machine without a GPU, full-mode scores within 0.3 points of before.
 
+### Live input (round 5)
+
+- Live kits hold the recorded camera (no shake: 8 consecutive frames change by 0.1–0.7 on a 0–255 scale, against 5–11 when
+  the two recorded frames are played alternately), and the generated project puts the canvas under the page's text
+  (`zIndex: 0`) and can show the replay beside the rebuild (`?view=replay`).
+- The input probe wheels (the page's own scroll, or the sum of the wheel when a fixed stage moves by wheel events),
+  moves the pointer and resizes the window; matrices (model, view, projection, normal) are fitted per draw to the pointer
+  and to the scroll. `extract.md` says per input whether it is verified live, inferred from a name, or frozen, and
+  `preview/interaction.jpg` plays the same pointer and scroll script on the site and on the kit with an interaction score.
+- A fit moves the recorded value instead of replacing it (recorded + scale × (input − input at rest)); it is held inside
+  the range it was measured over; a matrix is kept orthogonal; a projection keeps its depth range; a fit must predict the
+  way back of the pointer's path and may not be steeper than its data. Before, the first pointer event blacked out the
+  lusion.co rebuild (interaction score 1% → 24%).
+- The first-screen layout read finds fades and overlays painted by `::before` / `::after` (the bottom of jehaduddin's
+  page is darkened by one; the replay was up to 2× too bright there; page score 82.6% → 99.9%). A regular expression
+  that lost its backslash in a template literal had silently disabled the whole layout read; `inpage-scripts.test.ts`
+  now parses every in-page script, and the real-browser CI job prints failing assertions as annotations.
+- A replay whose two recorded frames flip even with held uniforms (lusion.co) now plays the last recorded frame alone: DEA
+  measures 8 live frames, patches the capture (`hold: "last"`) when they flip and measures again.
+- The capture cache is keyed by the recorder's source, so a changed recorder never serves old probe data.
+
 ### Act and connect
 
 - Hands (`dea session`, MCP `browse` / `interact` / `submit`): a browser that stays open, with a policy file; submits

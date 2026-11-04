@@ -73,6 +73,8 @@ export interface CaptureDoc {
   at: string;
   contexts: number;
   animate?: AnimateEntry[];
+  /** 'last': live, play the last recorded frame alone (set when the two recorded frames flip back and forth even with held uniforms) */
+  hold?: 'last';
   /** uniforms that follow the pointer, scroll or window size (measured by the input probe, or read from names) */
   inputs?: import('./inputs.ts').InputMap[];
   /** the window size (CSS px) when the recording was made */
