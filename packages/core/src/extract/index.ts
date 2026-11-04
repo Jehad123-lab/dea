@@ -11,6 +11,8 @@ import { type Gap, renderGaps } from '../gaps.ts';
 import { decodeMotion, type GsapNode, gsapModule, type MotionDoc } from '../motion/index.ts';
 import { animateEntries, buildGraph, type CaptureDoc, compactCapture, placeholderTextures, renderGraphMd } from '../replay/graph.ts';
 import { REPLAY_PLAYER } from '../replay/player.ts';
+import { type RebuildStats, rebuildMd, rebuildPipeline } from '../replay/rebuild.ts';
+import { REBUILD_RUNNER } from '../replay/runner.ts';
 import { recoverScene, sceneGlb, sceneMd, sceneModule } from '../replay/scene.ts';
 import type { InspectOptions } from '../see/inspect.ts';
 import {
@@ -76,6 +78,8 @@ export interface ExtractOptions extends InspectOptions {
   referenceMs?: number;
   /** do not record and replay the site's WebGL frames */
   noReplay?: boolean;
+  /** the largest recording (after compaction) DEA keeps, in MB (default 64); a bigger one is dropped with a note */
+  maxCaptureMb?: number;
 }
 
 /** What the recording and replay of the site's WebGL frames gave. */
@@ -93,6 +97,21 @@ export interface ReplayInfo {
   scene: { meshes: number; camera: boolean; canvas: number | null; page: number | null } | null;
   errors: string[];
   placeholders?: number;
+  /** false with --own-assets: the capture replay was scored but its recorded bytes are not in the kit */
+  shipped: boolean;
+  /**
+   * The editable rebuild: the recorded render graph as a three.js project (rebuild/rebuild.js + public/rebuild/), scored
+   * on its own. Unlike the capture replay above (the recorded calls played back), this is code you can change.
+   */
+  rebuild: null | {
+    canvas: number | null;
+    page: number | null;
+    kept: boolean;
+    stats: RebuildStats;
+    errors: string[];
+    /** canvas score of (b) against (a): what the translation to three.js itself loses */
+    vsReplay?: number | null;
+  };
 }
 
 export interface ExtractResult {
@@ -414,45 +433,71 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
       replayError = 'recordingError' in ref ? (ref.recordingError ?? null) : opts.reference ? 'a reference image was given, so nothing was recorded' : null;
       let recDoc: CaptureDoc | null = null;
       let hasScene = false;
+      let rebuildDoc: { pipeline: import('../replay/rebuild.ts').PipelineDoc; stats: RebuildStats } | null = null;
       if (recording) {
         say('recorded the WebGL frames behind that screenshot; building the render graph and the replay');
         const c = compactCapture(recording.doc, new Uint8Array(recording.bin.buffer, recording.bin.byteOffset, recording.bin.byteLength));
-        recDoc = c.doc;
-        const binU8 = new Uint8Array(c.bin.buffer, c.bin.byteOffset, c.bin.byteLength);
-        recDoc.animate = animateEntries(recDoc);
-        recDoc.graph = buildGraph(recDoc, binU8);
-        const models = (manifest?.network ?? [])
-          .filter((a) => a.kind === 'glb' || a.kind === 'gltf')
-          .flatMap((m) => (m.details?.meshes ?? []).map((x) => ({ name: `${basename(m.url.split('?')[0])} › ${x.name}`, vertices: x.vertices })));
-        const sc = recoverScene(recDoc, binU8, { models });
-        const placeholders = opts.ownAssets ? placeholderTextures(recDoc, binU8) : undefined;
-        await put('public/replay/capture.json', JSON.stringify(recDoc));
-        await put('public/replay/capture.bin', c.bin);
-        await put('replay/replay.js', REPLAY_PLAYER);
-        await put('render-graph.md', renderGraphMd(recDoc.graph, recDoc, url));
-        if (sc.meshes.length) {
-          hasScene = true;
-          await put('public/scene/scene.glb', sceneGlb(sc, { placeholders: Boolean(opts.ownAssets) }));
-          await put('scene/scene.js', sceneModule());
-          await put('scene/scene.md', sceneMd(sc, url));
+        const capMb = opts.maxCaptureMb ?? 64;
+        if (c.bin.length > capMb * 1e6) {
+          replayError = `the recording is ${(c.bin.length / 1e6).toFixed(1)} MB after compaction, over the ${capMb} MB cap (--max-capture-mb ${Math.ceil(c.bin.length / 1e6)} keeps it)`;
+          say(`recording dropped: ${replayError}`);
+        } else {
+          recDoc = c.doc;
+          const binU8 = new Uint8Array(c.bin.buffer, c.bin.byteOffset, c.bin.byteLength);
+          recDoc.animate = animateEntries(recDoc);
+          recDoc.graph = buildGraph(recDoc, binU8);
+          const models = (manifest?.network ?? [])
+            .filter((a) => a.kind === 'glb' || a.kind === 'gltf')
+            .flatMap((m) => (m.details?.meshes ?? []).map((x) => ({ name: `${basename(m.url.split('?')[0])} › ${x.name}`, vertices: x.vertices })));
+          const sc = recoverScene(recDoc, binU8, { models });
+          // (a) the capture replay: the recorded calls played back (the ground truth DEA scores against). With
+          // --own-assets it is scored and then removed: the kit carries no recorded bytes of the site's.
+          await put('public/replay/capture.json', JSON.stringify(recDoc));
+          await put('public/replay/capture.bin', c.bin);
+          await put('replay/replay.js', REPLAY_PLAYER);
+          await put('render-graph.md', renderGraphMd(recDoc.graph, recDoc, url));
+          // (b) the editable rebuild: the same render graph as three.js objects you can change
+          const sceneNodes = new Map(sc.meshes.map((m, i) => [`${m.frame}|${m.cmd}`, m.match ? `${m.match} (mesh ${i})` : `mesh ${i}`]));
+          let placeholders: number | undefined;
+          let rbDoc = recDoc;
+          let rbBin = binU8;
+          if (opts.ownAssets) {
+            rbDoc = structuredClone(recDoc);
+            rbBin = new Uint8Array(binU8);
+            placeholders = placeholderTextures(rbDoc, rbBin);
+          }
+          const rb = rebuildPipeline(rbDoc, rbBin, { data: opts.ownAssets ? 'data.bin' : '../replay/capture.bin', ownAssets: opts.ownAssets, sceneNodes });
+          await put('public/rebuild/pipeline.json', JSON.stringify(rb.pipeline));
+          for (const [f, s2] of Object.entries(rb.shaders)) await put(`public/rebuild/${f}`, s2);
+          if (opts.ownAssets) await put('public/rebuild/data.bin', Buffer.from(rbBin.buffer, rbBin.byteOffset, rbBin.byteLength));
+          await put('rebuild/rebuild.js', REBUILD_RUNNER);
+          rebuildDoc = { pipeline: rb.pipeline, stats: rb.stats };
+          if (sc.meshes.length) {
+            hasScene = true;
+            await put('public/scene/scene.glb', sceneGlb(sc, { placeholders: Boolean(opts.ownAssets) }));
+            await put('scene/scene.js', sceneModule());
+            await put('scene/scene.md', sceneMd(sc, url));
+          }
+          replay = {
+            frames: recDoc.frames.length,
+            passes: recDoc.graph.passes.length,
+            draws: recDoc.graph.passes.reduce((n, p) => n + p.drawCount, 0),
+            programs: recDoc.graph.programs.filter((p) => p.draws).length,
+            bytes: c.bin.length,
+            canvas: null,
+            page: null,
+            kept: false,
+            roles: [...new Set(recDoc.graph.passes.map((p) => p.role))],
+            scene: sc.meshes.length ? { meshes: sc.meshes.length, camera: Boolean(sc.camera), canvas: null, page: null } : null,
+            errors: recDoc.errors.slice(0, 10),
+            placeholders,
+            shipped: !opts.ownAssets,
+            rebuild: { canvas: null, page: null, kept: false, stats: rb.stats, errors: [] },
+          };
+          say(
+            `replay: ${replay.passes} passes, ${replay.draws} draws, ${replay.programs} programs, ${(c.bin.length / 1e6).toFixed(1)} MB${sc.meshes.length ? `; scene: ${sc.meshes.length} meshes` : ''}; editable rebuild: ${rb.stats.draws} draws, ${rb.stats.materials} materials, ${rb.stats.cameras} cameras`,
+          );
         }
-        replay = {
-          frames: recDoc.frames.length,
-          passes: recDoc.graph.passes.length,
-          draws: recDoc.graph.passes.reduce((n, p) => n + p.drawCount, 0),
-          programs: recDoc.graph.programs.filter((p) => p.draws).length,
-          bytes: c.bin.length,
-          canvas: null,
-          page: null,
-          kept: false,
-          roles: [...new Set(recDoc.graph.passes.map((p) => p.role))],
-          scene: sc.meshes.length ? { meshes: sc.meshes.length, camera: Boolean(sc.camera), canvas: null, page: null } : null,
-          errors: recDoc.errors.slice(0, 10),
-          placeholders,
-        };
-        say(
-          `replay: ${replay.passes} passes, ${replay.draws} draws, ${replay.programs} programs, ${(c.bin.length / 1e6).toFixed(1)} MB${sc.meshes.length ? `; scene: ${sc.meshes.length} meshes` : ''}`,
-        );
       }
       // the first screen's text as laid out on the site (with your own screenshot, read on both of the site's paths)
       const layoutCandidates = (
@@ -465,10 +510,12 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
       const cmp = await browser.newPage();
       let lastPng = '';
       let renderError: string | undefined;
+      let lastErr: string | undefined;
       let lastCmp: Similarity | null = null;
       const render = async (p: Params) => {
         const r = await renderPreview(browser, server.url, p, vp);
         renderError ??= r.error;
+        lastErr = r.error;
         lastPng = r.png;
         lastCmp = await compareImages(cmp, original, r.png);
         return lastCmp.similarity;
@@ -526,6 +573,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
         if (recDoc && replay) {
           const sR = await render({ ...params, program: '__replay' });
           const cR = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
+          const replayPng = lastPng;
           replay.page = sR;
           replay.canvas = cR?.score ?? null;
           if (replay.scene && hasScene) {
@@ -533,14 +581,59 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
             const cS = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
             replay.scene.page = sS;
             replay.scene.canvas = cS?.score ?? null;
+            await put('preview/scene.png', Buffer.from(lastPng.slice(lastPng.indexOf(',') + 1), 'base64'));
           }
-          if (cR && (!canvasStart || cR.score > canvasStart.score + 0.005)) {
+          say(`(a) capture replay (the recorded frames played back): canvas ${cR ? pct(cR.score) : 'n/a'}, page ${pct(sR)}`);
+          await put('preview/replay.png', Buffer.from(replayPng.slice(replayPng.indexOf(',') + 1), 'base64'));
+          await put(
+            'preview/side-by-side-replay.png',
+            await sideBySide(cmp, original, replayPng, [
+              `original (${url})`,
+              `(a) capture replay, recorded frames played back: page ${pct(sR)}, canvas ${cR ? pct(cR.score) : 'n/a'}`,
+            ]),
+          );
+          // (b) the editable rebuild, scored on its own
+          let cB: CanvasScore | null = null;
+          let sB = 0;
+          if (replay.rebuild && rebuildDoc) {
+            sB = await render({ ...params, program: '__rebuild' });
+            cB = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
+            replay.rebuild.page = sB;
+            replay.rebuild.canvas = cB?.score ?? null;
+            replay.rebuild.errors = lastErr ? [lastErr] : [];
+            const rebuildPng = lastPng;
+            // how close (b) comes to (a), pixel structure only: what the three.js translation itself loses
+            const agree = await compareCanvas(cmp, replayPng, rebuildPng, canvasBox, textBoxes, vp);
+            replay.rebuild.vsReplay = agree?.score ?? null;
+            say(
+              `(b) editable rebuild (three.js from the render graph): canvas ${cB ? pct(cB.score) : 'n/a'}, page ${pct(sB)}; against (a) itself: ${replay.rebuild.vsReplay != null ? pct(replay.rebuild.vsReplay) : 'n/a'}`,
+            );
+            await put('preview/rebuild.png', Buffer.from(rebuildPng.slice(rebuildPng.indexOf(',') + 1), 'base64'));
+            await put(
+              'preview/side-by-side-rebuild.png',
+              await sideBySide(cmp, original, rebuildPng, [
+                `original (${url})`,
+                `(b) editable rebuild, three.js from the render graph: page ${pct(sB)}, canvas ${cB ? pct(cB.score) : 'n/a'}`,
+              ]),
+            );
+            await put('rebuild.md', rebuildMd(rebuildDoc.pipeline, rebuildDoc.stats, { canvas: cB?.score ?? null, page: sB }, Boolean(opts.ownAssets)));
+          }
+          // the project runs the editable rebuild when it beats DEA's own start; the capture replay only when the rebuild
+          // could not and the recorded bytes may ship
+          const beats = (x: CanvasScore | null) => Boolean(x && (!canvasStart || x.score > canvasStart.score + 0.005));
+          if (replay.rebuild && beats(cB)) {
+            replayKept = true;
+            replay.rebuild.kept = true;
+            params = { ...params, program: '__rebuild' };
+            best = sB;
+            say(`keeping the editable rebuild: canvas ${pct((cB as CanvasScore).score)} (DEA's start: ${canvasStart ? pct(canvasStart.score) : 'n/a'})`);
+          } else if (!opts.ownAssets && beats(cR)) {
             replayKept = true;
             replay.kept = true;
             params = { ...params, program: '__replay' };
             best = sR;
-            say(`the replay of the site's own frames: canvas ${pct(cR.score)} (was ${canvasStart ? pct(canvasStart.score) : 'n/a'}), page ${pct(sR)}`);
-          } else say(`the replay did not beat the start on the canvas (${cR ? pct(cR.score) : 'n/a'}); keeping the shader rebuild`);
+            say(`keeping the capture replay (the editable rebuild scored lower): canvas ${pct((cR as CanvasScore).score)}`);
+          } else say(`neither the rebuild nor the replay beat the start on the canvas; keeping the shader rebuild`);
         }
         // analysis first: DEA's own facts as candidates (the screen's mean colour, other palette colours, each shader, opacity)
         const meanOriginal = (await compareImages(cmp, original, original)).meanA;
@@ -624,7 +717,17 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
         const final = research.best;
         await render(params);
         if (replayKept) {
-          const pf = projectFiles(target, { mods, title, site: url, threeVersion, hasMotion, heading, layout, replay: true });
+          const pf = projectFiles(target, {
+            mods,
+            title,
+            site: url,
+            threeVersion,
+            hasMotion,
+            heading,
+            layout,
+            replay: params.program === '__replay',
+            rebuild: params.program === '__rebuild',
+          });
           for (const f of Object.keys(pf)) await put(f, pf[f]);
         }
         if (standin) {
@@ -640,7 +743,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
           'preview/side-by-side.png',
           await sideBySide(cmp, original, lastPng, [
             `original (${url})`,
-            `DEA rebuild: page ${pct(final)}, canvas ${canvasFinal ? pct(canvasFinal.score) : 'n/a'}`,
+            `${params.program === '__rebuild' ? '(b) editable rebuild' : params.program === '__replay' ? '(a) capture replay' : 'DEA rebuild'}: page ${pct(final)}, canvas ${canvasFinal ? pct(canvasFinal.score) : 'n/a'}`,
           ]),
         );
         diff = {
@@ -662,6 +765,13 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
     }
   } finally {
     await browser?.close();
+  }
+
+  // with --own-assets the capture replay was only a yardstick: its recorded bytes leave the kit
+  if (opts.ownAssets && replay) {
+    await rm(join(out, 'public', 'replay'), { recursive: true, force: true });
+    await rm(join(out, 'replay'), { recursive: true, force: true });
+    for (let i = files.length - 1; i >= 0; i--) if (/^(public\/)?replay\//.test(files[i])) files.splice(i, 1);
   }
 
   // 5. techniques behind it, researched in free sources (cited; values and pointers only, no code copied)
@@ -789,9 +899,19 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
           `visual diff (${canvasLine(diff.canvas?.final)})${diff.canvas?.start && diff.canvas.final ? `, from ${pct(diff.canvas.start.score)} at the start` : ''}`,
         ]
       : []),
-    replay
-      ? `replay of the site's own frames: ${replay.passes} passes, ${replay.draws} draws, ${replay.programs} programs, ${(replay.bytes / 1e6).toFixed(1)} MB (render-graph.md)${replay.kept ? '' : ', not kept'}${replay.scene ? ` · scene: ${replay.scene.meshes} meshes + camera in public/scene/scene.glb${replay.scene.canvas != null ? ` (canvas ${pct(replay.scene.canvas)} with a plain material)` : ''}` : ''}`
-      : `replay: not recorded${replayError ? ` (${replayError})` : ''}`,
+    ...(replay
+      ? [
+          `(a) capture replay, the recorded frames played back (ground truth, not editable): canvas ${replay.canvas != null ? pct(replay.canvas) : 'n/a'}, page ${replay.page != null ? pct(replay.page) : 'n/a'} · ${replay.passes} passes, ${replay.draws} draws, ${replay.programs} programs, ${(replay.bytes / 1e6).toFixed(1)} MB (render-graph.md)${replay.shipped ? '' : ', scored but not in the kit (--own-assets)'}`,
+          replay.rebuild
+            ? `(b) editable rebuild, three.js from the render graph (rebuild.md): canvas ${replay.rebuild.canvas != null ? pct(replay.rebuild.canvas) : 'n/a'}, page ${replay.rebuild.page != null ? pct(replay.rebuild.page) : 'n/a'}${replay.rebuild.vsReplay != null ? `, ${pct(replay.rebuild.vsReplay)} against (a)` : ''} · ${replay.rebuild.stats.materials} RawShaderMaterials, ${replay.rebuild.stats.cameras} cameras, ${replay.rebuild.stats.renderTargets} render targets; recorded bytes still used: ${(replay.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB geometry, ${(replay.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB textures${replay.rebuild.kept ? ' · what the project runs' : ''}`
+            : '(b) editable rebuild: not made',
+          ...(replay.scene
+            ? [
+                `scene: ${replay.scene.meshes} meshes + camera in public/scene/scene.glb${replay.scene.canvas != null ? ` (canvas ${pct(replay.scene.canvas)} with a plain material)` : ''}`,
+              ]
+            : []),
+        ]
+      : [`replay: not recorded${replayError ? ` (${replayError})` : ''}`]),
     gaps.length ? `open gaps: ${gaps.length} (see "Gap → path to result" in the report)` : 'open gaps: none',
   ].join('\n');
   w.emit({ type: 'run.finished', runId: w.id, dir: w.dir, summary, at: new Date().toISOString() });
@@ -1029,17 +1149,31 @@ function renderExtractMd(o: {
     L.push(
       `- ${o.ownAssets ? '≈ Placeholders of the same size (your own images go here)' : '✔ The site’s texture files'}: ${tex.map((t) => `\`${t}\``).join(', ')}`,
     );
-  L.push('', "## The site's own frames, replayed", '');
+  L.push('', "## The site's own frames: (a) capture replay and (b) editable rebuild", '');
   if (o.replay) {
     const r = o.replay;
     L.push(
+      'Two different things, scored separately. **(a) Capture replay**: the recorded calls played back. It is the ground truth for the score, not code to build on. **(b) Editable rebuild**: the same render graph turned into a three.js project (materials, geometry, cameras, render targets, passes) that you can change; it still reads the recorded vertex and texture bytes where `rebuild.md` says so.',
+      '',
+      `| | canvas | page | in the kit |`,
+      `|---|---|---|---|`,
+      `| (a) capture replay | ${r.canvas != null ? pct(r.canvas) : 'n/a'} | ${r.page != null ? pct(r.page) : 'n/a'} | ${r.shipped ? "`replay/replay.js` + `public/replay/` (the site's bytes)" : 'no (--own-assets): scored, then removed'} |`,
+      `| (b) editable rebuild${r.rebuild?.vsReplay != null ? ` (${pct(r.rebuild.vsReplay)} against (a))` : ''} | ${r.rebuild?.canvas != null ? pct(r.rebuild.canvas) : 'n/a'} | ${r.rebuild?.page != null ? pct(r.rebuild.page) : 'n/a'} | ${r.rebuild ? `\`rebuild/rebuild.js\` + \`public/rebuild/\`${r.rebuild.kept ? ' (what the project runs)' : ''}` : 'not made'} |`,
+      '',
+      ...(r.rebuild
+        ? [
+            `- ✔ (b) \`public/rebuild/pipeline.json\`: ${r.rebuild.stats.draws} draws in the site's order as ${r.rebuild.stats.materials} RawShaderMaterials (GLSL in \`public/rebuild/shaders/\`), ${r.rebuild.stats.cameras} camera(s), ${r.rebuild.stats.renderTargets} render targets, ${r.rebuild.stats.glSteps} raw WebGL step(s). three.js reproduces the site's matrices from the camera and model matrix on ${r.rebuild.stats.matricesExact} draw(s)${r.rebuild.stats.matricesOff.length ? `, not on ${r.rebuild.stats.matricesOff.length}` : ''}.`,
+            `- recorded in (b): ${(r.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB of vertex/index buffers and ${(r.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB of texture pixels and simulation start state${o.ownAssets ? `; --own-assets: images are checkers and ${r.rebuild.stats.placeholders} large mesh(es) are boxes, their bytes are not in the kit` : " (the site's own bytes: for study and prototyping)"}. See \`rebuild.md\`.`,
+          ]
+        : []),
+      '',
       `✔ DEA recorded ${r.frames} consecutive frames of the site's WebGL right before the reference screenshot: every call with its arguments, and every buffer, texture, shader program and render target as it was when the frames began (read back from the GPU). ${(r.bytes / 1e6).toFixed(1)} MB in \`public/replay/\`.`,
       '',
       `- ✔ \`replay/replay.js\` runs exactly those calls with the site's own GLSL, geometry and textures: ${r.passes} passes, ${r.draws} draws, ${r.programs} programs. Passes seen (≈ roles read from the facts): ${r.roles.join(', ')}.`,
       `- ✔ \`render-graph.md\`: every pass in order, its target, programs, draws, the textures it reads, blend and depth.`,
       `- ≈ Clock uniforms (a value named like time that grew between the frames) advance with real time; everything else replays as recorded, frame after frame. \`replay.setUniform(program, name, value)\` overrides a value, \`replay.setPassEnabled(i, false)\` switches a pass off.`,
       r.canvas != null
-        ? `- Replay alone: canvas ${pct(r.canvas)}, page ${pct(r.page ?? 0)}. ${r.kept ? '✔ Kept: it is what the preview and the project run.' : 'Not kept: it did not beat the shader rebuild on the canvas.'}`
+        ? `- (a) alone: canvas ${pct(r.canvas)}, page ${pct(r.page ?? 0)}. ${r.kept ? '✔ The project runs it (the editable rebuild scored lower).' : 'The project does not run it: it is the reference.'}`
         : '- The replay was not scored.',
       ...(r.scene
         ? [

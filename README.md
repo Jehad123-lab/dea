@@ -285,24 +285,31 @@ visual diff: 73.2% → 88.1% after analysis → 88.1% after research (searches f
 open gaps: 3 (see "Gap → path to result" in the report)
 ```
 
-**The site's own frames, replayed.** For WebGL heroes, a hand-written stand-in is never the real thing. So right
-before the reference screenshot, `dea extract` records two consecutive frames of the site's busiest WebGL context:
-every call with its arguments, and every buffer, texture, shader program and render target as it was when the frames
-began (read back from the GPU). `replay/replay.js` runs exactly those calls with the site's own GLSL, geometry and
-textures, so simulation passes (float-texture ping-pong), particles, meshes, bloom chains, SMAA and the final composite
-all come back in their real order. `render-graph.md` lists every pass with its target, programs, draws, inputs, blend
-and depth (✔ Verified from the recording) and the role DEA reads from them (≈ Inferred, with why). Clock uniforms
-advance with real time; `replay.setUniform()` and `replay.setPassEnabled()` let you change the rest. The replay is kept
-only when it scores better than DEA's own rebuild; `--no-replay` turns it off.
+**The site's own frames: a capture replay and an editable rebuild.** For WebGL heroes a hand-written stand-in is
+never the real thing. So right before the reference screenshot, `dea extract` records two consecutive frames of the
+site's busiest WebGL context: every call with its arguments, and every buffer, texture, shader program and render target
+as it was when the frames began (read back from the GPU). From that recording it makes two different things and scores
+each on its own:
 
-Meshes drawn in the frame are also read back into `scene/scene.glb` (positions, normals, UVs, each draw's model matrix,
-and the camera from the view and projection uniforms), matched to the site's GLB files by vertex count when `dea assets`
-found them, with a three.js loader in `scene/scene.js`. `--own-assets` swaps every uploaded image for a neutral
-placeholder and every mesh in the GLB for its bounding box.
+- **(a) Capture replay** (`replay/replay.js`): the recorded calls played back, call for call. It is the ground truth
+  for the score, not code to build on.
+- **(b) Editable rebuild** (`rebuild/rebuild.js` + `public/rebuild/pipeline.json`): the same render graph as a three.js
+  project. Every draw is a three.js object with a `RawShaderMaterial` (the site's own GLSL, one file per program in
+  `public/rebuild/shaders/`), its blend, depth, cull and stencil state as material properties, a `BufferGeometry`, and
+  the site's camera and model matrix as three.js matrices; every framebuffer is a `WebGLRenderTarget`; the passes run in
+  the site's order. Change a uniform, a shader file, the camera, or switch a pass off (`rb.setPassEnabled(i, false)`),
+  and the picture follows. It still reads the recorded vertex buffers and texture pixels; `rebuild.md` says exactly
+  where and how many bytes.
 
-On the same portfolio, with the replay: page **94.5%**, canvas **90.5%** (SSIM 91.3%, edges 91.7%) — the canvas score
-was 50.9% with the stand-in. The recorded frames are the site's own data: they are for studying and prototyping, and
-the assets in them belong to their owners.
+`render-graph.md` lists every pass with its target, programs, draws, inputs, blend and depth (✔ Verified from the
+recording) and the role DEA reads from them (≈ Inferred, with why). The project runs the editable rebuild when it
+beats DEA's own start; side-by-sides for both are in `preview/side-by-side-replay.png` and
+`preview/side-by-side-rebuild.png`. Meshes in the frame are also read back into `scene/scene.glb` (positions, normals,
+UVs, model matrices, the camera), matched to the site's GLB files by vertex count. `--own-assets` swaps the site's
+images for placeholders and large meshes for boxes, and leaves the capture replay out of the kit (it is scored, then
+removed); `--max-capture-mb` caps the recording (64 MB after compaction by default); `--no-replay` turns all of it off.
+
+The recorded bytes are the site's own: use them to study and prototype, and swap in your own before you ship.
 
 `--section <selector>` scrolls that part of the page into view for the reference, reads only its text, and keeps only
 the motion that touches it. `--reference shot.png` compares against your own screenshot (for example one taken on a

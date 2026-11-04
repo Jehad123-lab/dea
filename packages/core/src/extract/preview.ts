@@ -84,6 +84,20 @@ try {
     const r = createReplay(c, d, { animate: false, preserveDrawingBuffer: true });
     r.renderFrames();
     window.__deaReplayErrors = r.errors;
+  } else if (P.program === '__rebuild') {
+    // the editable rebuild: the recorded render graph as three.js objects (rebuild/rebuild.js, public/rebuild/)
+    const THREE = await import('https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js');
+    const { loadPipeline, createRebuild } = await import('../rebuild/rebuild.js');
+    const d = await loadPipeline('../public/rebuild/');
+    const b = d.pipeline.canvas;
+    const c = document.createElement('canvas');
+    c.style.cssText = 'position:fixed;pointer-events:none;left:' + b.x + 'px;top:' + b.y + 'px;width:' + b.cssW + 'px;height:' + b.cssH + 'px';
+    const el = document.getElementById('scene');
+    el.style.opacity = String(P.opacity ?? 1);
+    el.appendChild(c);
+    const r = createRebuild(c, d, { THREE, animate: false, preserveDrawingBuffer: true });
+    r.renderFrames();
+    window.__deaReplayErrors = r.errors;
   } else if (P.program === '__scene') {
     // the 3D scene recovered from the recording (scene/scene.glb): geometry, transforms, camera; a plain material
     const { mountRecoveredScene } = await import('../scene/scene.js');
@@ -530,7 +544,8 @@ export async function renderPreview(
   const page = await browser.newPage({ viewport });
   try {
     await page.goto(`${base}/preview/index.html#${encodeURIComponent(JSON.stringify(params))}`, { waitUntil: 'load', timeout: 30_000 });
-    await page.waitForFunction('window.__deaReady === true', undefined, { timeout: 30_000 }).catch(() => {});
+    // a first compile of many programs on a software GPU can take a while; the wait ends as soon as the page is ready
+    await page.waitForFunction('window.__deaReady === true', undefined, { timeout: 120_000 }).catch(() => {});
     const error = (await page.evaluate('window.__deaError || null')) as string | null;
     const png = `data:image/png;base64,${(await page.screenshot({ type: 'png' })).toString('base64')}`;
     return { png, error: error ?? undefined };

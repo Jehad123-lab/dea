@@ -224,7 +224,7 @@ common(
     .argument('[url]', 'site to extract')
     .option('--to <target>', 'react, vanilla or framer', 'react')
     .option('--section <selector>', 'keep only motion that touches this CSS selector')
-    .option('--own-assets', 'write same-size placeholders instead of the site textures')
+    .option('--own-assets', "placeholders instead of the site's images and large meshes; the kit carries none of the site's recorded bytes")
     .option('--from <runs>', 'reuse runs: design=<id>,motion=<id>,assets=<id>,trace=<id>')
     .option('--no-diff', 'skip the visual diff and research loop')
     .option('--rounds <n>', 'research rounds when the rebuild does not match', '3')
@@ -232,7 +232,8 @@ common(
     .option('--tag <tags...>', 'tags for the library entry')
     .option('--verify-build', 'run npm install and npm run build in the generated project and report it')
     .option('--no-trace', 'skip the live WebGL trace (uniform values and drivers)')
-    .option('--no-replay', "do not record and replay the site's WebGL frames")
+    .option('--no-replay', "do not record the site's WebGL frames (no capture replay, no editable rebuild)")
+    .option('--max-capture-mb <mb>', 'the largest recording kept, after compaction', '64')
     .option('--no-research', 'do not search free sources for the techniques found')
     .option('--batch <file>', 'extract every URL in a text file (one per line)')
     .option('--reference <image>', 'your own screenshot of the original to compare against (e.g. taken on a machine with a GPU)')
@@ -256,6 +257,7 @@ common(
       research: boolean;
       reference?: string;
       referenceMs: string;
+      maxCaptureMb: string;
     },
   ) =>
     run(async () => {
@@ -292,6 +294,7 @@ common(
           verifyBuild: flags.verifyBuild,
           noTrace: !flags.trace,
           noReplay: !flags.replay,
+          maxCaptureMb: Number(flags.maxCaptureMb) || 64,
           noResearch: !flags.research,
         });
         if (flags.json)

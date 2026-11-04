@@ -13,6 +13,8 @@ import {
   unneededTextures,
 } from '../src/replay/graph.ts';
 import { REPLAY_PLAYER } from '../src/replay/player.ts';
+import { normalMatrixOf, rebuildMd, rebuildPipeline } from '../src/replay/rebuild.ts';
+import { REBUILD_RUNNER } from '../src/replay/runner.ts';
 import { invert, mul, perspectiveOf, recoverScene, sceneGlb, sceneMd } from '../src/replay/scene.ts';
 
 // a tiny recording, written the way the in-page recorder writes one: a simulation pass ping-ponging two float targets,
@@ -260,5 +262,82 @@ describe('replay: in-page code', () => {
     expect(REPLAY_CAPTURE_SCRIPT).not.toMatch(/\$\{/);
     expect(REPLAY_PLAYER).toMatch(/export function createReplay/);
     expect(REPLAY_PLAYER).toMatch(/export async function mountReplay/);
+  });
+
+  it('the editable-rebuild runner is valid JavaScript with no template holes', () => {
+    const body = REBUILD_RUNNER.replace(/^import .*$/m, 'const THREE_NS = {};').replace(/^export /gm, '');
+    expect(() => new Function(body)).not.toThrow();
+    expect(REBUILD_RUNNER).not.toMatch(/\$\{/);
+    expect(REBUILD_RUNNER).toMatch(/export function createRebuild/);
+    expect(REBUILD_RUNNER).toMatch(/export async function mountRebuild/);
+    expect(REBUILD_RUNNER).toMatch(/RawShaderMaterial/);
+  });
+});
+
+describe('replay: editable rebuild', () => {
+  const d = structuredClone(doc);
+  d.animate = animateEntries(d);
+  d.graph = buildGraph(d, BIN);
+  const { pipeline, shaders, stats } = rebuildPipeline(d, BIN, { data: '../replay/capture.bin' });
+  const draws = pipeline.frames.flatMap((f) => f.steps.filter((s) => s.op === 'draw'));
+
+  it('turns every draw into a three.js draw step with its material, geometry and target', () => {
+    expect(stats.draws).toBe(4);
+    expect(draws[0]).toMatchObject({ op: 'draw', frame: 0, mode: 4, first: 0, count: 3, target: 31, index: null });
+    expect(draws[0].attrs[0]).toMatchObject({ name: 'position', buf: 20, size: 2, type: 0x1406 });
+    expect(draws[1]).toMatchObject({ mode: 4, count: 12, target: 0, index: { buf: 21, type: 0x1403, offset: 0 } });
+    expect(pipeline.materials).toHaveLength(2);
+    expect(pipeline.materials[0]).toMatchObject({ program: 1, fragment: 'shaders/SimMaterial-1.frag' });
+    expect(shaders['shaders/SimMaterial-1.frag']).toMatch(/uniform sampler2D tPos/);
+    expect(pipeline.data).toBe('../replay/capture.bin');
+    expect(pipeline.glVersion).toBe(2);
+  });
+
+  it('samplers point at the texture bound to their unit, and per-draw changes are deltas', () => {
+    expect(pipeline.materials[0].uniforms.tPos).toEqual({ tex: 10, kind: '2d' });
+    expect(draws[0].uniforms).toEqual({});
+    expect(draws[2].uniforms.tPos).toEqual({ tex: 11, kind: '2d' });
+    expect(draws[2].uniforms.uTime).toBe(1.5);
+  });
+
+  it('cameras and model matrices become three.js matrices that reproduce the uploads', () => {
+    expect(pipeline.cameras).toHaveLength(1);
+    expect(pipeline.cameras[0].view).toEqual(view);
+    expect(pipeline.cameras[0].projection).toEqual(proj);
+    expect(draws[1].camera).toBe(0);
+    expect(draws[1].model).toEqual(model);
+    expect(draws[0].camera).toBeNull();
+    expect(stats.matricesExact).toBe(2);
+    expect(pipeline.materials[1].builtins.sort()).toEqual(['modelMatrix', 'projectionMatrix', 'viewMatrix']);
+    expect(normalMatrixOf([2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1])?.slice(0, 3)).toEqual([0.5, 0, 0]);
+  });
+
+  it('keeps clears, clocks and passes; labels what is recorded', () => {
+    const clears = pipeline.frames[0].steps.filter((s) => s.op === 'clear');
+    expect(clears).toHaveLength(1);
+    expect(clears[0]).toMatchObject({ target: 0, bits: 0x4100 });
+    expect(pipeline.clocks).toEqual([{ program: 1, uniform: 'uTime', base: 1, rate: expect.any(Number) }]);
+    expect(pipeline.passes.map((p) => p.role)).toContain('simulation step (GPGPU ping-pong)');
+    expect(pipeline.labels.geometry).toMatch(/^recorded/);
+    expect(stats.recordedBuffers).toBe(2);
+    const md = rebuildMd(pipeline, stats, { canvas: 0.8, page: 0.9 }, false);
+    expect(md).toMatch(/Editable rebuild score: canvas 80.0%, page 90.0%/);
+    expect(md).toMatch(/recorded: 2 vertex\/index buffers/);
+  });
+
+  it('--own-assets: large meshes become boxes and their bytes are zeroed', () => {
+    const big = structuredClone(d);
+    const n = 6000; // 6000 vertices × 12 bytes = 72 KB, past the 64 KB line
+    const b = new Uint8Array(BIN.length + n * 12 + 8);
+    b.set(BIN);
+    const o = Math.ceil(BIN.length / 8) * 8;
+    new Float32Array(b.buffer, o, n * 3).set(Array.from({ length: n * 3 }, (_, i) => (i % 3 === 1 ? 2 : i % 7)));
+    big.snap.buffers.push({ id: 22, kind: 'array', usage: 0x88e4, o, l: n * 12 });
+    (big.snap.vaos[1].attrs[0] as { buf: number }).buf = 22;
+    const r = rebuildPipeline(big, b, { data: 'data.bin', ownAssets: true });
+    const mesh = r.pipeline.frames[0].steps.find((s) => s.op === 'draw' && s.target === 0) as { placeholder?: { min: number[]; max: number[] } };
+    expect(mesh.placeholder).toEqual({ min: [0, 2, 0], max: [6, 2, 6] });
+    expect(r.stats.placeholders).toBe(2);
+    expect(b.subarray(o, o + n * 12).every((x) => x === 0)).toBe(true);
   });
 });

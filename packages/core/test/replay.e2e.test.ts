@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -8,6 +8,8 @@ import { compareCanvas } from '../src/extract/score.ts';
 import { pullRecording, REPLAY_CAPTURE_SCRIPT, recordFrames, releaseFrames } from '../src/replay/capture.ts';
 import { buildGraph, compactCapture } from '../src/replay/graph.ts';
 import { REPLAY_PLAYER } from '../src/replay/player.ts';
+import { rebuildPipeline } from '../src/replay/rebuild.ts';
+import { REBUILD_RUNNER } from '../src/replay/runner.ts';
 
 // A small WebGL2 page with the shapes real sites use: a float render target updated from its own previous value
 // (ping-pong), an instanced draw that reads it, and a full-screen composite to the canvas.
@@ -75,6 +77,26 @@ describe.skipIf(!process.env.DEA_E2E)('replay (real browser)', () => {
       const replayed = `data:image/png;base64,${(await p2.screenshot()).toString('base64')}`;
       const s = await compareCanvas(p2, shot, replayed, { x: 0, y: 0, w: 320, h: 200 }, [], { width: 320, height: 200 });
       expect(s?.score).toBeGreaterThan(0.97);
+      // (b) the same graph as three.js objects: materials, geometry, render targets, in the recorded order
+      const bin = new Uint8Array(c.bin.buffer, c.bin.byteOffset, c.bin.byteLength);
+      c.doc.graph = g;
+      const rb = rebuildPipeline(c.doc, bin, { data: 'capture.bin' });
+      expect(rb.stats.draws).toBe(4);
+      await mkdir(join(dir, 'shaders'), { recursive: true });
+      await writeFile(join(dir, 'pipeline.json'), JSON.stringify(rb.pipeline));
+      for (const [f, src] of Object.entries(rb.shaders)) await writeFile(join(dir, f), src);
+      await writeFile(join(dir, 'rebuild.js'), REBUILD_RUNNER);
+      await writeFile(
+        join(dir, 'rebuild.html'),
+        '<!doctype html><html><head><script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }</script></head><body style="margin:0;background:#111"><canvas id="c" style="width:320px;height:200px;display:block"></canvas><script type="module">try { const { loadPipeline, createRebuild } = await import("./rebuild.js"); const d = await loadPipeline("./"); const r = createRebuild(document.getElementById("c"), d, { animate: false, preserveDrawingBuffer: true, debug: true }); r.renderFrames(); window.__errors = r.errors; } catch (e) { window.__errors = [String(e)]; } window.__done = true;</script></body></html>',
+      );
+      const p3 = await ctx.newPage();
+      await p3.goto(`${server.url}/rebuild.html`);
+      await p3.waitForFunction(() => (window as unknown as { __done?: boolean }).__done, null, { timeout: 60_000 });
+      expect(await p3.evaluate(() => (window as unknown as { __errors: string[] }).__errors)).toEqual([]);
+      const rebuilt = `data:image/png;base64,${(await p3.screenshot()).toString('base64')}`;
+      const s3 = await compareCanvas(p3, shot, rebuilt, { x: 0, y: 0, w: 320, h: 200 }, [], { width: 320, height: 200 });
+      expect(s3?.score).toBeGreaterThan(0.95);
       await ctx.close();
     } finally {
       await server.close();

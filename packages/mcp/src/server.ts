@@ -187,21 +187,30 @@ export function createServer(opts: ServerOptions = {}): McpServer {
     {
       title: 'Extract a website into code you can use',
       description:
-        'Decode a website and write a runnable kit: design tokens (tokens.css, a Tailwind preset, W3C tokens.json), motion as a GSAP module and CSS keyframes, the site shaders as three.js RawShaderMaterial modules with a minimal React (react-three-fiber), vanilla three.js or Framer scene, and textures by local path (or same-size placeholders). Then renders the rebuild, compares it with the original first screen, and researches and retries (up to 3 rounds, free search providers) when it does not match. Writes files under the run folder; never changes the site.',
+        'Decode a website and write a runnable kit: design tokens (tokens.css, a Tailwind preset, W3C tokens.json), motion as a GSAP module and CSS keyframes, the site shaders as three.js RawShaderMaterial modules with a minimal React (react-three-fiber), vanilla three.js or Framer scene, and textures by local path (or same-size placeholders). On WebGL pages it also records two frames of the site’s own WebGL and reports two scores: (a) the capture replay (the recorded calls played back, the ground truth) and (b) the editable rebuild (the recorded render graph as a three.js project: materials with the site’s GLSL, geometry, cameras, render targets, passes in order). Then renders the rebuild, compares it with the original first screen, and researches and retries (up to 3 rounds, free search providers) when it does not match. Writes files under the run folder; never changes the site.',
       inputSchema: z.object({
         url,
         browser,
         to: z.enum(['react', 'vanilla', 'framer']).default('react').describe('Which kind of project to write.'),
         section: z.string().optional().describe('A CSS selector: keep only motion that touches it.'),
-        ownAssets: z.boolean().optional().describe('Write same-size placeholders instead of the site textures.'),
+        ownAssets: z
+          .boolean()
+          .optional()
+          .describe("Placeholders instead of the site's images and large meshes; the kit carries none of the site's recorded bytes."),
+        referenceMs: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('How long to watch the original before the reference screenshot (ms, default 45000; slow loaders need more).'),
         diff: z.boolean().optional().describe('Run the visual diff and research loop (default true).'),
         verifyBuild: z.boolean().optional().describe('Run npm install and npm run build in the generated project and report the result.'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    async ({ url, browser, to, section, ownAssets, diff, verifyBuild }) => {
+    async ({ url, browser, to, section, ownAssets, referenceMs, diff, verifyBuild }) => {
       try {
-        const r = await extract(url, { browser, to, section, ownAssets, noDiff: diff === false, verifyBuild });
+        const r = await extract(url, { browser, to, section, ownAssets, referenceMs, noDiff: diff === false, verifyBuild });
         return { content: [text(`${DATA_NOTE}\n\n${r.summary}\n\n${clip(r.extractMd)}\n\nFiles: ${r.out}\nRun id: ${r.runId}`)] };
       } catch (e) {
         return fail(e);

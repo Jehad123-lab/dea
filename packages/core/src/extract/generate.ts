@@ -591,11 +591,15 @@ export function projectFiles(
     standin?: Standin | null;
     /** the site's recorded frames replayed (replay/replay.js + public/replay/) instead of one shader program */
     replay?: boolean;
+    /** the editable three.js rebuild of the recorded render graph (rebuild/rebuild.js + public/rebuild/) */
+    rebuild?: boolean;
   },
 ): Record<string, string> {
   const m = o.mods[0];
   const files: Record<string, string> = {};
-  const three = `^0.${o.threeVersion.replace(/^r/, '')}.0`;
+  // the editable rebuild needs three.js r170 or newer (render targets around existing framebuffers, per-material blend colour)
+  const minor = Number(o.threeVersion.replace(/^r/, '').replace(/^0\./, '').split('.')[0]) || 170;
+  const three = `^0.${o.rebuild ? Math.max(170, minor) : o.threeVersion.replace(/^r/, '')}.0`;
   if (target === 'vanilla') {
     files['scene.js'] =
       `// A minimal three.js scene that runs the site's main shader program.\nimport * as THREE from 'three';\n${m ? `import { createMaterial, update } from './${m.file}';` : ''}\n${o.standin ? "import { createParticles } from './standins/particles.js';\n" : ''}\nexport function mountScene(el = document.body) {\n${m ? sceneBody(o.mods, '  ') : '  // no custom shader program was found on the site'}\n${m && o.standin ? `  scene.add(createParticles(THREE, ${JSON.stringify({ spread: o.standin.spread, x: o.standin.x, y: o.standin.y, color: o.standin.color })})); // ≈ technique stand-in, not the site's code\n` : ''}  return () => { renderer.setAnimationLoop(null); window.removeEventListener('resize', onResize); renderer.dispose(); el.removeChild(renderer.domElement); };\n}\n`;
@@ -659,6 +663,14 @@ ${(m?.textures ?? []).map((t) => `    ${t.sampler}: { type: ControlType.String, 
   if (o.replay && target === 'react')
     files['src/Scene.jsx'] =
       `// The site's own WebGL frames, replayed call for call with its shaders, buffers, textures and render targets\n// (see render-graph.md for the passes). replay.setUniform(...) and replay.setPassEnabled(...) change it live.\nimport { useEffect, useRef } from 'react';\nimport { mountReplay } from '../replay/replay.js';\n\nexport default function Scene() {\n  const ref = useRef(null);\n  useEffect(() => {\n    let stop = null;\n    let dead = false;\n    mountReplay(ref.current, { base: '/replay/' }).then((s) => {\n      if (dead) s();\n      else stop = s;\n    });\n    return () => {\n      dead = true;\n      if (stop) stop();\n    };\n  }, []);\n  return <div ref={ref} className="dea-scene" style={{ position: 'fixed', inset: 0, zIndex: -1 }} />;\n}\n`;
+  const rebuildNote =
+    "// The editable rebuild: the site's render graph as three.js objects (rebuild/rebuild.js reads public/rebuild/pipeline.json).\n// Each draw is a RawShaderMaterial with the site's GLSL (public/rebuild/shaders/), cameras and model matrices are three.js\n// matrices, framebuffers are WebGLRenderTargets. rb.uniforms[i].name.value, rb.setPassEnabled(i, false) and the shader\n// files change it. Vertex and texture bytes are recorded from the site (see rebuild.md for where).\n";
+  if (o.rebuild && target === 'vanilla')
+    files['scene.js'] =
+      `${rebuildNote}import { mountRebuild } from './rebuild/rebuild.js';\n\nexport function mountScene(el = document.body) {\n  let rb = null;\n  let dead = false;\n  mountRebuild(el, { base: '/rebuild/' }).then((r) => {\n    rb = r;\n    if (dead) r.stop();\n  });\n  return () => {\n    dead = true;\n    if (rb) {\n      rb.stop();\n      rb.renderer.dispose();\n    }\n  };\n}\n`;
+  if (o.rebuild && target === 'react')
+    files['src/Scene.jsx'] =
+      `${rebuildNote}import { useEffect, useRef } from 'react';\nimport { mountRebuild } from '../rebuild/rebuild.js';\n\nexport default function Scene() {\n  const ref = useRef(null);\n  useEffect(() => {\n    let rb = null;\n    let dead = false;\n    mountRebuild(ref.current, { base: '/rebuild/' }).then((r) => {\n      rb = r;\n      if (dead) r.stop();\n    });\n    return () => {\n      dead = true;\n      if (rb) {\n        rb.stop();\n        rb.renderer.dispose();\n        rb.renderer.domElement.remove();\n      }\n    };\n  }, []);\n  return <div ref={ref} className="dea-scene" style={{ position: 'fixed', inset: 0, zIndex: -1 }} />;\n}\n`;
   return files;
 }
 
