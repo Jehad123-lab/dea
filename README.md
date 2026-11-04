@@ -285,6 +285,25 @@ visual diff: 73.2% → 88.1% after analysis → 88.1% after research (searches f
 open gaps: 3 (see "Gap → path to result" in the report)
 ```
 
+**The site's own frames, replayed.** For WebGL heroes, a hand-written stand-in is never the real thing. So right
+before the reference screenshot, `dea extract` records two consecutive frames of the site's busiest WebGL context:
+every call with its arguments, and every buffer, texture, shader program and render target as it was when the frames
+began (read back from the GPU). `replay/replay.js` runs exactly those calls with the site's own GLSL, geometry and
+textures, so simulation passes (float-texture ping-pong), particles, meshes, bloom chains, SMAA and the final composite
+all come back in their real order. `render-graph.md` lists every pass with its target, programs, draws, inputs, blend
+and depth (✔ Verified from the recording) and the role DEA reads from them (≈ Inferred, with why). Clock uniforms
+advance with real time; `replay.setUniform()` and `replay.setPassEnabled()` let you change the rest. The replay is kept
+only when it scores better than DEA's own rebuild; `--no-replay` turns it off.
+
+Meshes drawn in the frame are also read back into `scene/scene.glb` (positions, normals, UVs, each draw's model matrix,
+and the camera from the view and projection uniforms), matched to the site's GLB files by vertex count when `dea assets`
+found them, with a three.js loader in `scene/scene.js`. `--own-assets` swaps every uploaded image for a neutral
+placeholder and every mesh in the GLB for its bounding box.
+
+On the same portfolio, with the replay: page **94.5%**, canvas **90.5%** (SSIM 91.3%, edges 91.7%) — the canvas score
+was 50.9% with the stand-in. The recorded frames are the site's own data: they are for studying and prototyping, and
+the assets in them belong to their owners.
+
 `--section <selector>` scrolls that part of the page into view for the reference, reads only its text, and keeps only
 the motion that touches it. `--reference shot.png` compares against your own screenshot (for example one taken on a
 machine with a GPU). `--library <name> --tag hero` saves the kit; `--batch urls.txt` extracts a list of sites.

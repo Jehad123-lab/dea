@@ -4,6 +4,7 @@ import { extname, join, normalize } from 'node:path';
 import type { Browser, Page } from 'playwright';
 import { NAME_SHIM } from '../browser/init.ts';
 import { installObservers } from '../browser/open.ts';
+import { pullRecording, REPLAY_CAPTURE_SCRIPT, type Recording, recordFrames, releaseFrames } from '../replay/capture.ts';
 import type { ShaderModule } from './generate.ts';
 import type { Params } from './research.ts';
 
@@ -49,7 +50,7 @@ export function previewHtml(mods: ShaderModule[], threeVersion: string, hero: st
 <meta charset="utf-8" />
 <title>DEA rebuild preview</title>
 <link rel="stylesheet" href="../tokens/tokens.css" />
-<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.${v}.0/build/three.module.js" } }</script>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.${v}.0/build/three.module.js", "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.${v}.0/examples/jsm/" } }</script>
 <style>html, body { margin: 0; height: 100%; overflow: hidden; } #scene { position: fixed; inset: 0; } .dea-hero { position: relative; z-index: 1; } h1 { position: relative; margin: 30vh 8vw 0; font-weight: 500; line-height: 1.05; }</style>
 </head>
 <body>
@@ -70,7 +71,25 @@ ${mods.map((m) => `  ${JSON.stringify(m.name)}: () => import('../${m.file}'),`).
 };
 window.__deaReady = false;
 try {
-  if (P.program === '__pipeline') {
+  if (P.program === '__replay') {
+    // the site's own recorded frames, replayed call for call (replay/replay.js)
+    const { loadCapture, createReplay } = await import('../replay/replay.js');
+    const d = await loadCapture('../public/replay/');
+    const b = d.doc.canvas;
+    const c = document.createElement('canvas');
+    c.style.cssText = 'position:fixed;pointer-events:none;left:' + b.x + 'px;top:' + b.y + 'px;width:' + b.cssW + 'px;height:' + b.cssH + 'px';
+    const el = document.getElementById('scene');
+    el.style.opacity = String(P.opacity ?? 1);
+    el.appendChild(c);
+    const r = createReplay(c, d, { animate: false, preserveDrawingBuffer: true });
+    r.renderFrames();
+    window.__deaReplayErrors = r.errors;
+  } else if (P.program === '__scene') {
+    // the 3D scene recovered from the recording (scene/scene.glb): geometry, transforms, camera; a plain material
+    const { mountRecoveredScene } = await import('../scene/scene.js');
+    const el = document.getElementById('scene');
+    await mountRecoveredScene(el, { url: '../public/scene/scene.glb', once: true });
+  } else if (P.program === '__pipeline') {
     const THREE = await import('three');
     const { createPipeline } = await import('../pipeline.js');
     const el = document.getElementById('scene');
@@ -365,10 +384,14 @@ export async function referenceShot(
   viewport: { width: number; height: number },
   ms = 20_000,
   section: string | null = null,
+  record = false,
 ): Promise<{
   png: string;
   atMs: number;
   loader: boolean;
+  /** the recorded WebGL frames (when `record`), taken right before the screenshot, which shows the last of them */
+  recording?: Recording | null;
+  recordingError?: string;
   layout: {
     viewport: { width: number; height: number };
     boxes: LayoutBox[];
@@ -379,6 +402,7 @@ export async function referenceShot(
   // the same observers and GPU answer DEA's decoders use, so the site shows its real 3D on a GPU-less machine
   const context = await browser.newContext({ viewport });
   await installObservers(context, true);
+  if (record) await context.addInitScript({ content: REPLAY_CAPTURE_SCRIPT });
   const page = await context.newPage();
   try {
     await page.goto(url, { waitUntil: 'load', timeout: 60_000 }).catch(() => {});
@@ -424,6 +448,38 @@ export async function referenceShot(
         best = { png, score: s2, atMs: Date.now() - t0, loader };
         layout = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
       }
+    }
+    if (record) {
+      // record two frames, hold the page on the last one, and use that moment as the reference: the replay then has the
+      // exact frame to match
+      if (section) await page.evaluate(`document.querySelector(${JSON.stringify(section)})?.scrollIntoView({ block: 'start' })`).catch(() => {});
+      const r = await recordFrames(page, { frames: 2 });
+      if (r.ok) {
+        await page.waitForTimeout(400);
+        const buf = await page.screenshot({ type: 'png' }).catch(() => null);
+        const nowLoader = (await page.evaluate(LOADER_VISIBLE).catch(() => false)) as boolean;
+        const recording = await pullRecording(page).catch(() => null);
+        await releaseFrames(page);
+        if (buf && recording) {
+          const l = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
+          return {
+            png: `data:image/png;base64,${buf.toString('base64')}`,
+            atMs: Date.now() - t0,
+            loader: nowLoader,
+            layout: (l ?? layout) as never,
+            recording,
+          };
+        }
+        return {
+          png: best.png,
+          atMs: best.atMs,
+          loader: best.loader,
+          layout: layout as never,
+          recording: null,
+          recordingError: 'the recording could not be read out of the page',
+        };
+      }
+      return { png: best.png, atMs: best.atMs, loader: best.loader, layout: layout as never, recording: null, recordingError: r.error };
     }
     return { png: best.png, atMs: best.atMs, loader: best.loader, layout: layout as never };
   } finally {

@@ -589,6 +589,8 @@ export function projectFiles(
     heading: string;
     layout?: HeroLayout | null;
     standin?: Standin | null;
+    /** the site's recorded frames replayed (replay/replay.js + public/replay/) instead of one shader program */
+    replay?: boolean;
   },
 ): Record<string, string> {
   const m = o.mods[0];
@@ -651,6 +653,12 @@ ${(m?.textures ?? []).map((t) => `    ${t.sampler}: { type: ControlType.String, 
 `;
   }
   if (o.standin && target !== 'framer') files['standins/particles.js'] = particlesStandin();
+  if (o.replay && target === 'vanilla')
+    files['scene.js'] =
+      `// The site's own WebGL frames, replayed call for call with its shaders, buffers, textures and render targets\n// (see render-graph.md for the passes). The shader modules in shaders/ are the same programs as editable three.js materials.\nimport { mountReplay } from './replay/replay.js';\n\nexport function mountScene(el = document.body) {\n  let stop = null;\n  let dead = false;\n  mountReplay(el, { base: '/replay/' }).then((s) => {\n    if (dead) s();\n    else stop = s;\n  });\n  return () => {\n    dead = true;\n    if (stop) stop();\n  };\n}\n`;
+  if (o.replay && target === 'react')
+    files['src/Scene.jsx'] =
+      `// The site's own WebGL frames, replayed call for call with its shaders, buffers, textures and render targets\n// (see render-graph.md for the passes). replay.setUniform(...) and replay.setPassEnabled(...) change it live.\nimport { useEffect, useRef } from 'react';\nimport { mountReplay } from '../replay/replay.js';\n\nexport default function Scene() {\n  const ref = useRef(null);\n  useEffect(() => {\n    let stop = null;\n    let dead = false;\n    mountReplay(ref.current, { base: '/replay/' }).then((s) => {\n      if (dead) s();\n      else stop = s;\n    });\n    return () => {\n      dead = true;\n      if (stop) stop();\n    };\n  }, []);\n  return <div ref={ref} className="dea-scene" style={{ position: 'fixed', inset: 0, zIndex: -1 }} />;\n}\n`;
   return files;
 }
 

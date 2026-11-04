@@ -232,6 +232,7 @@ common(
     .option('--tag <tags...>', 'tags for the library entry')
     .option('--verify-build', 'run npm install and npm run build in the generated project and report it')
     .option('--no-trace', 'skip the live WebGL trace (uniform values and drivers)')
+    .option('--no-replay', "do not record and replay the site's WebGL frames")
     .option('--no-research', 'do not search free sources for the techniques found')
     .option('--batch <file>', 'extract every URL in a text file (one per line)')
     .option('--reference <image>', 'your own screenshot of the original to compare against (e.g. taken on a machine with a GPU)')
@@ -251,6 +252,7 @@ common(
       tag?: string[];
       verifyBuild?: boolean;
       trace: boolean;
+      replay: boolean;
       research: boolean;
       reference?: string;
       referenceMs: string;
@@ -289,6 +291,7 @@ common(
           tags: flags.tag,
           verifyBuild: flags.verifyBuild,
           noTrace: !flags.trace,
+          noReplay: !flags.replay,
           noResearch: !flags.research,
         });
         if (flags.json)

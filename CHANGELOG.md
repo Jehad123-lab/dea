@@ -38,6 +38,11 @@ The first release: decode a website with evidence, use what comes out, and let A
 - `dea library add|list|search|use|remove`: decode once, reuse in every project; `dea extract --batch urls.txt`.
 - A canvas-only score beside the page score on every extract (SSIM at three scales, edges and tones of the WebGL
   canvas with the text hidden), and `dea score` to score any two screenshots the same way.
+- WebGL frame replay in `dea extract`: two frames of the site's own WebGL calls and GPU resources recorded and replayed
+  call for call (`replay/replay.js`), a per-pass `render-graph.md` (Verified / Inferred), and the meshes of the frame
+  read back into `scene/scene.glb` with model matrices and the camera. `--no-replay` turns it off; `--own-assets` uses
+  placeholders.
+- Headings keep the space where they break onto a new line; uniform "set by" names the line that assigns `.value`.
 
 ### Act and connect
 

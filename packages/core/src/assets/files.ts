@@ -67,7 +67,14 @@ export function lottieSummary(j: any): LottieSummary | null {
 
 export interface GlbSummary {
   generator: string | null;
-  meshes: Array<{ name: string; primitives: number; vertices: number | null; material: string[] }>;
+  meshes: Array<{
+    name: string;
+    primitives: number;
+    vertices: number | null;
+    material: string[];
+    /** per primitive: vertex count and index count (for matching a draw call to the primitive it drew) */
+    prims?: Array<{ vertices: number | null; indices: number | null; material: string | null }>;
+  }>;
   materials: Array<{ name: string; slots: Record<string, string> }>;
   images: Array<{ name: string; mime: string | null; uri: string | null; bytes: number | null; width?: number; height?: number }>;
   animations: Array<{ name: string; channels: number; seconds: number | null; targets: string[] }>;
@@ -108,6 +115,11 @@ export function gltfSummary(j: any, binBytes?: number): GlbSummary {
       primitives: (m.primitives ?? []).length,
       vertices: (m.primitives ?? []).reduce((n: number, p: any) => n + (accessors[p.attributes?.POSITION]?.count ?? 0), 0) || null,
       material: (m.primitives ?? []).map((p: any) => materials[p.material]?.name).filter(Boolean),
+      prims: (m.primitives ?? []).map((p: any) => ({
+        vertices: accessors[p.attributes?.POSITION]?.count ?? null,
+        indices: p.indices != null ? (accessors[p.indices]?.count ?? null) : null,
+        material: materials[p.material]?.name ?? null,
+      })),
     })),
     materials,
     images: images.map((im, i) => ({

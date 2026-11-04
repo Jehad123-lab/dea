@@ -409,6 +409,32 @@ export async function traceWebGL(url: string, opts: TraceOptions = {}): Promise<
       : classifyDriver(t, env);
     uniforms.push(t);
   }
+  // "set by": the WebGL upload happens inside the engine's render call; the line that changes the value is earlier in the
+  // same frame. When the site's own code assigns `<name>.value` in a script DEA already read, name that line first.
+  const assignedAt = new Map<string, string | null>();
+  const assigns = (name: string): string | null => {
+    if (assignedAt.has(name)) return assignedAt.get(name) ?? null;
+    let found: string | null = null;
+    const re = new RegExp(`(?:\\.|\\b)${name.replace(/[^\w$]/g, '')}\\.value\\s*(?:[-+*/]?=)(?!=)`);
+    for (const [u, txt] of texts) {
+      const m = re.exec(txt);
+      if (!m) continue;
+      const before = txt.slice(0, m.index);
+      const line = before.split('\n').length;
+      const col = m.index - before.lastIndexOf('\n') - 1;
+      const sm = mapCache.get(u);
+      const o = sm ? sm.originalPositionFor({ line, column: col }) : null;
+      found = o?.source ? `${o.source.split('/').pop()}:${o.line}` : `${u.split('?')[0].split('/').pop() ?? u}:${line}:${col + 1}`;
+      break;
+    }
+    assignedAt.set(name, found);
+    return found;
+  };
+  for (const t of uniforms) {
+    const a = /^[\w$]+$/.test(t.name) ? assigns(t.name) : null;
+    if (a) t.setBy = `${a} (assigns .value)${t.setBy ? `; uploaded by ${t.setBy}` : ''}`;
+  }
+
   const uploads: TraceDoc['uploads'] = [];
   for (const x of (raw?.uploads ?? []) as any[])
     uploads.push({ fn: x.fn, texture: x.texture, width: x.width, height: x.height, source: x.source, by: await where(x.stack) });

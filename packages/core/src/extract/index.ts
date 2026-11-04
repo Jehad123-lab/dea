@@ -9,6 +9,9 @@ import { type DesignDoc, decodeDesign } from '../design/index.ts';
 import { newRunId, RunWriter, resolveRun, runsDir } from '../evidence/run.ts';
 import { type Gap, renderGaps } from '../gaps.ts';
 import { decodeMotion, type GsapNode, gsapModule, type MotionDoc } from '../motion/index.ts';
+import { animateEntries, buildGraph, type CaptureDoc, compactCapture, placeholderTextures, renderGraphMd } from '../replay/graph.ts';
+import { REPLAY_PLAYER } from '../replay/player.ts';
+import { recoverScene, sceneGlb, sceneMd, sceneModule } from '../replay/scene.ts';
 import type { InspectOptions } from '../see/inspect.ts';
 import {
   type HeroLayout,
@@ -71,6 +74,25 @@ export interface ExtractOptions extends InspectOptions {
   reference?: string;
   /** how long DEA watches the original for its reference screenshot (default 45 s) */
   referenceMs?: number;
+  /** do not record and replay the site's WebGL frames */
+  noReplay?: boolean;
+}
+
+/** What the recording and replay of the site's WebGL frames gave. */
+export interface ReplayInfo {
+  frames: number;
+  passes: number;
+  draws: number;
+  programs: number;
+  bytes: number;
+  /** canvas score of the replay alone (before research) */
+  canvas: number | null;
+  page: number | null;
+  kept: boolean;
+  roles: string[];
+  scene: { meshes: number; camera: boolean; canvas: number | null; page: number | null } | null;
+  errors: string[];
+  placeholders?: number;
 }
 
 export interface ExtractResult {
@@ -94,6 +116,8 @@ export interface ExtractResult {
     /** the canvas-only perceptual score (text masked out) at the start and at the end; null when there is no canvas */
     canvas?: { start: CanvasScore | null; final: CanvasScore | null };
   };
+  /** the recorded-and-replayed WebGL frames; null when not recorded (with the reason in gaps) */
+  replay: ReplayInfo | null;
   build: BuildCheck | null;
   gaps: Gap[];
   techniques: Technique[];
@@ -222,7 +246,9 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
   if (opts.section) tree = filterTree(tree, opts.section);
   const tk = tokenFiles(design?.tokens ?? {}, { eases: easesOf(tree) });
   // web fonts: the files the page downloaded, served from /fonts with @font-face rules
-  const manifest = await readJson<{ network?: Array<{ kind: string; url: string; file: string | null }> }>(join(assetsDir, 'assets', 'manifest.json'));
+  const manifest = await readJson<{
+    network?: Array<{ kind: string; url: string; file: string | null; details?: { meshes?: Array<{ name: string; vertices: number | null }> } }>;
+  }>(join(assetsDir, 'assets', 'manifest.json'));
   const fontFiles = (manifest?.network ?? []).filter((a) => a.kind === 'font' && a.file);
   const faces: string[] = [];
   for (const fam of (design?.typography?.families ?? []) as Array<{ family: string; files?: string[] }>) {
@@ -334,6 +360,8 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
   const browserNeeded = Boolean(opts.ownAssets && texNames.size) || !opts.noDiff;
   const { browser } = browserNeeded ? await launchBrowser(opts.browser ?? 'auto', true) : { browser: null };
   let diff: ExtractResult['diff'] = null;
+  let replay: ReplayInfo | null = null;
+  let replayError: string | null = null;
   let layout: HeroLayout | null = null;
   let standin: Standin | null = null;
   const rgbHex = (c: string | null | undefined): string | null => {
@@ -378,9 +406,54 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
             loader: false,
             layout: null,
           }
-        : await referenceShot(browser, url, vp, opts.referenceMs ?? 45_000, opts.section ?? null);
+        : await referenceShot(browser, url, vp, opts.referenceMs ?? 45_000, opts.section ?? null, !opts.noReplay);
       const original = ref.png;
       await put('preview/original.png', Buffer.from(original.slice(original.indexOf(',') + 1), 'base64'));
+      // the site's own frames, recorded right before that screenshot: the render graph, the replay, the 3D scene
+      const recording = 'recording' in ref ? ref.recording : null;
+      replayError = 'recordingError' in ref ? (ref.recordingError ?? null) : opts.reference ? 'a reference image was given, so nothing was recorded' : null;
+      let recDoc: CaptureDoc | null = null;
+      let hasScene = false;
+      if (recording) {
+        say('recorded the WebGL frames behind that screenshot; building the render graph and the replay');
+        const c = compactCapture(recording.doc, new Uint8Array(recording.bin.buffer, recording.bin.byteOffset, recording.bin.byteLength));
+        recDoc = c.doc;
+        const binU8 = new Uint8Array(c.bin.buffer, c.bin.byteOffset, c.bin.byteLength);
+        recDoc.animate = animateEntries(recDoc);
+        recDoc.graph = buildGraph(recDoc, binU8);
+        const models = (manifest?.network ?? [])
+          .filter((a) => a.kind === 'glb' || a.kind === 'gltf')
+          .flatMap((m) => (m.details?.meshes ?? []).map((x) => ({ name: `${basename(m.url.split('?')[0])} › ${x.name}`, vertices: x.vertices })));
+        const sc = recoverScene(recDoc, binU8, { models });
+        const placeholders = opts.ownAssets ? placeholderTextures(recDoc, binU8) : undefined;
+        await put('public/replay/capture.json', JSON.stringify(recDoc));
+        await put('public/replay/capture.bin', c.bin);
+        await put('replay/replay.js', REPLAY_PLAYER);
+        await put('render-graph.md', renderGraphMd(recDoc.graph, recDoc, url));
+        if (sc.meshes.length) {
+          hasScene = true;
+          await put('public/scene/scene.glb', sceneGlb(sc, { placeholders: Boolean(opts.ownAssets) }));
+          await put('scene/scene.js', sceneModule());
+          await put('scene/scene.md', sceneMd(sc, url));
+        }
+        replay = {
+          frames: recDoc.frames.length,
+          passes: recDoc.graph.passes.length,
+          draws: recDoc.graph.passes.reduce((n, p) => n + p.drawCount, 0),
+          programs: recDoc.graph.programs.filter((p) => p.draws).length,
+          bytes: c.bin.length,
+          canvas: null,
+          page: null,
+          kept: false,
+          roles: [...new Set(recDoc.graph.passes.map((p) => p.role))],
+          scene: sc.meshes.length ? { meshes: sc.meshes.length, camera: Boolean(sc.camera), canvas: null, page: null } : null,
+          errors: recDoc.errors.slice(0, 10),
+          placeholders,
+        };
+        say(
+          `replay: ${replay.passes} passes, ${replay.draws} draws, ${replay.programs} programs, ${(c.bin.length / 1e6).toFixed(1)} MB${sc.meshes.length ? `; scene: ${sc.meshes.length} meshes` : ''}`,
+        );
+      }
       // the first screen's text as laid out on the site (with your own screenshot, read on both of the site's paths)
       const layoutCandidates = (
         opts.reference
@@ -443,9 +516,32 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
         const start = await render(params);
         // the canvas-only score: the WebGL picture alone, with the site's text hidden
         const textBoxes = (layout ?? layoutCandidates[0] ?? null)?.boxes ?? [];
-        const canvasBox = (layout ?? layoutCandidates[0] ?? null)?.canvas ?? null;
+        const canvasBox =
+          (layout ?? layoutCandidates[0] ?? null)?.canvas ??
+          (recDoc ? { x: recDoc.canvas.x, y: recDoc.canvas.y, w: recDoc.canvas.cssW, h: recDoc.canvas.cssH } : null);
         const canvasStart = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
         let best = start;
+        // the replay of the site's own frames, and the recovered 3D scene: kept when the canvas gets closer
+        let replayKept = false;
+        if (recDoc && replay) {
+          const sR = await render({ ...params, program: '__replay' });
+          const cR = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
+          replay.page = sR;
+          replay.canvas = cR?.score ?? null;
+          if (replay.scene && hasScene) {
+            const sS = await render({ ...params, program: '__scene' });
+            const cS = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
+            replay.scene.page = sS;
+            replay.scene.canvas = cS?.score ?? null;
+          }
+          if (cR && (!canvasStart || cR.score > canvasStart.score + 0.005)) {
+            replayKept = true;
+            replay.kept = true;
+            params = { ...params, program: '__replay' };
+            best = sR;
+            say(`the replay of the site's own frames: canvas ${pct(cR.score)} (was ${canvasStart ? pct(canvasStart.score) : 'n/a'}), page ${pct(sR)}`);
+          } else say(`the replay did not beat the start on the canvas (${cR ? pct(cR.score) : 'n/a'}); keeping the shader rebuild`);
+        }
         // analysis first: DEA's own facts as candidates (the screen's mean colour, other palette colours, each shader, opacity)
         const meanOriginal = (await compareImages(cmp, original, original)).meanA;
         const palette = Object.values(design?.tokens?.color ?? {}).map((v) => String((v as { $value?: string }).$value));
@@ -455,7 +551,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
           ['opacity', [0.6, 0.3]],
           ['text', palette],
         ];
-        for (const [k, vals] of candidates)
+        for (const [k, vals] of candidates.filter(([k]) => !replayKept || (k !== 'program' && k !== 'opacity')))
           for (const v of vals) {
             if (params[k] === v) continue;
             const s = await render({ ...params, [k]: v });
@@ -466,7 +562,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
           }
         // a technique stand-in where the site runs a system DEA does not rebuild (a GPGPU particle simulation): try it,
         // keep it only when the diff improves
-        if (techniques.some((t) => t.id === 'gpgpu' || t.id === 'points')) {
+        if (!replayKept && techniques.some((t) => t.id === 'gpgpu' || t.id === 'points')) {
           await put('standins/particles.js', particlesStandin());
           const light = [...palette].sort((a, b) => lum(b) - lum(a))[0] ?? '#ffffff';
           let tp: Params = { ...params, standin: 'particles', spread: 0.8, standinX: 0, standinY: 0, standinColor: light };
@@ -527,6 +623,10 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
         params = research.params;
         const final = research.best;
         await render(params);
+        if (replayKept) {
+          const pf = projectFiles(target, { mods, title, site: url, threeVersion, hasMotion, heading, layout, replay: true });
+          for (const f of Object.keys(pf)) await put(f, pf[f]);
+        }
         if (standin) {
           const pf = projectFiles(target, { mods, title, site: url, threeVersion, hasMotion, heading, layout, standin });
           for (const f of Object.keys(pf)) await put(f, pf[f]);
@@ -584,7 +684,18 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
 
   // 7. README + extract.md + dea-kit.json
   const extractedAt = new Date().toISOString();
-  const gaps = extractGaps({ url, mods, diff, build, hasMotion, trace, passes: passes.length, referenceLoader: diff?.referenceLoader ?? false });
+  const gaps = extractGaps({
+    url,
+    mods,
+    diff,
+    build,
+    hasMotion,
+    trace,
+    passes: passes.length,
+    referenceLoader: diff?.referenceLoader ?? false,
+    replay,
+    replayError,
+  });
   const md = renderExtractMd({
     url,
     target,
@@ -603,6 +714,8 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
     build,
     gaps,
     extractedAt,
+    replay,
+    replayError,
   });
   const kit: KitManifest = {
     url,
@@ -676,10 +789,13 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
           `visual diff (${canvasLine(diff.canvas?.final)})${diff.canvas?.start && diff.canvas.final ? `, from ${pct(diff.canvas.start.score)} at the start` : ''}`,
         ]
       : []),
+    replay
+      ? `replay of the site's own frames: ${replay.passes} passes, ${replay.draws} draws, ${replay.programs} programs, ${(replay.bytes / 1e6).toFixed(1)} MB (render-graph.md)${replay.kept ? '' : ', not kept'}${replay.scene ? ` · scene: ${replay.scene.meshes} meshes + camera in public/scene/scene.glb${replay.scene.canvas != null ? ` (canvas ${pct(replay.scene.canvas)} with a plain material)` : ''}` : ''}`
+      : `replay: not recorded${replayError ? ` (${replayError})` : ''}`,
     gaps.length ? `open gaps: ${gaps.length} (see "Gap → path to result" in the report)` : 'open gaps: none',
   ].join('\n');
   w.emit({ type: 'run.finished', runId: w.id, dir: w.dir, summary, at: new Date().toISOString() });
-  return { runId: w.id, dir: w.dir, out, target, files, shaders: mods, diff, build, gaps, techniques, extractMd: md, summary };
+  return { runId: w.id, dir: w.dir, out, target, files, shaders: mods, diff, replay, build, gaps, techniques, extractMd: md, summary };
 }
 
 const pct = (x: number) => `${Math.round(x * 1000) / 10}%`;
@@ -738,9 +854,40 @@ export function extractGaps(o: {
   trace: TraceDoc | null;
   passes: number;
   referenceLoader: boolean;
+  replay?: ReplayInfo | null;
+  replayError?: string | null;
 }): Gap[] {
   const gaps: Gap[] = [];
   const site = o.url;
+  if (!o.replay && o.replayError && !/reference image/.test(o.replayError))
+    gaps.push({
+      area: 'extract',
+      topic: "The site's WebGL frames were not recorded",
+      known: ['✔ The shader modules hold the exact GLSL; the pipeline order is in pipeline.js.'],
+      missing: o.replayError,
+      next: [
+        { why: 'give a slow intro more time before recording', command: `dea extract ${site} --reference-ms 180000` },
+        { why: 'see whether the canvas draws continuously', command: `dea trace ${site} --ms 20000` },
+      ],
+    });
+  if (o.replay?.kept)
+    gaps.push({
+      area: 'extract',
+      topic: 'The replay is a recording, not the site’s logic',
+      known: [
+        `✔ ${o.replay.frames} frames, ${o.replay.passes} passes and ${o.replay.draws} draws replay call for call with the site's shaders, buffers and textures.`,
+        '✔ Clock uniforms advance with real time (≈ named like time and growing between frames).',
+      ],
+      missing:
+        'Values the site drives from the pointer, scroll or its own state replay as recorded; the drawing buffer keeps the recorded size; content that appears after the recorded moment is not in it.',
+      approximation: {
+        text: 'Drive values yourself with replay.setUniform(program, name, value); the drivers DEA traced are in the shader modules and the trace report.',
+      },
+      next: [
+        { why: 'find what drives each uniform (clock, scroll, pointer)', command: `dea trace ${site} --ms 30000` },
+        { why: 'record another moment (after scrolling to a section)', command: `dea extract ${site} --section <selector>` },
+      ],
+    });
   if (o.build && !o.build.ok && !o.build.skipped)
     gaps.push({
       area: 'extract',
@@ -799,7 +946,7 @@ export function extractGaps(o: {
       ],
     });
   const rts = o.mods.flatMap((m) => m.textures.filter((t) => t.note?.includes('render target')).map((t) => `${m.name}.${t.sampler}`));
-  if (rts.length)
+  if (rts.length && !o.replay?.kept)
     gaps.push({
       area: 'extract',
       topic: 'Samplers fed by other passes',
@@ -840,6 +987,8 @@ function renderExtractMd(o: {
   build?: BuildCheck | null;
   gaps?: Gap[];
   extractedAt?: string;
+  replay?: ReplayInfo | null;
+  replayError?: string | null;
 }): string {
   const run = o.target === 'framer' ? 'Paste `DeaScene.tsx` into a new Code File in Framer.' : '```bash\nnpm install\nnpm run dev\n```';
   const L = [
@@ -880,6 +1029,32 @@ function renderExtractMd(o: {
     L.push(
       `- ${o.ownAssets ? '≈ Placeholders of the same size (your own images go here)' : '✔ The site’s texture files'}: ${tex.map((t) => `\`${t}\``).join(', ')}`,
     );
+  L.push('', "## The site's own frames, replayed", '');
+  if (o.replay) {
+    const r = o.replay;
+    L.push(
+      `✔ DEA recorded ${r.frames} consecutive frames of the site's WebGL right before the reference screenshot: every call with its arguments, and every buffer, texture, shader program and render target as it was when the frames began (read back from the GPU). ${(r.bytes / 1e6).toFixed(1)} MB in \`public/replay/\`.`,
+      '',
+      `- ✔ \`replay/replay.js\` runs exactly those calls with the site's own GLSL, geometry and textures: ${r.passes} passes, ${r.draws} draws, ${r.programs} programs. Passes seen (≈ roles read from the facts): ${r.roles.join(', ')}.`,
+      `- ✔ \`render-graph.md\`: every pass in order, its target, programs, draws, the textures it reads, blend and depth.`,
+      `- ≈ Clock uniforms (a value named like time that grew between the frames) advance with real time; everything else replays as recorded, frame after frame. \`replay.setUniform(program, name, value)\` overrides a value, \`replay.setPassEnabled(i, false)\` switches a pass off.`,
+      r.canvas != null
+        ? `- Replay alone: canvas ${pct(r.canvas)}, page ${pct(r.page ?? 0)}. ${r.kept ? '✔ Kept: it is what the preview and the project run.' : 'Not kept: it did not beat the shader rebuild on the canvas.'}`
+        : '- The replay was not scored.',
+      ...(r.scene
+        ? [
+            `- ✔ \`public/scene/scene.glb\` + \`scene/scene.js\`: ${r.scene.meshes} mesh(es) read back from the GPU buffers with their model matrices${r.scene.camera ? ' and the camera (from the view and projection uniforms)' : ''}; see \`scene/scene.md\`.${r.scene.canvas != null ? ` Rendered with a plain material it scores canvas ${pct(r.scene.canvas)}: the placement is the site's, the look is in the replay.` : ''}`,
+          ]
+        : ['- No mesh draws in the recorded frame (full-screen passes and points only), so no scene.glb.']),
+      ...(o.ownAssets && r.placeholders != null
+        ? [
+            `- ≈ --own-assets: ${r.placeholders} uploaded texture(s) in the replay are neutral checkers of the same size; render targets and geometry are the frames' own.`,
+          ]
+        : []),
+      ...(r.errors.length ? [`- Recording notes: ${r.errors.slice(0, 5).join('; ')}`] : []),
+    );
+  } else
+    L.push(`Not recorded${o.replayError ? `: ${o.replayError}` : ''}. Without a recording the rebuild uses the shader modules and the pipeline order above.`);
   L.push('', '## How close the rebuild is', '');
   if (o.diff) {
     L.push(

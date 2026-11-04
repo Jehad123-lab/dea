@@ -177,7 +177,29 @@ export async function takeSnapshot(page: Page): Promise<PageSnapshot> {
       },
       headings: Array.from(document.querySelectorAll('h1,h2,h3'))
         .slice(0, 40)
-        .map((h) => ({ level: Number(h.tagName[1]), text: (h.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 120) }))
+        .map((h) => {
+          // a space where the heading breaks onto a new line (lines in their own spans or after <br> often carry no
+          // whitespace in the markup, which would glue "storytelling" and "and" together)
+          let text = '';
+          try {
+            const walk = document.createTreeWalker(h, NodeFilter.SHOW_TEXT);
+            let lastTop: number | null = null;
+            for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+              const t = n.textContent ?? '';
+              const r = document.createRange();
+              r.selectNodeContents(n);
+              const rects = r.getClientRects();
+              const top = rects.length ? Math.round(rects[0].top) : lastTop;
+              if (lastTop !== null && top !== null && Math.abs(top - lastTop) > 2) text += ' ';
+              text += t;
+              if (rects.length) lastTop = Math.round(rects[rects.length - 1].top);
+              if (n.nextSibling && (n.nextSibling as Element).tagName === 'BR') text += ' ';
+            }
+          } catch {
+            text = h.textContent ?? '';
+          }
+          return { level: Number(h.tagName[1]), text: (text || h.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120) };
+        })
         .filter((h) => h.text),
       fonts: Array.from(document.fonts).map((f) => ({
         family: f.family.replace(/^["']|["']$/g, ''),
