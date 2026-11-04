@@ -361,7 +361,35 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     if (hiddenUp(el) || shown(el, r) < 0.5) continue;
     const op = opacityOf(el);
     if (op < 0.05) continue;
-    shapes.push({ x: r.left, y: r.top, w: r.width, h: r.height, background: bg, gradient: grad, border, radius: cs.borderRadius, opacity: op });
+    shapes.push({ x: r.left, y: r.top, w: r.width, h: r.height, background: bg, gradient: grad, border, radius: cs.borderRadius, filter: null, opacity: op });
+  }
+  // a gradient painted by a ::before or ::after: a fade laid over the picture (a dark band at the bottom of a section, a
+  // blurred spot) is an overlay too, and the picture under it is the same canvas. Its box comes from its own offsets and size.
+  for (let i = 0; i < all.length && i < 4000 && shapes.length < 40; i++) {
+    const el = all[i];
+    if (el.closest('svg') || el.tagName === 'CANVAS') continue;
+    for (const pe of ['::before', '::after']) {
+      const ps = getComputedStyle(el, pe);
+      if (ps.content === 'none' || ps.content === 'normal' || ps.display === 'none' || ps.visibility === 'hidden' || ps.position === 'static') continue;
+      if (!/gradient\\(/.test(ps.backgroundImage)) continue;
+      const pr = el.getBoundingClientRect();
+      const ext = (v, base) => (v === 'auto' ? null : v.endsWith('%') ? (parseFloat(v) / 100) * base : parseFloat(v));
+      const L = ext(ps.left, pr.width);
+      const R = ext(ps.right, pr.width);
+      const T = ext(ps.top, pr.height);
+      const B = ext(ps.bottom, pr.height);
+      let w = ext(ps.width, pr.width);
+      let h = ext(ps.height, pr.height);
+      if (w == null) w = L != null && R != null ? pr.width - L - R : pr.width;
+      if (h == null) h = T != null && B != null ? pr.height - T - B : pr.height;
+      const x = pr.left + (L != null ? L : R != null ? pr.width - R - w : 0);
+      const y = pr.top + (T != null ? T : B != null ? pr.height - B - h : 0);
+      if (!(w >= 3 && h >= 3 && y + h > 0 && x + w > 0 && y < H && x < W)) continue;
+      if (hiddenUp(el) || shown(el, { left: x, top: y, right: x + w, bottom: y + h, width: w, height: h }) < 0.5) continue;
+      const op = Math.round(opacityOf(el) * (+ps.opacity) * 100) / 100;
+      if (op < 0.05) continue;
+      shapes.push({ x, y, w, h, background: null, gradient: ps.backgroundImage, border: null, radius: ps.borderRadius, filter: ps.filter !== 'none' ? ps.filter : null, opacity: op });
+    }
   }
   // the first screen's graphics: inline SVG (a logo, an icon) with its computed paint inlined, and small images
   const graphics = [];

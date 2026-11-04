@@ -450,6 +450,8 @@ export interface HeroLayout {
     gradient: string | null;
     border: string | null;
     radius: string;
+    /** a CSS filter on a pseudo-element overlay (a blur), or null */
+    filter?: string | null;
     opacity: number;
   }>;
   /** ✔ graphics on the first screen: inline SVG with its computed paint, or an image by URL (the site's own, for study) */
@@ -496,6 +498,7 @@ export function heroStyles(l: HeroLayout): Array<{ tag: string; text: string; ht
       ...(s.gradient ? { backgroundImage: s.gradient } : {}),
       ...(s.border ? { border: s.border, boxSizing: 'border-box' } : {}),
       ...(s.radius && s.radius !== '0px' ? { borderRadius: s.radius } : {}),
+      ...(s.filter ? { filter: s.filter } : {}),
     },
   }));
   const graphics = (l.graphics ?? []).map((gr) =>

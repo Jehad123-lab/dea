@@ -47,8 +47,16 @@ jobs:
           pnpm -s dea stack https://threejs.org/examples/webgl_animation_keyframes.html --browser chromium --json > stack.json
           cat stack.json
           grep -q '"name": "three.js"' stack.json
-      - name: MCP tool test against a real site
-        run: pnpm test:e2e
+      - name: Real-browser tests (the MCP tools against a real site, record and replay, hands)
+        run: |
+          set +e
+          pnpm test:e2e 2>&1 | tee e2e.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            # put the failing assertions into the run's annotations, where they can be read without opening the full log
+            grep -E 'FAIL|AssertionError|Error:|Timeout|expected' e2e.log | head -20 | while IFS= read -r line; do echo "::error::${line:0:300}"; done
+          fi
+          exit "$code"
 
   windows:
     name: Windows (unit tests + Edge smoke test)
