@@ -276,15 +276,25 @@ export function createReplay(canvas, data, options = {}) {
   const live = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, vx: 0, vy: 0, scroll: 0, width: doc.viewport ? doc.viewport.w : doc.canvas.cssW || doc.canvas.w, height: doc.viewport ? doc.viewport.h : doc.canvas.cssH || doc.canvas.h };
   const eased = new Map();
   let inputTouched = !!options.liveFromStart;
-  const signalOf = (m) => m.kind === 'pointer' ? (m.axis === 'y' ? live.y : live.x) : m.kind === 'pointer-velocity' ? (m.axis === 'y' ? live.vy : live.vx) : m.kind === 'scroll' ? (m.lo != null ? Math.min(m.hi, Math.max(m.lo, live.scroll)) : live.scroll) : m.kind === 'viewport' ? (m.axis === 'height' ? live.height : m.axis === 'aspect' ? live.width / live.height : live.width) : 0;
+  const live0 = Object.assign({}, live);
+  const signalOf = (m, L = live) => m.kind === 'pointer' ? (m.axis === 'y' ? L.y : L.x) : m.kind === 'pointer-velocity' ? (m.axis === 'y' ? L.vy : L.vx) : m.kind === 'scroll' ? (m.lo != null ? Math.min(m.hi, Math.max(m.lo, L.scroll)) : L.scroll) : m.kind === 'viewport' ? (m.axis === 'height' ? L.height : m.axis === 'aspect' ? L.width / L.height : L.width) : 0;
+  // the fits are linear and only as good as their r: the input moves the recorded value by what the fit says the move
+  // changes (recorded + scale x (input - the input at rest)), not to the fit's line (which carries every residual)
+  const delta = (m, e, e2) => {
+    const cl = (v, lo, hi) => (lo != null && hi != null ? Math.min(hi, Math.max(lo, v)) : v);
+    const d = m.scale * (cl(e, m.lo, m.hi) - cl(signalOf(m, live0), m.lo, m.hi)) + (m.axis2 ? m.scale2 * (cl(e2 == null ? 0.5 : e2, m.lo2, m.hi2) - cl(0.5, m.lo2, m.hi2)) : 0);
+    // and never by more than the value was seen to move while the probe watched
+    return m.span != null ? Math.max(-m.span, Math.min(m.span, d)) : d;
+  };
+
   const stepInputs = () => {
     live.vx = live.x - live.px; live.vy = live.y - live.py; live.px = live.x; live.py = live.y;
-    for (const m of inputs) { const k = m.program + '|' + m.uniform + '|' + m.component; const s = signalOf(m); const e = eased.has(k) ? eased.get(k) : s; eased.set(k, e + (m.k == null ? 1 : m.k) * (s - e)); }
+    for (const m of inputs) { const k = m.program + '|' + m.uniform + '|' + m.component; const s = signalOf(m); const e = eased.has(k) ? eased.get(k) : signalOf(m, live0); eased.set(k, e + (m.k == null ? 1 : m.k) * (s - e)); if (m.axis2) { const s2 = m.axis2 === 'y' ? live.y : live.x; const e2 = eased.has(k + '|2') ? eased.get(k + '|2') : 0.5; eased.set(k + '|2', e2 + (m.k == null ? 1 : m.k) * (s2 - e2)); } }
   };
   // the input's value written into a copy of the uniform's value
   const withInputs = (list, v) => {
     const out = Array.from(v && typeof v.length === 'number' ? v : [v]);
-    for (const m of list) { const x = m.scale * eased.get(m.program + '|' + m.uniform + '|' + m.component) + m.offset; if (Number.isFinite(x)) out[m.component] = x; }
+    for (const m of list) { const ek = m.program + '|' + m.uniform + '|' + m.component; const d = delta(m, eased.get(ek), eased.get(ek + '|2')); if (Number.isFinite(d)) out[m.component] = out[m.component] + d; }
     return out;
   };
   // three.js sets a uniform only when its value changes, so the recorded frames may not set it at all: set it on the

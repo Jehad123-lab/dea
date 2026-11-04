@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyInputs, type InteractionScore } from '../src/extract/interaction.ts';
-import { fitInputs, inferInputs, type ProbeData } from '../src/replay/inputs.ts';
+import { fitInputs, holdsOnTheWayBack, inferInputs, type ProbeData, pointerLegs } from '../src/replay/inputs.ts';
 
 /** a probe of 120 frames: pointer sweeps x then y, then a scroll, then a resize */
 function probe(): ProbeData {
@@ -131,6 +131,9 @@ describe('matrix inputs (a camera or model that follows the pointer)', () => {
     expect(at(14)).toBeUndefined();
     expect(at(0)).toBeUndefined();
     expect(at(12)?.r).toBeGreaterThan(0.99);
+    // how far the value moved while the probe watched (the kit never moves it further)
+    expect(at(12)?.span).toBeGreaterThan(1);
+    expect(at(12)?.span).toBeLessThan(2.5);
   });
 });
 
@@ -166,5 +169,64 @@ describe('scroll that moves a fixed stage (a wheel-driven scene)', () => {
     expect(z?.scale).toBeCloseTo(4 / 2000, 5);
     expect(z?.offset).toBeCloseTo(-6, 2);
     expect(rep.inputs.filter((m) => m.uniform === 'viewMatrix#0')).toHaveLength(1);
+  });
+});
+
+describe('a fit has to hold on the way back', () => {
+  // the probe's path: x out and back (frames 0-29), then y out and back (30-59), then still
+  const tri = (k: number, n: number) => 1 - Math.abs(1 - (2 * k) / n);
+  const px: number[] = [];
+  const py: number[] = [];
+  for (let i = 0; i < 100; i++) {
+    px.push(i < 30 ? 0.2 + 0.6 * tri(i, 29) : 0.5);
+    py.push(i >= 30 && i < 60 ? 0.2 + 0.6 * tri(i - 30, 29) : 0.5);
+  }
+  const legs = pointerLegs({ px, py });
+
+  it('labels the way out and the way back', () => {
+    expect(legs.filter((l) => l === 'a').length).toBeGreaterThan(20);
+    expect(legs.filter((l) => l === 'b').length).toBeGreaterThan(20);
+    expect(legs[5]).toBe('a');
+    expect(legs[25]).toBe('b');
+    expect(legs[40]).toBe('a');
+    expect(legs[55]).toBe('b');
+    expect(legs[90]).toBeNull();
+  });
+
+  it('accepts a value that follows the pointer and rejects one that only drifts or turns with time', () => {
+    const pick = px.map((_, i) => i).filter((i) => i < 60);
+    const L = pick.map((i) => legs[i]);
+    const X = pick.map((i) => px[i]);
+    const Y = pick.map((i) => py[i]);
+    expect(
+      holdsOnTheWayBack(
+        L,
+        X,
+        Y,
+        pick.map((i) => 3 * px[i] - 1 + 2 * py[i]),
+      ),
+    ).toBe(true);
+    // a value that falls while the pointer goes out and keeps falling on the way back
+    expect(
+      holdsOnTheWayBack(
+        L,
+        X,
+        Y,
+        pick.map((i) => 5 - i * 0.1),
+      ),
+    ).toBe(false);
+    // a slow oscillation that happens to line up with the way out
+    expect(
+      holdsOnTheWayBack(
+        L,
+        X,
+        Y,
+        pick.map((i) => Math.sin((i / 30) * Math.PI * 0.9)),
+      ),
+    ).toBe(false);
+  });
+
+  it('does not drop a pointer fit it has too little to judge', () => {
+    expect(holdsOnTheWayBack([null, null, 'a', 'b'], [0, 1, 2, 3], [0, 0, 0, 0], [1, 2, 3, 4])).toBe(true);
   });
 });

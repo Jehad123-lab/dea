@@ -35,12 +35,17 @@ export interface InputMap {
   /** how well the measured values follow the input (correlation), 1 for a name-based guess */
   r: number;
   source: 'measured' | 'name';
-  /** scroll: the range of the input the probe saw (px); live input is held inside it so a value is never extrapolated past what was measured */
+  /** the range of the (eased) input the value was measured over (scroll: px; pointer: 0..1); live input is held inside it so a value is never extrapolated past what was measured */
   lo?: number;
   hi?: number;
   /** a second pointer axis the value also follows (matrices: both x and y turn the camera): value += scale2 × eased(axis2) */
   axis2?: 'x' | 'y';
   scale2?: number;
+  /** the same range for the second axis */
+  lo2?: number;
+  hi2?: number;
+  /** pointer: how far the value moved (max − min) while the probe watched; the input never moves it by more than that */
+  span?: number;
 }
 
 export interface ProbeReport {
@@ -138,6 +143,96 @@ function ease(s: number[], k: number): number[] {
   return out;
 }
 
+/**
+ * Which leg of the probe's pointer path each frame belongs to: 'a' while the pointer travels out (x from 20% to 80%, then y),
+ * 'b' on the way back. A fit made on one leg has to predict the other: a value that merely drifts or turns with time
+ * (every smooth series fits a pointer path with r ≈ 0.9 by luck, there are so few independent points in it) predicts the
+ * wrong way round on the way back, a value that follows the pointer predicts it.
+ */
+export function pointerLegs(sig: { px: number[]; py: number[] }): Array<'a' | 'b' | null> {
+  const n = sig.px.length;
+  const lab: Array<'a' | 'b' | null> = new Array(n).fill(null);
+  if (n < 12) return lab;
+  const away = (s: number[], from: number, to: number) => {
+    let s0 = -1;
+    for (let e = from; e < to; e++)
+      if (Math.abs(s[e] - s[from]) > 0.01) {
+        s0 = e;
+        break;
+      }
+    if (s0 < 0) return;
+    let peak = s0;
+    for (let e = s0; e < to; e++) if (s[e] > s[peak] + 1e-9) peak = e;
+    for (let e = s0; e <= peak; e++) lab[e] = 'a';
+    for (let e = peak + 1; e < Math.min(to, peak + 1 + (peak - s0)); e++) lab[e] = 'b';
+  };
+  let yStart = n;
+  for (let e = 1; e < n; e++)
+    if (Math.abs(sig.py[e] - sig.py[0]) > 0.01) {
+      yStart = e;
+      break;
+    }
+  away(sig.px, 0, yStart);
+  away(sig.py, Math.max(0, yStart - 1), n);
+  return lab;
+}
+
+/** least squares y ≈ a + b X + c Y */
+function lsq3(X: number[], Y: number[], y: number[]): { a: number; b: number; c: number } | null {
+  const n = y.length;
+  if (n < 4) return null;
+  const mean = (v: number[]) => v.reduce((s, q) => s + q, 0) / n;
+  const mx = mean(X);
+  const my = mean(Y);
+  const mz = mean(y);
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+  let sxz = 0;
+  let syz = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = X[i] - mx;
+    const dy = Y[i] - my;
+    const dz = y[i] - mz;
+    sxx += dx * dx;
+    syy += dy * dy;
+    sxy += dx * dy;
+    sxz += dx * dz;
+    syz += dy * dz;
+  }
+  const det = sxx * syy - sxy * sxy;
+  if (Math.abs(det) < 1e-12 * Math.max(1e-12, sxx * syy)) {
+    // one axis does not move on these samples: a one-axis fit on the other
+    if (sxx > 1e-12) return { a: mz - (sxz / sxx) * mx, b: sxz / sxx, c: 0 };
+    if (syy > 1e-12) return { a: mz - (syz / syy) * my, b: 0, c: syz / syy };
+    return null;
+  }
+  const b = (sxz * syy - syz * sxy) / det;
+  const c = (syz * sxx - sxz * sxy) / det;
+  return { a: mz - b * mx - c * my, b, c };
+}
+
+/** does a pointer fit made on the way out predict the way back? (true when there are too few samples to tell) */
+export function holdsOnTheWayBack(labels: Array<'a' | 'b' | null>, X: number[], Y: number[], y: number[], minR = 0.6): boolean {
+  const A: number[] = [];
+  const B: number[] = [];
+  labels.forEach((l, i) => {
+    if (l === 'a') A.push(i);
+    else if (l === 'b') B.push(i);
+  });
+  if (A.length < 6 || B.length < 6) return true;
+  const f = lsq3(
+    A.map((i) => X[i]),
+    A.map((i) => Y[i]),
+    A.map((i) => y[i]),
+  );
+  if (!f) return false;
+  const pred = B.map((i) => f.a + f.b * X[i] + f.c * Y[i]);
+  const act = B.map((i) => y[i]);
+  const r = corr(pred, act).r;
+  return r >= minR;
+}
+
 const round = (x: number, d = 5) => Math.round(x * 10 ** d) / 10 ** d;
 
 /**
@@ -147,6 +242,7 @@ const round = (x: number, d = 5) => Math.round(x * 10 ** d) / 10 ** d;
  */
 function fitMatrix(program: number, uniform: string, rows: number[][], idx: number[], sig: { px: number[]; py: number[] }, minR: number): InputMap[] {
   const out: InputMap[] = [];
+  const legs = pointerLegs(sig);
   const comps = Math.max(...rows.map((r) => r.length - 1));
   for (let c = 0; c < comps; c++) {
     const pick = rows.map((r, i) => (Number.isFinite(r[c + 1]) && idx[i] >= 0 ? i : -1)).filter((i) => i >= 0);
@@ -155,7 +251,7 @@ function fitMatrix(program: number, uniform: string, rows: number[][], idx: numb
     const lo = Math.min(...y);
     const hi = Math.max(...y);
     if (hi - lo <= Math.max(1e-6, Math.max(Math.abs(lo), Math.abs(hi)) * 1e-4)) continue;
-    let best: { r: number; k: number; a: number; b: number; cc: number } | null = null;
+    let best: { r: number; k: number; a: number; b: number; cc: number; start: 'first' | 'centre' } | null = null;
     // the eased pointer starts either where the first sample is or at the centre of the window (a page's pointer state at load)
     for (const [k, start] of [1, 0.5, 0.3, 0.14, 0.05].flatMap(
       (kk) =>
@@ -223,14 +319,51 @@ function fitMatrix(program: number, uniform: string, rows: number[][], idx: numb
         sst += (y[i] - mean) ** 2;
       }
       const r = sst > 0 ? Math.sqrt(Math.max(0, 1 - ssr / sst)) : 0;
-      if (!best || r > best.r + 1e-4) best = { r, k, a, b, cc };
+      if (!best || r > best.r + 1e-4) best = { r, k, a, b, cc, start };
     }
     if (!best || best.r < minR) continue;
+    let easedSpanX = 0;
+    let easedSpanY = 0;
+    let easedLoX = 0;
+    let easedHiX = 1;
+    let easedLoY = 0;
+    let easedHiY = 1;
+    {
+      // the fit has to hold on the way back too (see pointerLegs)
+      let ex = best.start === 'first' ? sig.px[idx[pick[0]]] : 0.5;
+      let ey = best.start === 'first' ? sig.py[idx[pick[0]]] : 0.5;
+      const X: number[] = [];
+      const Y: number[] = [];
+      for (const i of pick) {
+        ex += best.k * (sig.px[idx[i]] - ex);
+        ey += best.k * (sig.py[idx[i]] - ey);
+        X.push(ex);
+        Y.push(ey);
+      }
+      easedLoX = Math.min(...X);
+      easedHiX = Math.max(...X);
+      easedLoY = Math.min(...Y);
+      easedHiY = Math.max(...Y);
+      easedSpanX = easedHiX - easedLoX;
+      easedSpanY = easedHiY - easedLoY;
+      if (
+        !holdsOnTheWayBack(
+          pick.map((i) => legs[idx[i]] ?? null),
+          X,
+          Y,
+          y,
+        )
+      )
+        continue;
+    }
     const spanX = Math.max(...sig.px) - Math.min(...sig.px);
     const spanY = Math.max(...sig.py) - Math.min(...sig.py);
     const useX = Math.abs(best.b) * spanX > 0.04 * (hi - lo);
     const useY = Math.abs(best.cc) * spanY > 0.04 * (hi - lo);
     if (!useX && !useY) continue;
+    // a fit has to be as steep as the data: over the pointer's whole path it cannot predict much more movement than the
+    // value showed (a steep line through a few points that merely look like the pointer's path)
+    if ((useX ? Math.abs(best.b) * easedSpanX : 0) + (useY ? Math.abs(best.cc) * easedSpanY : 0) > 2.5 * (hi - lo)) continue;
     const first = useX ? { axis: 'x' as const, scale: best.b } : { axis: 'y' as const, scale: best.cc };
     const m: InputMap = {
       program,
@@ -243,10 +376,15 @@ function fitMatrix(program: number, uniform: string, rows: number[][], idx: numb
       k: best.k,
       r: round(best.r, 4),
       source: 'measured',
+      span: round(hi - lo, 6),
+      lo: round(first.axis === 'x' ? easedLoX : easedLoY, 4),
+      hi: round(first.axis === 'x' ? easedHiX : easedHiY, 4),
     };
     if (useX && useY) {
       m.axis2 = 'y';
       m.scale2 = round(best.cc, 6);
+      m.lo2 = round(easedLoY, 4);
+      m.hi2 = round(easedHiY, 4);
     }
     out.push(m);
   }
@@ -331,6 +469,7 @@ export function fitInputs(probe: ProbeData, opts: { minR?: number } = {}): Probe
   ];
   const inputs: InputMap[] = [];
   const unexplained: string[] = [];
+  const legs = pointerLegs(sig);
   for (const [key, rows] of Object.entries(probe.series)) {
     const bar = key.lastIndexOf('|');
     const program = Number(key.slice(0, bar));
@@ -405,7 +544,36 @@ export function fitInputs(probe: ProbeData, opts: { minR?: number } = {}): Probe
             };
         }
       }
+      if (best && best.m.kind === 'pointer' && Math.abs(best.m.scale) * span(ease(best.m.axis === 'y' ? sig.py : sig.px, best.m.k)) > 2.5 * span(u)) {
+        unexplained.push(`${uniform}[${c}] (program ${program}; a pointer fit steeper than the values it was fitted to)`);
+        best = null;
+      }
+      if (best && (best.m.kind === 'pointer' || best.m.kind === 'pointer-velocity')) {
+        // the same hold-out as for matrices: made on the way out, it has to predict the way back
+        const se = ease(best.m.kind === 'pointer-velocity' ? vel(best.m.axis === 'y' ? sig.py : sig.px) : best.m.axis === 'y' ? sig.py : sig.px, best.m.k ?? 1);
+        const ok = idx.filter((_, i) => keep[i]);
+        const xs = ok.map((j) => se[j]);
+        if (
+          !holdsOnTheWayBack(
+            ok.map((j) => legs[j] ?? null),
+            xs,
+            xs.map(() => 0),
+            u,
+          )
+        ) {
+          unexplained.push(`${uniform}[${c}] (program ${program}; it matched the pointer's way out but not the way back, so it is time, not pointer)`);
+          best = null;
+        }
+      }
       if (best) {
+        if (best.m.kind === 'pointer' || best.m.kind === 'pointer-velocity') {
+          best.m.span = round(span(u), 6);
+          const raw = best.m.axis === 'y' ? sig.py : sig.px;
+          const se = ease(best.m.kind === 'pointer-velocity' ? vel(raw) : raw, best.m.k);
+          const xs = idx.filter((_, i) => keep[i]).map((j) => se[j]);
+          best.m.lo = round(Math.min(...xs), 5);
+          best.m.hi = round(Math.max(...xs), 5);
+        }
         if (best.m.kind === 'scroll') {
           best.m.lo = Math.min(...sig.scroll);
           best.m.hi = Math.max(...sig.scroll);

@@ -455,12 +455,32 @@ export function createRebuild(canvas, data, options = {}) {
   const live = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, vx: 0, vy: 0, scroll: 0, width: p.viewport ? p.viewport.w : p.canvas.cssW || p.canvas.w, height: p.viewport ? p.viewport.h : p.canvas.cssH || p.canvas.h };
   // start where the recording was: the eased state of each input begins at its recorded value
   const eased = new Map();
-  const signalOf = (m) => {
-    if (m.kind === 'pointer') return m.axis === 'y' ? live.y : live.x;
-    if (m.kind === 'pointer-velocity') return m.axis === 'y' ? live.vy : live.vx;
-    if (m.kind === 'scroll') return m.lo != null ? Math.min(m.hi, Math.max(m.lo, live.scroll)) : live.scroll;
-    if (m.kind === 'viewport') return m.axis === 'height' ? live.height : m.axis === 'aspect' ? live.width / live.height : live.width;
+  const live0 = Object.assign({}, live);
+  const signalOf = (m, L = live) => {
+    if (m.kind === 'pointer') return m.axis === 'y' ? L.y : L.x;
+    if (m.kind === 'pointer-velocity') return m.axis === 'y' ? L.vy : L.vx;
+    if (m.kind === 'scroll') return m.lo != null ? Math.min(m.hi, Math.max(m.lo, L.scroll)) : L.scroll;
+    if (m.kind === 'viewport') return m.axis === 'height' ? L.height : m.axis === 'aspect' ? L.width / L.height : L.width;
     return 0;
+  };
+  // The fits are linear (value = scale × input + offset) and only as good as their r: written as absolute values they put
+  // every fitted component at its regression line, residual and all, the moment the first input arrives (a model matrix
+  // whose components are each set from their own line is no rotation any more, and the picture goes). So the input
+  // moves the recorded value by what the fit says the move changes: recorded + scale × (input − the input at rest).
+  const delta = (m, e, e2) => {
+    const cl = (v, lo, hi) => (lo != null && hi != null ? Math.min(hi, Math.max(lo, v)) : v);
+    const d = m.scale * (cl(e, m.lo, m.hi) - cl(signalOf(m, live0), m.lo, m.hi)) + (m.axis2 ? m.scale2 * (cl(e2 == null ? 0.5 : e2, m.lo2, m.hi2) - cl(0.5, m.lo2, m.hi2)) : 0);
+    // and never by more than the value was seen to move while the probe watched
+    return m.span != null ? Math.max(-m.span, Math.min(m.span, d)) : d;
+  };
+
+  const follow = new Map();
+  const followed = (key, cur, d) => {
+    const st = follow.get(key);
+    const base = st && st.w === cur ? st.b : cur;
+    const w = base + d;
+    follow.set(key, { b: base, w });
+    return w;
   };
   let inputTouched = !!options.liveFromStart;
   const stepInputs = () => {
@@ -468,11 +488,11 @@ export function createRebuild(canvas, data, options = {}) {
     for (const m of inputs) {
       const k = m.program + '|' + m.uniform + '|' + m.component;
       const s = signalOf(m);
-      const e = eased.has(k) ? eased.get(k) : s;
+      const e = eased.has(k) ? eased.get(k) : signalOf(m, live0);
       eased.set(k, e + (m.k == null ? 1 : m.k) * (s - e));
       if (m.axis2) {
         const s2 = m.axis2 === 'y' ? live.y : live.x;
-        const e2 = eased.has(k + '|2') ? eased.get(k + '|2') : s2;
+        const e2 = eased.has(k + '|2') ? eased.get(k + '|2') : 0.5;
         eased.set(k + '|2', e2 + (m.k == null ? 1 : m.k) * (s2 - e2));
       }
     }
@@ -487,34 +507,81 @@ export function createRebuild(canvas, data, options = {}) {
     matIn.get(ord).items.push({ name: m.uniform.slice(0, h), m });
   }
   for (const fr of p.frames) { let n = 0; for (const s of fr.steps) if (s.op === 'draw') s._ord = n++; }
+  // A matrix moved component by component is no rotation any more (a column gets longer, two columns lean on each other)
+  // and the object shears, flips or vanishes. After the inputs have moved a matrix its 3x3 block is made orthogonal again,
+  // each column keeping the length it had in the recording, so what a fit can do to it is turn and slide it.
+  const tidy3 = (el, base, stride) => {
+    const col = (a, i) => [a[i * stride], a[i * stride + 1], a[i * stride + 2]];
+    const len = (v) => Math.hypot(v[0], v[1], v[2]);
+    const norm = (v) => { const l = len(v) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+    const b = [col(base, 0), col(base, 1), col(base, 2)];
+    const L3 = b.map(len);
+    if (L3.some((l) => !(l > 1e-9))) return;
+    const n0 = norm(col(el, 0));
+    let c1 = col(el, 1);
+    const d01 = c1[0] * n0[0] + c1[1] * n0[1] + c1[2] * n0[2];
+    c1 = [c1[0] - d01 * n0[0], c1[1] - d01 * n0[1], c1[2] - d01 * n0[2]];
+    if (!(len(c1) > 1e-9)) return;
+    const n1 = norm(c1);
+    let n2 = [n0[1] * n1[2] - n0[2] * n1[1], n0[2] * n1[0] - n0[0] * n1[2], n0[0] * n1[1] - n0[1] * n1[0]];
+    const b2 = [b[0][1] * b[1][2] - b[0][2] * b[1][1], b[0][2] * b[1][0] - b[0][0] * b[1][2], b[0][0] * b[1][1] - b[0][1] * b[1][0]];
+    if (b2[0] * b[2][0] + b2[1] * b[2][1] + b2[2] * b[2][2] < 0) n2 = [-n2[0], -n2[1], -n2[2]];
+    [n0, n1, n2].forEach((n, i) => { for (let k = 0; k < 3; k++) el[i * stride + k] = n[k] * L3[i]; });
+  };
   const applyMatrices = (step, obj, U, dirtySet) => {
     if (!inputTouched || !matIn.size) return;
     const L = matIn.get(step._ord);
     if (!L || L.program !== p.materials[step.material].program) return;
-    const val = (m) => { const k = m.program + '|' + m.uniform + '|' + m.component; const e = eased.get(k); if (e == null) return NaN; let v = m.scale * e + m.offset; if (m.axis2) v += m.scale2 * (eased.get(k + '|2') ?? 0); return v; };
+    const dv = (m) => { const k = m.program + '|' + m.uniform + '|' + m.component; const e = eased.get(k); if (e == null) return NaN; return delta(m, e, eased.get(k + '|2')); };
     const cam = step.camera != null ? cameras[step.camera] : null;
     const mv = (name) => L.items.filter((x) => x.name === name);
     if (cam) {
-      for (const x of mv('viewMatrix')) { const v = val(x.m); if (Number.isFinite(v)) cam.matrixWorldInverse.elements[x.m.component] = v; }
-      if (mv('viewMatrix').length) { cam.matrixWorld.copy(cam.matrixWorldInverse).invert(); cam.matrix.copy(cam.matrixWorld); }
-      for (const x of mv('projectionMatrix')) { const v = val(x.m); if (Number.isFinite(v)) cam.projectionMatrix.elements[x.m.component] = v; }
+      if (!cam._rec) cam._rec = { view: cam.matrixWorldInverse.elements.slice(), proj: cam.projectionMatrix.elements.slice() };
+      for (const x of mv('viewMatrix')) { const d = dv(x.m); if (Number.isFinite(d)) cam.matrixWorldInverse.elements[x.m.component] = cam._rec.view[x.m.component] + d; }
+      if (mv('viewMatrix').length) { tidy3(cam.matrixWorldInverse.elements, cam._rec.view, 4); cam.matrixWorld.copy(cam.matrixWorldInverse).invert(); cam.matrix.copy(cam.matrixWorld); }
+      // a projection keeps its depth range and its field of view's proportions: the sideways shift (8, 9) follows the input,
+      // the two scales (0, 5) by at most 15 %
+      for (const x of mv('projectionMatrix')) {
+        const c = x.m.component;
+        const d = dv(x.m);
+        if (!Number.isFinite(d)) continue;
+        const base = cam._rec.proj[c];
+        if (c === 8 || c === 9) cam.projectionMatrix.elements[c] = base + d;
+        else if (c === 0 || c === 5) cam.projectionMatrix.elements[c] = base + Math.max(-0.15 * Math.abs(base), Math.min(0.15 * Math.abs(base), d));
+      }
       if (mv('projectionMatrix').length) cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
     }
-    for (const x of mv('modelMatrix')) { const v = val(x.m); if (Number.isFinite(v)) obj.matrixWorld.elements[x.m.component] = v; }
+    if (!obj._rec) obj._rec = obj.matrixWorld.clone();
+    if (mv('modelMatrix').length || mv('modelViewMatrix').length) obj.matrixWorld.copy(obj._rec);
+    for (const x of mv('modelMatrix')) { const d = dv(x.m); if (Number.isFinite(d)) obj.matrixWorld.elements[x.m.component] += d; }
+    if (mv('modelMatrix').length) tidy3(obj.matrixWorld.elements, obj._rec.elements, 4);
     if (cam && mv('modelViewMatrix').length) {
       const MVm = new THREE.Matrix4().multiplyMatrices(cam.matrixWorldInverse, obj.matrixWorld);
-      for (const x of mv('modelViewMatrix')) { const v = val(x.m); if (Number.isFinite(v)) MVm.elements[x.m.component] = v; }
+      const MV0 = MVm.elements.slice();
+      for (const x of mv('modelViewMatrix')) { const d = dv(x.m); if (Number.isFinite(d)) MVm.elements[x.m.component] += d; }
+      tidy3(MVm.elements, MV0, 4);
       obj.matrixWorld.multiplyMatrices(cam.matrixWorld, MVm);
     }
     if (mv('modelMatrix').length || mv('modelViewMatrix').length) obj.matrix.copy(obj.matrixWorld);
+    const touched = new Set();
     for (const x of L.items) {
       if (/^(modelMatrix|viewMatrix|projectionMatrix|modelViewMatrix)$/.test(x.name)) continue;
       const u = U[x.name];
-      const v = val(x.m);
-      if (!u || !Number.isFinite(v)) continue;
-      if (Array.isArray(u.value)) { u.value = u.value.slice(); u.value[x.m.component] = v; }
-      else if (u.value && u.value.elements) u.value.elements[x.m.component] = v;
+      const d = dv(x.m);
+      if (!u || !Number.isFinite(d)) continue;
+      const fk = 'M' + step._ord + '|' + x.name + '|' + x.m.component;
+      if (Array.isArray(u.value)) { u.value = u.value.slice(); u.value[x.m.component] = followed(fk, u.value[x.m.component], d); }
+      else if (u.value && u.value.elements) u.value.elements[x.m.component] = followed(fk, u.value.elements[x.m.component], d);
+      if (x.name === 'normalMatrix') touched.add(x.name);
       dirtySet.add(x.name);
+    }
+    for (const n of touched) {
+      const u = U[n];
+      const el = u.value && u.value.elements ? u.value.elements : Array.isArray(u.value) ? u.value : null;
+      if (!el || el.length !== 9) continue;
+      const base = el.map((v, c) => { const st = follow.get('M' + step._ord + '|' + n + '|' + c); return st ? st.b : v; });
+      tidy3(el, base, 3);
+      el.forEach((v, c) => { const k = 'M' + step._ord + '|' + n + '|' + c; const st = follow.get(k); if (st) follow.set(k, { b: st.b, w: v }); });
     }
   };
   const applyInputs = (programId, U, dirtySet) => {
@@ -524,11 +591,13 @@ export function createRebuild(canvas, data, options = {}) {
     for (const m of list) {
       const u = U[m.uniform];
       if (!u) continue;
-      const v = m.scale * eased.get(m.program + '|' + m.uniform + '|' + m.component) + m.offset;
-      if (!Number.isFinite(v)) continue;
-      if (Array.isArray(u.value)) { u.value = u.value.slice(); u.value[m.component] = v; }
-      else if (u.value && typeof u.value === 'object' && 'x' in u.value) u.value.setComponent(m.component, v);
-      else u.value = v;
+      const ek = m.program + '|' + m.uniform + '|' + m.component;
+      const d = delta(m, eased.get(ek), eased.get(ek + '|2'));
+      if (!Number.isFinite(d)) continue;
+      const fk = 'U' + ek;
+      if (Array.isArray(u.value)) { u.value = u.value.slice(); u.value[m.component] = followed(fk, u.value[m.component], d); }
+      else if (u.value && typeof u.value === 'object' && 'x' in u.value) u.value.setComponent(m.component, followed(fk, u.value.getComponent(m.component), d));
+      else u.value = followed(fk, u.value, d);
       dirtySet.add(m.uniform);
     }
   };
