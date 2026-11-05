@@ -3,6 +3,7 @@ import { currentCache } from '../cache.ts';
 import { timed } from '../timings.ts';
 import type { BrowserInfo } from '../types.ts';
 import { INIT_SCRIPT, NAME_SHIM } from './init.ts';
+import { assertNotBotWall } from './wall.ts';
 
 export type BrowserChoice = 'auto' | 'chromium' | 'chrome' | 'msedge';
 
@@ -189,6 +190,14 @@ export async function openSite(url: string, opts: OpenOptions = {}): Promise<Ses
     if (r === 'timeout') warnings.push('The network never went quiet (normal for sites that stream or poll); DEA waited 8 s and moved on.');
   });
   await timed('settle wait', () => settle(page, opts.settleMs ?? 2_500));
+
+  try {
+    await assertNotBotWall(page, response);
+  } catch (e) {
+    await context.close().catch(() => {});
+    await releaseBrowser(browser);
+    throw e;
+  }
 
   const info = browserInfo(browser, channel, headless);
   let closed = false;

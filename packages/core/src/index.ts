@@ -37,6 +37,7 @@ export {
   settle,
   withSharedBrowser,
 } from './browser/open.ts';
+export { BotProtectionError, type BotWall, classifyBotWall, type WallEvidence } from './browser/wall.ts';
 export { type CacheOptions, type CacheStats, ContentCache, cacheKey, currentCache, fmtMb, withCache } from './cache.ts';
 export { type ApiCall, buildOpenApi, inferSchema, isApiCall, isAssetUrl, isTelemetry, mergeSchema, templatePath } from './code/api.ts';
 export { type CodeDoc, type CodeOptions, type CodeResult, decodeCode } from './code/decode.ts';

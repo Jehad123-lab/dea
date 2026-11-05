@@ -496,6 +496,15 @@ export interface HeroLayout {
 }
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
+/** How many lines a measured text block was set in (its height over its line height). */
+const boxLines = (b: { h: number; fontSize: number; lineHeight: string }): number => {
+  const lh = /px$/.test(b.lineHeight)
+    ? Number.parseFloat(b.lineHeight)
+    : /^[\d.]+$/.test(b.lineHeight)
+      ? Number.parseFloat(b.lineHeight) * b.fontSize
+      : b.fontSize * 1.25;
+  return Math.round(b.h / Math.max(1, lh));
+};
 
 /**
  * Each text block as an absolutely placed element in viewport units, so it scales with the window like a full-screen
@@ -579,7 +588,9 @@ export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text
         ...(b.deco ? { textDecoration: b.deco } : {}),
         ...(b.fstyle && b.fstyle !== 'normal' ? { fontStyle: b.fstyle } : {}),
         ...(b.opacity < 1 ? { opacity: String(b.opacity) } : {}),
-        whiteSpace: 'pre-wrap',
+        // a line that was one line stays one line (a different font must not wrap it onto its neighbour); a block of
+        // several lines keeps its measured height and clips what overflows, as the site's line clamp or overflow did
+        ...(boxLines(b) <= 1 ? { whiteSpace: 'pre' } : { whiteSpace: 'pre-wrap', height: vh(b.h * 1.12 + 2), overflow: 'hidden' }),
       },
     })),
   ];

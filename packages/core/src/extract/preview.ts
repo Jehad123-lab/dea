@@ -4,6 +4,7 @@ import { extname, join, normalize } from 'node:path';
 import type { Browser, Page } from 'playwright';
 import { NAME_SHIM } from '../browser/init.ts';
 import { installObservers, LOADER_VISIBLE } from '../browser/open.ts';
+import { assertNotBotWall } from '../browser/wall.ts';
 import { currentCache } from '../cache.ts';
 import { pullRecording, REPLAY_CAPTURE_SCRIPT, type Recording, recordFrames, recordTape, releaseFrames } from '../replay/capture.ts';
 import { type ProbeData, probeInputs } from '../replay/inputs.ts';
@@ -299,17 +300,29 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
   const keyOf = (el, pe) => { const p = []; for (let n = el; n && n.nodeType === 1 && n !== document.documentElement; n = n.parentElement) { let i = 1; for (let s = n.previousElementSibling; s; s = s.previousElementSibling) i++; p.push(n.tagName.toLowerCase() + ':' + i); } return p.reverse().join('>') + (pe || ''); };
   // where an element paints: the z-index of each stacking context on the way down (position + z-index, fixed or sticky, opacity,
   // transforms, filters), then its own level (positioned above in-flow); equal paths paint in document order
+  const zinfo = new Map();
   const zpath = (el) => {
     const up = [];
     for (let n = el; n && n !== document.documentElement; n = n.parentElement) up.push(n);
     const path = [];
+    let inPos = false;
     for (const n of up.reverse()) {
-      const c = getComputedStyle(n);
-      const pos = c.position !== 'static';
-      const zi = c.zIndex !== 'auto' ? parseInt(c.zIndex, 10) : null;
-      const ctx = (pos && zi !== null) || c.position === 'fixed' || c.position === 'sticky' || +c.opacity < 1 || c.transform !== 'none' || c.filter !== 'none' || c.isolation === 'isolate' || c.mixBlendMode !== 'normal';
-      if (n === el) path.push(zi !== null && pos ? zi : pos ? 0.5 : 0);
-      else if (ctx) path.push(zi !== null && pos ? zi : 0);
+      let v = zinfo.get(n);
+      if (!v) {
+        const c = getComputedStyle(n);
+        const pos = c.position !== 'static';
+        const zi = c.zIndex !== 'auto' ? parseInt(c.zIndex, 10) : null;
+        const ctx = (pos && zi !== null) || c.position === 'fixed' || c.position === 'sticky' || +c.opacity < 1 || c.transform !== 'none' || c.filter !== 'none' || c.isolation === 'isolate' || c.mixBlendMode !== 'normal';
+        v = { pos, zi, ctx };
+        zinfo.set(n, v);
+      }
+      const { pos, zi, ctx } = v;
+      // content inside a positioned element without a z-index paints with that element (its layer), not below it
+      if (n === el) path.push(zi !== null && pos ? zi : pos || inPos ? 0.5 : 0);
+      else if (ctx) {
+        path.push(zi !== null && pos ? zi : 0);
+        inPos = false;
+      } else if (pos) inPos = true;
     }
     return path;
   };
@@ -347,7 +360,8 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     if (skip && el !== root && (el.getAttribute('role') === 'progressbar' || LOADER.test(String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className) + ' ' + el.id))) return;
     let cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return;
-    const own = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' ').replace(/\\s+/g, ' ').trim();
+    const own = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' ').replace(/\\s+/g, ' ').trim()
+    || (el.tagName === 'INPUT' && /^(button|submit|reset)$/.test(el.type) ? String(el.value || '').trim() : '');
     if (own && !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(el.tagName)) {
       // split text (one span per character or word) is one block: climb through inline parents to the word or line
       let top = el;
@@ -525,7 +539,18 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
   }
   const common = [...seenBg.entries()].sort((a, b) => b[1] - a[1])[0];
   const background = (common && common[1] >= 4 ? common[0] : null) || bgOf(document.body) || bgOf(document.documentElement);
-  return { viewport: { width: W, height: H }, boxes, canvas, background, shapes, graphics };
+  // a colour written in a newer space (oklch, oklab, lab, color()) reads back as it was written; the page colour is handed on as plain sRGB
+  const plain = (c) => {
+    if (!c || /^(rgb|#)/i.test(c)) return c;
+    try {
+      const cv = document.createElement('canvas'); cv.width = cv.height = 1;
+      const cx = cv.getContext('2d', { willReadFrequently: true });
+      cx.fillStyle = c; cx.fillRect(0, 0, 1, 1);
+      const d = cx.getImageData(0, 0, 1, 1).data;
+      return d[3] === 255 ? 'rgb(' + d[0] + ', ' + d[1] + ', ' + d[2] + ')' : 'rgba(' + d[0] + ', ' + d[1] + ', ' + d[2] + ', ' + Math.round((d[3] / 255) * 1000) / 1000 + ')';
+    } catch { return c; }
+  };
+  return { viewport: { width: W, height: H }, boxes, canvas, background: plain(background), shapes, graphics };
 })()`;
 
 /** Where each first-screen element sits at a few scroll positions: a box that moves, scales or fades with scroll gets keyframes. */
@@ -666,8 +691,9 @@ export async function readLayout(
     if (l && (!best || l.boxes.length > best.boxes.length)) best = l;
   };
   try {
-    await page.goto(url, { waitUntil: 'load', timeout: 60_000 }).catch(() => {});
+    const resp = await page.goto(url, { waitUntil: 'load', timeout: 60_000 }).catch(() => null);
     await page.waitForTimeout(waitMs);
+    await assertNotBotWall(page, resp);
     await read();
     // wait out a loading screen (up to 3 minutes), keeping the reading with the most text
     for (let t = 0; t < 180_000 && (await page.evaluate(LOADER_VISIBLE).catch(() => false)); t += 2500) {
@@ -726,7 +752,8 @@ export async function referenceShot(
   if (record) await context.addInitScript({ content: REPLAY_CAPTURE_SCRIPT });
   const page = await context.newPage();
   try {
-    await timed('page load', () => page.goto(url, { waitUntil: 'load', timeout: 60_000 }).catch(() => {}));
+    const resp = await timed('page load', () => page.goto(url, { waitUntil: 'load', timeout: 60_000 }).catch(() => null));
+    await assertNotBotWall(page, resp);
     let best = { png: '', score: -1, atMs: 0, loader: false };
     let layout: unknown = null;
     const t0 = Date.now();
@@ -774,7 +801,10 @@ export async function referenceShot(
       quiet = s2 > best.score * 1.02 || loader ? 0 : quiet + 1;
       if (s2 > best.score) {
         best = { png, score: s2, atMs: Date.now() - t0, loader };
-        layout = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
+        layout = await page.evaluate(LAYOUT_READ(section)).catch((e) => {
+          if (process.env.DEA_DEBUG_LAYOUT) console.error('layout read failed (watch):', String(e).slice(0, 300));
+          return layout;
+        });
       }
     }
     currentTimings()?.record('watch for the reference frame', watchStart, (currentTimings()?.now() ?? 0) - watchStart);
@@ -788,7 +818,10 @@ export async function referenceShot(
         const buf = await page.screenshot({ type: 'png' }).catch(() => null);
         const nowLoader = (await page.evaluate(LOADER_VISIBLE).catch(() => false)) as boolean;
         // the first screen's layout is read now, while the page is still held on the recorded moment (the tape runs it on)
-        const l = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
+        const l = await page.evaluate(LAYOUT_READ(section)).catch((e) => {
+          if (process.env.DEA_DEBUG_LAYOUT) console.error('layout read failed:', String(e).slice(0, 300));
+          return layout;
+        });
         // the tape: more frames of the same recording while the pointer moves and settles (what the site draws and uploads then)
         const tape = interact ? await timed('record the pointer tape', () => recordTape(page).catch((e) => ({ ok: false as const, error: String(e) }))) : null;
         const recording = await timed('read the recording out of the page', () => pullRecording(page).catch(() => null));

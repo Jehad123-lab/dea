@@ -56,6 +56,7 @@ import {
   compareImages,
   kitInteraction,
   kitSteadiness,
+  LAYOUT_READ,
   placeholderPng,
   previewHtml,
   readLayout,
@@ -215,7 +216,8 @@ const STAGE_CACHE_VERSION = 1;
 // bumped when the probe or the capture's result format changes; the recorder's own source is hashed into the key too, so a change
 // to it never serves a recording made by the old one
 const CAPTURE_CACHE_VERSION = 3;
-const CAPTURE_CODE = createHash('sha1').update(REPLAY_CAPTURE_SCRIPT).digest('hex').slice(0, 12);
+/** the recorder and the first-screen reader: a change to either takes the capture again instead of reusing an older reading */
+const CAPTURE_CODE = createHash('sha1').update(REPLAY_CAPTURE_SCRIPT).update(LAYOUT_READ(null)).digest('hex').slice(0, 12);
 
 type RefShot = Awaited<ReturnType<typeof referenceShot>>;
 
