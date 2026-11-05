@@ -15,6 +15,16 @@ export function hubHome(): string {
 
 /** A standard mcpServers entry (Claude Desktop / Cursor shape), plus DEA's few extras. */
 export type ServerDef =
+  | {
+      /** a connector built into DEA (github, vercel, filesystem, http): no MCP server involved */
+      builtin: string;
+      /** NAME of the environment variable that holds the token; the token itself is never stored */
+      tokenEnv?: string;
+      /** what the connector may touch; required, nothing outside it is reached in any mode */
+      scope: Record<string, unknown>;
+      disabled?: boolean;
+      note?: string;
+    }
   | { command: string; args?: string[]; env?: Record<string, string>; cwd?: string; disabled?: boolean; note?: string }
   | {
       url: string;

@@ -26,6 +26,7 @@ import {
   planInvestigation,
   type RunDoc,
   readRun,
+  readUrl,
   renderReport,
   renderTimings,
   resolveRun,
@@ -36,6 +37,7 @@ import {
   startBudget,
   Timings,
   traceWebGL,
+  webSearch,
   withCache,
   withSharedBrowser,
   withTimings,
@@ -425,6 +427,45 @@ cacheCmd
       const c = new ContentCache({ dir: flags.cacheDir });
       await c.clear();
       process.stdout.write(`cleared ${c.dir}\n`);
+    }),
+  );
+
+program
+  .command('search')
+  .description('free web search (DuckDuckGo, MDN, npm, GitHub, Stack Overflow, Wikipedia: no keys) with source, time and evidence on every result')
+  .argument('<query...>', 'what to look for')
+  .option('--source <names>', 'only these sources, comma separated: duckduckgo, wikipedia, github, npm, mdn, stackexchange, hackernews, searxng')
+  .option('--limit <n>', 'results to show', '8')
+  .option('--fresh', 'skip the cache and ask the sources again')
+  .option('--json', 'print JSON')
+  .action((q: string[], flags: { source?: string; limit: string; fresh?: boolean; json?: boolean }) =>
+    run(async () => {
+      const r = await webSearch(q.join(' '), { sources: flags.source?.split(',').map((x) => x.trim()), limit: Number(flags.limit) || 8, fresh: flags.fresh });
+      if (flags.json) return void process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
+      process.stdout.write(`${r.label.toUpperCase()}  ${r.results.length} results for "${r.query}"\n`);
+      r.results.forEach((x, i) => {
+        process.stdout.write(
+          `\n${i + 1}. ${x.title}\n   ${x.url}\n   ${x.snippet.slice(0, 200)}\n   [${x.source}${x.verified ? '' : ', cached'}${x.license ? `, ${x.license}` : ''}]\n`,
+        );
+      });
+      process.stdout.write(`\nSources: ${r.sources.map((s) => `${s.source} ${s.status}${s.note ? ` (${s.note})` : ''}`).join('; ')}\n${r.evidence}\n`);
+    }),
+  );
+
+program
+  .command('read')
+  .description('fetch one public page and print its readable text (robots.txt respected, local addresses refused, bot-checks reported not bypassed)')
+  .argument('<url>', 'page to read')
+  .option('--max <chars>', 'cut the text here', '12000')
+  .option('--links', 'also list the page links')
+  .option('--fresh', 'skip the cache')
+  .option('--json', 'print JSON')
+  .action((url: string, flags: { max: string; links?: boolean; fresh?: boolean; json?: boolean }) =>
+    run(async () => {
+      const r = await readUrl(url, { maxChars: Number(flags.max) || 12000, links: flags.links, fresh: flags.fresh });
+      if (flags.json) return void process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
+      process.stdout.write(`${r.title || r.final_url}\n${r.final_url}  [${r.verified ? 'verified' : 'cached'}, ${r.fetched_at}]\n${r.evidence}\n\n${r.text}\n`);
+      for (const l of r.links ?? []) process.stdout.write(`- ${l.text}: ${l.url}\n`);
     }),
   );
 

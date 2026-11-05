@@ -1,15 +1,22 @@
 #!/usr/bin/env node
 // stdout is the MCP channel: diagnostics go to stderr only.
-import { Hub } from '@dea/core';
+import { Hub, hubMode } from '@dea/core';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
-import { createGateway } from './gateway.ts';
+import { createGateway, elicitApprove } from './gateway.ts';
 
 export async function serveGateway(client: string): Promise<void> {
-  const hub = new Hub(undefined, {
-    onPause: (c, why) => console.error(`dea-hub: ${c} ${why}`),
-    onStderr: () => {},
-  });
+  const mode = hubMode();
+  const hub = new Hub(
+    undefined,
+    {
+      onPause: (c, why) => console.error(`dea-hub: ${c} ${why}`),
+      onStderr: () => {},
+    },
+    { mode },
+  );
   const server = createGateway(client, hub);
+  hub.opts.approve = elicitApprove(server);
+  console.error(`dea-hub: permission mode ${mode}`);
   await server.connect(new StdioServerTransport());
   console.error(`dea-hub: serving connected apps to "${client}" on stdio`);
 }

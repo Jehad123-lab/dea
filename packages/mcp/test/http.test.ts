@@ -25,7 +25,7 @@ describe('dea serve --http (Streamable HTTP, bearer token)', () => {
       c.clients.laptop = { enabled: true, apps: { notes: { level: 'selected', tools: ['list_notes', 'add_note'] } } };
     }, hubHome);
     token = await createToken('laptop', home);
-    srv = await serveHttp({ port: 0, home, hubHome, log: () => {} });
+    srv = await serveHttp({ port: 0, home, hubHome, hubMode: 'delegated', log: () => {} });
   });
   afterAll(async () => {
     await srv?.close();

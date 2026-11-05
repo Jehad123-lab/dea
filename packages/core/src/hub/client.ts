@@ -196,6 +196,7 @@ export async function connectServer(name: string, def: ServerDef, o: ConnectOpti
     await client.connect(transport);
     return client;
   }
+  if ('builtin' in def) throw new Error(`${name} is a built-in connector, not an MCP server.`);
   const url = new URL(expandEnv(def.url));
   const sec = await o.secrets.get(name);
   const headers: Record<string, string> = { ...(def.headers ?? {}) };

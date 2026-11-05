@@ -72,7 +72,7 @@ describe('DEA Hub end to end', () => {
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: ['--import', 'tsx', resolve(root, 'packages/cli/src/index.ts'), 'hub', 'serve', '--client', 'cursor'],
-      env: { ...process.env, DEA_HUB_HOME: home } as Record<string, string>,
+      env: { ...process.env, DEA_HUB_HOME: home, DEA_MODE: 'delegated' } as Record<string, string>,
       cwd: root,
       stderr: 'pipe',
     });
@@ -94,6 +94,64 @@ describe('DEA Hub end to end', () => {
     } finally {
       await client.close();
     }
+  }, 60_000);
+
+  it('supervised mode over MCP: the AI app is asked (elicitation) before a change; an app that cannot be asked gets no changes', async () => {
+    await updateHub((c) => {
+      c.clients.zed = { enabled: true, apps: { notes: { level: 'full' } } };
+    }, home);
+    const connect = async (withElicit: boolean, answer: boolean) => {
+      const transport = new StdioClientTransport({
+        command: process.execPath,
+        args: ['--import', 'tsx', resolve(root, 'packages/cli/src/index.ts'), 'hub', 'serve', '--client', 'zed'],
+        env: { ...process.env, DEA_HUB_HOME: home, DEA_MODE: 'supervised' } as Record<string, string>,
+        cwd: root,
+        stderr: 'pipe',
+      });
+      const asked: string[] = [];
+      const client = new Client({ name: 'test-zed', version: '1.0.0' }, withElicit ? { capabilities: { elicitation: { form: {} } } } : {});
+      if (withElicit)
+        client.setRequestHandler('elicitation/create', async (req) => {
+          asked.push(String((req.params as { message?: string }).message));
+          return { action: 'accept', content: { approve: answer } };
+        });
+      await client.connect(transport);
+      return { client, asked };
+    };
+    const yes = await connect(true, true);
+    try {
+      expect(text(await yes.client.callTool({ name: 'notes__list_notes', arguments: {} }))).toContain('first note');
+      expect(yes.asked.length).toBe(0); // reading never asks
+      expect(
+        text(await yes.client.callTool({ name: 'notes__add_note', arguments: { text: 'asked first', apiKey: 'sk_live_supersecretvalue123456' } })),
+      ).toContain('added');
+      expect(yes.asked.length).toBe(1);
+      expect(yes.asked[0]).toMatch(/add_note on notes/);
+      expect(yes.asked[0]).not.toContain('supersecret');
+    } finally {
+      await yes.client.close();
+    }
+    const no = await connect(true, false);
+    try {
+      const r = await no.client.callTool({ name: 'notes__add_note', arguments: { text: 'declined' } });
+      expect(r.isError).toBe(true);
+      expect(text(r)).toMatch(/did not approve/);
+    } finally {
+      await no.client.close();
+    }
+    const mute = await connect(false, true);
+    try {
+      const r = await mute.client.callTool({ name: 'notes__add_note', arguments: { text: 'no way to ask' } });
+      expect(r.isError).toBe(true);
+      expect(text(r)).toMatch(/nothing here can ask you/);
+      expect(text(await mute.client.callTool({ name: 'notes__list_notes', arguments: {} }))).not.toContain('declined');
+    } finally {
+      await mute.client.close();
+    }
+    const { readAudit } = await import('@dea/core');
+    const a = await readAudit({ app: 'notes' }, home);
+    expect(a.filter((l) => l.mode === 'supervised').map((l) => `${l.stage}`)).toEqual(['intent', 'done', 'denied', 'denied']);
+    expect(JSON.stringify(a)).not.toContain('supersecret');
   }, 60_000);
 
   it('logs in to an OAuth-protected MCP server: discovery, registration, PKCE, tokens stored encrypted, refresh', async () => {

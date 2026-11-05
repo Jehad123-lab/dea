@@ -1,4 +1,4 @@
-import { Hub } from '@dea/core';
+import { type Approve, Hub } from '@dea/core';
 import { Server } from '@modelcontextprotocol/server';
 
 /**
@@ -37,6 +37,22 @@ export function createGateway(client: string, hub = new Hub(), o: { closeHub?: b
       void hub.close();
     };
   return server;
+}
+
+/**
+ * Supervised mode, over MCP: ask the person through the AI app itself (MCP elicitation) before a change. An AI app that
+ * cannot show the question gets no way to approve, so its changes are refused: it can never approve for itself.
+ */
+export function elicitApprove(server: Server): Approve {
+  return async (req) => {
+    if (!server.getClientCapabilities()?.elicitation) return 'unavailable';
+    const r = await server.elicitInput({
+      mode: 'form',
+      message: `Allow ${req.client} to change something through DEA Hub?\n${req.tool} on ${req.app}: ${req.where}\n${req.args}`,
+      requestedSchema: { type: 'object', properties: { approve: { type: 'boolean', title: 'Allow this change' } }, required: ['approve'] },
+    });
+    return r.action === 'accept' && r.content?.approve === true;
+  };
 }
 
 const GATEWAY_NOTE = (client: string) =>

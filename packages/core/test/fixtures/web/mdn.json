@@ -1,0 +1,57 @@
+{
+  "documents": [
+    {
+      "mdn_url": "/en-US/docs/Web/API/WebGLRenderingContext",
+      "score": 97.16154,
+      "title": "WebGLRenderingContext",
+      "locale": "en-us",
+      "slug": "web/api/webglrenderingcontext",
+      "popularity": 0.006107590862929641,
+      "summary": "The WebGLRenderingContext interface provides an interface to the OpenGL ES 2.0 graphics rendering context for the drawing surface of an HTML <canvas> element.",
+      "highlight": {
+        "body": [
+          "The <mark>WebGLRenderingContext</mark> interface provides an interface to the OpenGL ES 2.0 graphics rendering <mark>context</mark> for the drawing",
+          "<mark>Web</mark><mark>GLRendering</mark><mark>Context</mark>.scissor()\nDefines the scissor box.\n<mark>Web</mark><mark>GLRendering</mark><mark>Context</mark>.viewport()\nSets the viewport.",
+          "<mark>Web</mark><mark>GLRendering</mark><mark>Context</mark>.enable()\nEnables specific <mark>Web</mark>GL capabilities for this <mark>context</mark>."
+        ],
+        "title": ["<mark>WebGLRenderingContext</mark>"]
+      }
+    },
+    {
+      "mdn_url": "/en-US/docs/Web/API/WebGLRenderingContext/enable",
+      "score": 84.419075,
+      "title": "WebGLRenderingContext: enable() method",
+      "locale": "en-us",
+      "slug": "web/api/webglrenderingcontext/enable",
+      "popularity": 0.0011538149795698464,
+      "summary": "The WebGLRenderingContext.enable() method of the WebGL API enables specific WebGL capabilities\nfor this context.",
+      "highlight": {
+        "body": [
+          "The <mark>Web</mark><mark>GLRendering</mark><mark>Context</mark>.enable() method of the <mark>Web</mark>GL API enables specific <mark>Web</mark>GL capabilities\nfor this <mark>context</mark>.\njsenable",
+          "See <mark>Web</mark><mark>GLRendering</mark><mark>Context</mark>.stencilFunc().",
+          "method:\njsgl.isEnabled(gl.DITHER);\n&#x2F;&#x2F; true\n<mark>Web</mark><mark>GLRendering</mark><mark>Context</mark>.disable()\n<mark>Web</mark><mark>GLRendering</mark><mark>Context</mark>.isEnabled()"
+        ],
+        "title": ["<mark>WebGLRenderingContext</mark>: enable() method"]
+      }
+    },
+    {
+      "mdn_url": "/en-US/docs/Web/API/WebGLRenderingContext/disable",
+      "score": 84.41502,
+      "title": "WebGLRenderingContext: disable() method",
+      "locale": "en-us",
+      "slug": "web/api/webglrenderingcontext/disable",
+      "popularity": 0.0007485493875721731,
+      "summary": "The WebGLRenderingContext.disable() method of the WebGL API disables specific WebGL\ncapabilities for this context.",
+      "highlight": {
+        "body": [
+          "The <mark>Web</mark><mark>GLRendering</mark><mark>Context</mark>.disable() method of the <mark>Web</mark>GL API disables specific <mark>Web</mark>GL\ncapabilities for this <mark>context</mark>.\njsdisable",
+          "See <mark>Web</mark><mark>GLRendering</mark><mark>Context</mark>.stencilFunc().",
+          ") method:\njsgl.isEnabled(gl.DITHER);\n&#x2F;&#x2F; false\n<mark>Web</mark><mark>GLRendering</mark><mark>Context</mark>.enable()\n<mark>Web</mark><mark>GLRendering</mark><mark>Context</mark>.isEnabled()"
+        ],
+        "title": ["<mark>WebGLRenderingContext</mark>: disable() method"]
+      }
+    }
+  ],
+  "metadata": { "took_ms": 13, "size": 10, "page": 1, "total": { "value": 7143, "relation": "eq" } },
+  "suggestions": []
+}

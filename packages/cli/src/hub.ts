@@ -3,17 +3,24 @@ import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
+  auditPath,
   CATALOG,
+  CONNECTORS,
+  type Connector,
   checkName,
   connectServer,
   findCatalog,
+  findConnector,
   Hub,
   hubHome,
+  hubMode,
+  isEnvVarName,
   LEVELS,
   type Level,
   listAllTools,
   loadHub,
   parseServersConfig,
+  readAudit,
   readHistory,
   SecretStore,
   type ServerDef,
@@ -35,6 +42,41 @@ export function openBrowser(url: string): void {
   } catch {
     /* printed below anyway */
   }
+}
+
+/** Ask on the terminal. No terminal (piped input) means nobody is there to say yes: the answer is no. */
+async function askYesNo(question: string): Promise<boolean | 'unavailable'> {
+  if (!process.stdin.isTTY) return 'unavailable';
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    return /^y(es)?$/i.test((await rl.question(`${question}\n[y/N] `)).trim());
+  } finally {
+    rl.close();
+  }
+}
+
+/** key=value[,value...] pairs into a scope object: list-valued keys become arrays, true/false become booleans. */
+function parseScope(pairs: string[]): Record<string, unknown> {
+  const LISTS = new Set(['repos', 'projects', 'dirs', 'methods']);
+  const scope: Record<string, unknown> = {};
+  for (const p of pairs) {
+    const i = p.indexOf('=');
+    if (i <= 0) throw new Error(`--scope wants key=value, got "${p}"`);
+    const k = p.slice(0, i).trim();
+    const v = p.slice(i + 1).trim();
+    scope[k] = LISTS.has(k)
+      ? v
+          .split(',')
+          .map((x) => x.trim())
+          .filter(Boolean)
+      : v === 'true'
+        ? true
+        : v === 'false'
+          ? false
+          : v;
+  }
+  return scope;
 }
 
 async function readStdin(): Promise<string> {
@@ -171,7 +213,16 @@ export function registerHub(program: Command, run: (fn: () => Promise<void>) => 
         if (!Object.keys(cfg.mcpServers).length)
           out('  none yet: dea hub connect notion   or   dea hub add files -- npx -y @modelcontextprotocol/server-filesystem .');
         for (const [n, d] of Object.entries(cfg.mcpServers)) {
-          const how = 'command' in d ? `stdio: ${d.command} ${(d.args ?? []).join(' ')}` : `${d.type === 'sse' ? 'sse' : 'http'}: ${d.url}`;
+          const how =
+            'builtin' in d
+              ? `built-in ${d.builtin}: ${Object.entries(d.scope)
+                  .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(',') : String(v)}`)
+                  .join(
+                    ' ',
+                  )}${d.tokenEnv ? `  (token from ${isEnvVarName(d.tokenEnv) ? `$${d.tokenEnv}` : 'a variable whose name looks like a token: remove and re-add this app'})` : ''}`
+              : 'command' in d
+                ? `stdio: ${d.command} ${(d.args ?? []).join(' ')}`
+                : `${d.type === 'sse' ? 'sse' : 'http'}: ${d.url}`;
           const login = 'url' in d ? ((secrets as any)[n]?.tokens ? ' (logged in)' : (secrets as any)[n]?.headers ? ' (token)' : '') : '';
           out(`  ${n.padEnd(16)} ${how}${login}${d.disabled ? ' [disabled]' : ''}`);
         }
@@ -210,14 +261,26 @@ export function registerHub(program: Command, run: (fn: () => Promise<void>) => 
 
   hub
     .command('call')
-    .description('call an app tool yourself, through the same checks and history as an AI client (client name "cli")')
+    .description(
+      'call an app tool yourself, through the same checks, permission mode and history as an AI client (client name "cli"); a change asks you first in supervised mode',
+    )
     .argument('<app>')
     .argument('<tool>')
     .argument('[json]', 'arguments as JSON', '{}')
     .option('--as <client>', 'act as this client (to test its permissions)', 'cli')
-    .action((app: string, tool: string, json: string, f: { as: string }) =>
+    .option('--yes', 'approve this one change in advance (supervised mode only; restricted still refuses, scope still applies)')
+    .action((app: string, tool: string, json: string, f: { as: string; yes?: boolean }) =>
       run(async () => {
-        const h = new Hub();
+        const mode = hubMode();
+        const h = new Hub(
+          undefined,
+          {},
+          {
+            mode,
+            approve: async (r) =>
+              f.yes === true ? true : await askYesNo(`Allow this change?\n  ${r.tool} on ${r.app}: ${r.where}\n  ${r.args}\n  mode: ${r.mode}`),
+          },
+        );
         try {
           const r = await h.call(f.as, app, tool, JSON.parse(json));
           for (const c of r.content ?? []) out(c.type === 'text' ? String((c as { text?: string }).text) : `[${c.type}]`);
@@ -225,6 +288,161 @@ export function registerHub(program: Command, run: (fn: () => Promise<void>) => 
         } finally {
           await h.close();
         }
+      }),
+    );
+
+  hub
+    .command('connectors')
+    .description('built-in connectors (GitHub, Vercel deploy, one folder, one web address): what each needs and what its scope means')
+    .action(() =>
+      run(async () => {
+        for (const c of Object.values(CONNECTORS)) {
+          out(`${c.id.padEnd(11)} ${c.title}`);
+          out(
+            `            token: ${c.needsToken ? `from an environment variable (default $${c.defaultTokenEnv})` : 'optional, from an environment variable (--token-env)'}`,
+          );
+          for (const [k, v] of Object.entries(c.scopeHelp)) out(`            scope ${k}: ${v}`);
+          out(
+            `            tools: ${c.tools.map((t) => `${t.name}${(typeof t.kind === 'function' ? 'write' : t.kind) === 'write' ? '*' : ''}`).join(', ')}   (* changes things)`,
+          );
+        }
+        out('\nAdd one:  dea hub add-connector github --scope repos=you/your-repo --token-env GITHUB_TOKEN');
+      }),
+    );
+
+  hub
+    .command('add-connector')
+    .description('add a built-in connector with a declared scope; the token stays in YOUR environment variable, never in a file')
+    .argument('<kind>', `one of: ${Object.keys(CONNECTORS).join(', ')}`)
+    .option('--name <app>', 'name to use in DEA Hub (default: the kind)')
+    .option('--token-env <VAR>', 'NAME of the environment variable that holds the token (never the token itself)')
+    .option(
+      '--scope <key=value...>',
+      'scope entries, e.g. repos=a/b,c/d  root=C:\\notes  baseUrl=https://api.example.com  methods=GET,POST',
+      (v, acc: string[]) => [...acc, v],
+      [] as string[],
+    )
+    .action((kind: string, f: { name?: string; tokenEnv?: string; scope: string[] }) =>
+      run(async () => {
+        const c = findConnector(kind);
+        if (!c) throw new Error(`No built-in connector "${kind}". Known: ${Object.keys(CONNECTORS).join(', ')}`);
+        const name = checkName('App', f.name ?? c.id);
+        if (f.tokenEnv !== undefined && !isEnvVarName(f.tokenEnv))
+          throw new Error(
+            '--token-env takes the NAME of an environment variable (like GITHUB_TOKEN), and that looks like a token. Nothing was saved; the value was not stored or shown again. Never paste a token into a command or a chat.',
+          );
+        const scope = parseScope(f.scope);
+        c.validateScope(scope);
+        await updateHub((cfg) => {
+          cfg.mcpServers[name] = {
+            builtin: c.id,
+            ...(f.tokenEnv ? { tokenEnv: f.tokenEnv } : c.defaultTokenEnv ? { tokenEnv: c.defaultTokenEnv } : {}),
+            scope,
+          };
+        });
+        const env = f.tokenEnv ?? c.defaultTokenEnv;
+        out(`Added "${name}" (${c.id}). ${env ? `Token: from $${env} ${process.env[env] ? '(set in this shell)' : '(not set in this shell yet)'}.` : ''}`);
+        out(`See what it may do: dea hub tools ${name}.  Check it: dea hub doctor${c.probe ? ' --live' : ''}.  Mode now: ${hubMode()}.`);
+      }),
+    );
+
+  hub
+    .command('mode')
+    .description(
+      'the permission mode every hub call goes through: restricted (read-only), supervised (changes ask first), delegated (changes run inside scope)',
+    )
+    .action(() =>
+      run(async () => {
+        const m = hubMode();
+        out(`${m}${process.env.DEA_MODE ? ' (from DEA_MODE)' : ' (from the policy file or the default)'}`);
+        out(
+          m === 'restricted'
+            ? 'Only reading. Changes are refused.'
+            : m === 'supervised'
+              ? 'Reading runs. Every change asks you first.'
+              : 'Reading and changes run, but only inside each connector’s declared scope.',
+        );
+        out('Change it for one run:  DEA_MODE=delegated   or in policy.json: { "mode": "supervised" }');
+      }),
+    );
+
+  hub
+    .command('audit')
+    .description('every change a connector made or was refused: what, where, when, in which mode (no secrets)')
+    .option('--limit <n>', 'last n lines', '30')
+    .option('--app <app>')
+    .action((f: { limit: string; app?: string }) =>
+      run(async () => {
+        const lines = await readAudit({ limit: Number(f.limit) || 30, app: f.app });
+        if (!lines.length) return void out(`No changes recorded yet (${auditPath()}).`);
+        for (const l of lines)
+          out(
+            `${l.t.replace('T', ' ').slice(0, 19)}  ${l.stage.padEnd(7)} ${l.mode.padEnd(10)} ${`${l.app}.${l.tool}`.padEnd(28)} ${l.where}${l.stage === 'denied' || l.error ? `  — ${l.error ?? l.basis}` : ''}`,
+          );
+      }),
+    );
+
+  hub
+    .command('doctor')
+    .description('check every connected app: token present, scope valid, tools listed; --live also makes one harmless read per built-in connector')
+    .option('--live', 'make one read call per built-in connector to prove the token works')
+    .action((f: { live?: boolean }) =>
+      run(async () => {
+        const cfg = await loadHub();
+        const names = Object.keys(cfg.mcpServers);
+        out(`Mode: ${hubMode()}   Home: ${hubHome()}   Audit: ${auditPath()}`);
+        if (!names.length) return void out('No apps yet. Try: dea hub connectors');
+        const h = new Hub();
+        let bad = 0;
+        try {
+          for (const [n, d] of Object.entries(cfg.mcpServers)) {
+            const row = (ok: boolean, msg: string) => {
+              if (!ok) bad++;
+              out(`  ${ok ? 'ok  ' : 'FAIL'} ${n.padEnd(14)} ${msg}`);
+            };
+            if ('builtin' in d) {
+              const c = findConnector(d.builtin) as Connector | undefined;
+              if (!c) {
+                row(false, `unknown built-in connector "${d.builtin}"`);
+                continue;
+              }
+              try {
+                c.validateScope(d.scope);
+              } catch (e) {
+                row(false, `scope: ${(e as Error).message}`);
+                continue;
+              }
+              const env = d.tokenEnv ?? c.defaultTokenEnv;
+              if (env && !isEnvVarName(env)) {
+                row(false, 'tokenEnv is not an environment variable name (a token was pasted there); remove this app and add it again');
+                continue;
+              }
+              if (c.needsToken && !(env && process.env[env])) {
+                row(false, `token: $${env} is not set in this shell`);
+                continue;
+              }
+              let live = '';
+              if (f.live && c.probe) {
+                try {
+                  live = `; live: ${await c.probe({ token: env ? process.env[env] : undefined, scope: d.scope, fetch, redact: new (await import('@dea/core')).Redactor([env ? process.env[env] : undefined]) })}`;
+                } catch (e) {
+                  row(false, `live check failed: ${(e as Error).message}`);
+                  continue;
+                }
+              }
+              row(true, `${c.tools.length} tools, scope valid${env ? `, $${env} ${process.env[env] ? 'set' : 'not set (optional)'}` : ''}${live}`);
+            } else {
+              try {
+                row(true, `${(await h.appTools(n)).length} tools listed over MCP`);
+              } catch (e) {
+                row(false, `could not connect: ${(e as Error).message.slice(0, 160)}`);
+              }
+            }
+          }
+        } finally {
+          await h.close();
+        }
+        if (bad) process.exitCode = 1;
       }),
     );
 

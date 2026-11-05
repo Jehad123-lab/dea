@@ -162,6 +162,23 @@ Found by running igloo.inc and the WebGL fluid simulation; each rule is general.
   the sections in view at each stop, how far the probe got, and an Unknown in the ledger saying which sections the kit does not
   contain. The map lists the innermost sections (a wrapper that holds other sections is not one).
 
+### Hub: free search and built-in connectors
+
+- `dea search` and `dea read` (MCP tools `search`, `read`): free keyless sources (DuckDuckGo HTML, MDN, npm, GitHub repository
+  search, Stack Overflow, Wikipedia, Hacker News, your own SearXNG); each result carries source, time, a verified/cached label and an
+  evidence note; robots.txt is read, calls are spaced, private addresses are refused, blocked or rate-limited sources are reported
+  as such and never worked around; answers are cached on disk.
+- Built-in connectors in the Hub: `github` (read repos, issues, pulls, files; create issue, comment), `vercel` (list, static
+  deploy), `filesystem` (one folder), `http` (one base address). Each needs a declared scope and takes its token from an
+  environment variable you name.
+- Every Hub call now follows the permission mode (restricted, supervised, delegated). Supervised asks before a change: in the
+  terminal for `dea hub call`, through the AI app's own prompt (MCP elicitation) for the gateway; an app that cannot show the
+  prompt gets no changes. Set `DEA_MODE=delegated` for the old behaviour inside the grants you gave.
+- `dea hub audit` (`~/.dea/audit.jsonl`: what, where, when, mode for every change or refusal; a change that cannot be recorded
+  is not made), `dea hub doctor [--live]`, `dea hub mode`, `dea hub connectors`, `dea hub add-connector`.
+- History and audit lines hide secrets in free text and URL parameters as well as in argument names; tests prove tokens do not
+  appear in results, errors, history, audit or config.
+
 ### Act and connect
 
 - Hands (`dea session`, MCP `browse` / `interact` / `submit`): a browser that stays open, with a policy file; submits

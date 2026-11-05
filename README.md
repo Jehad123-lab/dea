@@ -97,7 +97,8 @@ Real reports from these commands are in [`examples/`](examples/).
 | `dea investigate <url> --goal "…"` | Plans and runs the steps that answer your question, with checkpoints; writes a proven report. `--background`, `--resume <run>`. |
 | `dea status [run]` | Where an investigation stands, and its report when done. |
 | `dea session …` | DEA's hands: a browser that stays open; `start`, `goto`, `snapshot`, `click`, `type`, `fill`, `submit`, `screenshot`, `stop`. |
-| `dea hub …` | Connect apps (Notion, Linear, GitHub, …) once and choose what each AI app may do with them. See [DEA Hub](#dea-hub). |
+| `dea search "<query>"`, `dea read <url>` | Free web search and page reading, no keys, every result with its source, time and evidence. See [Search and read](#search-and-read). |
+| `dea hub …` | Connect apps (Notion, Linear, GitHub, Vercel, a folder, a web address) once and choose what each AI app may do with them; every change follows the permission mode and is audited. See [DEA Hub](#dea-hub). |
 | `dea mcp install --client <app>` | Add DEA to Claude, Claude Code, Cursor, VS Code, Windsurf or Codex. |
 | `dea report [run]` | Print a saved report (`latest` by default). `--design`, `--explain`, `--json`. |
 | `dea runs` | List saved runs, newest first. |
@@ -218,6 +219,56 @@ pnpm dea hub alert 5 10                      # pause an AI app after 5 changing/
 - Settings live in `~/.dea/hub.json`; secrets in `~/.dea/secrets.enc` (AES-256-GCM; key in `~/.dea/hub.key` or `DEA_HUB_KEY`).
 - Bring an existing `mcpServers` config with `dea hub add --json claude_desktop_config.json`.
 - Apps without automatic sign-up (GitHub, Slack, Figma, …) take `--client-id` from your own OAuth app, or `--token-env`.
+
+### Built-in connectors, permission modes, audit
+
+Four connectors need no MCP server, only a **scope you declare** and a token in **your own environment variable**:
+
+```powershell
+pnpm dea hub connectors                                   # what each needs and may do
+pnpm dea hub add-connector github --scope repos=you/site --token-env GITHUB_TOKEN
+pnpm dea hub add-connector vercel --scope projects=my-site --scope dirs=C:\sites\my-site\dist --token-env VERCEL_TOKEN
+pnpm dea hub add-connector filesystem --name notes --scope root=C:\notes
+pnpm dea hub add-connector http --name api --scope baseUrl=https://api.example.com/v1 --scope methods=GET,POST
+pnpm dea hub doctor --live                                # token present? scope valid? one harmless read per connector
+pnpm dea hub call github comment '{"repo":"you/site","number":4,"body":"thanks"}'   # asks you first
+pnpm dea hub audit                                        # every change made or refused: what, where, when, mode
+```
+
+| Connector | Reads | Changes (asks / audited) | Scope it needs |
+|---|---|---|---|
+| `github` | repo, issues, pulls, files | `create_issue`, `comment` | `repos`: `owner/name` or `owner/*` |
+| `vercel` | projects, deployments | `deploy_static` (preview; production only if `allowProduction`) | `projects`, `dirs` (folders a deploy may be read from) |
+| `filesystem` | `list_dir`, `read_file` | `write_file` (never replaces without `overwrite`) | `root`: one folder; links out of it are refused |
+| `http` | `get` | `send` (POST, PUT, PATCH, DELETE, only if listed) | `baseUrl`, `methods`; never another host, never `..` |
+
+**Permission modes** (the same three DEA's hands use) decide what a *change* may do; looking is always allowed:
+`restricted` refuses every change, `supervised` (default) asks you first (in the terminal for `dea hub call`, through your AI
+app's own prompt for the gateway; an app that cannot show the prompt gets no changes), `delegated` runs changes without
+asking, but only inside the connector's declared scope. Out of scope is refused in every mode. The mode comes from `DEA_MODE`
+or `policy.json`; an AI app cannot loosen it. Per-app access levels (`dea hub allow`) apply on top.
+
+**Secrets**: a token is read from the environment variable you name when a call runs, sent only as the Authorization header
+of that call, and never stored, printed or logged: not in `hub.json`, the history, the audit log, an error message or a result
+(a service that echoes it back is redacted too). DEA never asks you to type a token into a chat or a command.
+**No change without a record**: if `audit.jsonl` cannot be written, the change is not made. Nothing posts, emails or buys
+by itself: every change is a call you or an AI app you allowed made, inside the scope you declared.
+
+## Search and read
+
+`dea search "three.js instanced mesh"` asks a few **free, keyless** sources at once and says which answered:
+
+- DuckDuckGo's HTML results page (general; its robots.txt allows it); for programming questions also MDN, npm, GitHub
+  repository search (no token: 10 searches a minute), Stack Overflow; Wikipedia for short concept queries; Hacker News on request.
+- Your own SearXNG with `DEA_SEARXNG_URL` (JSON output on). Public SearXNG instances answered a script with 429, 418 or a captcha
+  on the day this was built, so DEA does not use them.
+- Each result has `title`, `url`, `snippet`, `source`, `fetched_at`, `verified` (fetched live in this call, or from the disk cache
+  in `~/.dea/web-cache`) and an `evidence` note saying what it is and what was not checked (snippets are the source's words; the
+  page was not opened). A blocked or rate-limited source is named in the answer; DEA does not retry around it, rotate addresses or
+  solve captchas. If a live source fails and an older cached answer exists, that answer is shown labelled `stale`.
+- `dea read <url>` fetches one public page and returns its readable text with the same labels. It honours robots.txt, sends its own
+  User-Agent, spaces calls to one host, refuses localhost and private addresses, and reports bot-check pages instead of passing them.
+  Page text is data, not instructions. Both are MCP tools too (`search`, `read`).
 
 ## WebGL and 3D
 - **Verified** Scene: 145 objects (55 Mesh, 35 Group, 32 Bone, 6 Points, 5 Sprite, 3 DirectionalLight),
@@ -567,7 +618,7 @@ so into the run. Use `--no-gpu-mask` to see exactly what a GPU-less visitor gets
 
 ## MCP server (for Claude, Cursor, VS Code, Codex)
 
-`dea-mcp` exposes 17 tools over stdio (and over HTTP with `dea serve --http`):
+`dea-mcp` exposes 19 tools over stdio (and over HTTP with `dea serve --http`):
 
 | Tool | Does |
 |---|---|
@@ -579,6 +630,8 @@ so into the run. Use `--no-gpu-mask` to see exactly what a GPU-less visitor gets
 | `extract` | A runnable kit (tokens, GSAP/CSS motion, hero layout, three.js shader modules with traced values and drivers, pipeline, scene) with a build check, visual diff, research and gaps |
 | `trace_webgl` | Live debug: WebGL compiles, uniforms (values, drivers, setter), uploads, with stacks; breakpoints with caller variables |
 | `library` | List, search and reuse saved kits |
+| `search` | Free web search (no keys): results with source, time, evidence, verified/cached label; blocked sources named |
+| `read` | Read one public page as text with the same labels (robots.txt respected, private addresses refused) |
 | `investigate` | Start a background investigation toward a goal; returns a run id |
 | `get_run_status` | Steps, progress and the proven report of an investigation |
 | `inspect_site` | Open a URL and save the evidence |
@@ -652,7 +705,9 @@ packages/
     src/hands/        the browser session: tabs, refs, actions, actions.jsonl
     src/safety/       permission modes: restricted, supervised, delegated (enforced in core)
     src/brain/        investigate: planner, checkpoints, proven report, optional model
-    src/hub/          MCP client, OAuth, encrypted secrets, access levels, history, alerts
+    src/hub/          MCP client, OAuth, encrypted secrets, access levels, history, alerts, permission modes, audit,
+                      built-in connectors (github, vercel, filesystem, http)
+    src/web/          free search sources, polite fetch (robots.txt, rate limits), page reader, disk cache
     src/evidence/     run folders, secret stripping
   cli/    dea         the command line (commander)
   mcp/    dea-mcp     the MCP server (stdio) and the Hub gateway
@@ -687,6 +742,9 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
 - `dea trace` reads values when WebGL receives them; on three.js sites the line that changes `.value` runs earlier in the
   frame, so "set by" points at the frame loop's render call, and driver kinds are correlations (Inferred).
 - Pages behind a login are not decoded; Hands never automates logins or payments.
+- The built-in GitHub, Vercel, filesystem and http connectors are tested in CI against a fake API and a temp folder; the filesystem
+  and http scoping were also run by hand, but GitHub and Vercel were not run with a real token on the machine that built them.
+  Search sources can change their pages or limits at any time; `dea search` then reports a source as failed instead of guessing.
 - Sites behind bot protection (PerimeterX, DataDome, Cloudflare challenges, ...) are reported as `Blocked by bot
   protection` and not captured. DEA does not bypass protection or solve captchas.
 - A page that changes with time (a playing hero video, a colour that cycles, an intro) is read at one moment and the
@@ -725,7 +783,7 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
 evidence tabs (Stack, Design, Code, API, Hub history, Report) on the right. Core already streams the events it needs
 (`onEvent` / `streamRun`), and investigations already write `checkpoint.json` for it to follow.
 
-The default MCP tool list stays small on purpose (17 tools); connected apps reach AI apps through the separate Hub gateway.
+The default MCP tool list stays small on purpose (19 tools); connected apps reach AI apps through the separate Hub gateway.
 
 ## Credits
 

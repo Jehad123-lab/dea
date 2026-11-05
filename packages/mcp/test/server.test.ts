@@ -114,7 +114,7 @@ describe('dea MCP server', () => {
   it('lists the tools in a fixed order, with honest hints, and stays small', async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toEqual([...TOOL_NAMES]);
-    expect(tools.length).toBeLessThanOrEqual(17); // tool budget: keep the default list small (decoders + extract + trace + library + hands)
+    expect(tools.length).toBeLessThanOrEqual(19); // tool budget: keep the default list small (decoders + extract + trace + library + search/read + hands)
     const hands = new Set(['browse', 'interact', 'submit']);
     for (const t of tools) {
       expect(t.description?.length).toBeGreaterThan(20);

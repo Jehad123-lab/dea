@@ -1,0 +1,46 @@
+{
+  "pages": [
+    {
+      "id": 24336445,
+      "key": "WebGL",
+      "title": "WebGL",
+      "excerpt": "IEWeb<span class=\"searchmatch\">GL</span>. Microsoft Edge \u2013 For Microsoft Edge Legacy, the initial stable release supports <span class=\"searchmatch\">WebGL</span> version 0.95 (context name: &quot;experimental-<span class=\"searchmatch\">webgl</span>&quot;) with",
+      "matched_title": null,
+      "anchor": null,
+      "description": "JavaScript bindings for OpenGL in web browsers",
+      "thumbnail": {
+        "mimetype": "image/svg+xml",
+        "width": 60,
+        "height": 25,
+        "duration": null,
+        "url": "//thumb.wikimedia.org/wikipedia/commons/thumb/2/25/WebGL_Logo.svg/60px-WebGL_Logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=rest&utm_content=thumbnail"
+      }
+    },
+    {
+      "id": 52250745,
+      "key": "GlTF",
+      "title": "GlTF",
+      "excerpt": "<span class=\"searchmatch\">gl</span>TF (Graphics Library Transmission Format or <span class=\"searchmatch\">GL</span> Transmission Format and formerly known as <span class=\"searchmatch\">WebGL</span> Transmissions Format or <span class=\"searchmatch\">WebGL</span> TF) is a standard file format",
+      "matched_title": null,
+      "anchor": null,
+      "description": "3D scene and model file format",
+      "thumbnail": {
+        "mimetype": "image/svg+xml",
+        "width": 60,
+        "height": 31,
+        "duration": null,
+        "url": "//thumb.wikimedia.org/wikipedia/commons/thumb/e/e1/GlTF_logo.svg/60px-GlTF_logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=rest&utm_content=thumbnail"
+      }
+    },
+    {
+      "id": 15128305,
+      "key": "Web3D",
+      "title": "Web3D",
+      "excerpt": "2011. &quot;<span class=\"searchmatch\">WebGL</span> \u2013 Open<span class=\"searchmatch\">GL</span> ES 2.0 for the <span class=\"searchmatch\">Web</span>&quot;. The Khronos Group. Khronos.org. 19 July 2011. Retrieved 22 May 2023. &quot;Khronos Releases Final <span class=\"searchmatch\">WebGL</span> 1.0 Specification&quot;",
+      "matched_title": null,
+      "anchor": null,
+      "description": "Web-based interactive 3D content",
+      "thumbnail": null
+    }
+  ]
+}

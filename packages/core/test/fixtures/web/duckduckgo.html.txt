@@ -1,0 +1,116 @@
+<html><body><div id="links" class="results">
+<div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fthreejs.org%2Fdocs%2Fpages%2FInstancedMesh.html&amp;rut=c54eb1a8c2b9299e25dbedeebdf7275d58a74e7fe6df81772670309cc58e73fc">InstancedMesh - three.js docs</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fthreejs.org%2Fdocs%2Fpages%2FInstancedMesh.html&amp;rut=c54eb1a8c2b9299e25dbedeebdf7275d58a74e7fe6df81772670309cc58e73fc">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/threejs.org.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fthreejs.org%2Fdocs%2Fpages%2FInstancedMesh.html&amp;rut=c54eb1a8c2b9299e25dbedeebdf7275d58a74e7fe6df81772670309cc58e73fc">
+                            threejs.org/docs/pages/InstancedMesh.html
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fthreejs.org%2Fdocs%2Fpages%2FInstancedMesh.html&amp;rut=c54eb1a8c2b9299e25dbedeebdf7275d58a74e7fe6df81772670309cc58e73fc">A special version of a <b>mesh</b> with <b>instanced</b> rendering support. Use this class if you have to render a large number of objects with the same geometry and material (s) but with different world transformations.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                
+<div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fthreejs.org%2Fdocs%2F%3Fq%3Dinstancedmesh&amp;rut=f74431d120f3631f07c3bc37d6b82fd283aeeb5e95cc8d418b95406d76930aab">three.js docs</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fthreejs.org%2Fdocs%2F%3Fq%3Dinstancedmesh&amp;rut=f74431d120f3631f07c3bc37d6b82fd283aeeb5e95cc8d418b95406d76930aab">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/threejs.org.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fthreejs.org%2Fdocs%2F%3Fq%3Dinstancedmesh&amp;rut=f74431d120f3631f07c3bc37d6b82fd283aeeb5e95cc8d418b95406d76930aab">
+                            threejs.org/docs/?q=instancedmesh
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fthreejs.org%2Fdocs%2F%3Fq%3Dinstancedmesh&amp;rut=f74431d120f3631f07c3bc37d6b82fd283aeeb5e95cc8d418b95406d76930aab">module-SceneUtils.createMeshesFrom <b>InstancedMesh</b> ().sort <b>InstancedMesh</b> () <b>instancedMesh</b></a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                
+<div class="result results_links results_links_deep web-result ">
+                  <div class="links_main links_deep result__body"> <!-- This is the visible part -->
+                    
+                      <h2 class="result__title">
+                        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwaelyasmina.net%2Farticles%2Finstanced%2Drendering%2Din%2Dthree%2Djs%2F&amp;rut=7e4cc99295e4ce354dc2bb0f5e7b0577014ab1de329842f1d5a904db09ebab4e">Instanced Rendering in Three.js - Wael Yasmina</a>
+                      </h2>
+
+                    
+
+                    
+                      <div class="result__extras">
+                        <div class="result__extras__url">
+                          <span class="result__icon">
+                            <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwaelyasmina.net%2Farticles%2Finstanced%2Drendering%2Din%2Dthree%2Djs%2F&amp;rut=7e4cc99295e4ce354dc2bb0f5e7b0577014ab1de329842f1d5a904db09ebab4e">
+                              <img class="result__icon__img" width="16" height="16" alt="" src="//external-content.duckduckgo.com/ip3/waelyasmina.net.ico" name="i15" />
+                            </a>
+                          </span>
+                          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwaelyasmina.net%2Farticles%2Finstanced%2Drendering%2Din%2Dthree%2Djs%2F&amp;rut=7e4cc99295e4ce354dc2bb0f5e7b0577014ab1de329842f1d5a904db09ebab4e">
+                            waelyasmina.net/articles/instanced-rendering-in-three-js/
+                          </a>
+                          
+                        </div>
+                      </div>
+                    
+
+                    
+                      
+                        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwaelyasmina.net%2Farticles%2Finstanced%2Drendering%2Din%2Dthree%2Djs%2F&amp;rut=7e4cc99295e4ce354dc2bb0f5e7b0577014ab1de329842f1d5a904db09ebab4e"><b>Instanced</b> Rendering in <b>Three.js</b> Published on 20 Nov, 2024 | ~11 min read | Demo Instancing is a crucial topic to understand when it comes to optimizing the performance of 3D applications. So, if your scene contains thousands of meshes and you&#x27;re concerned about performance, this article is exactly what you need.</a>
+                      
+                    
+
+                    <div class="clear"></div>
+                  </div>
+                </div>
+              
+            
+              
+                
+</div></body></html>

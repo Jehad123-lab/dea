@@ -2,6 +2,7 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { redactText } from '../evidence/secrets.ts';
 import type { ToolInfo } from './client.ts';
+import { hideQuerySecrets } from './redact.ts';
 import { type AppGrant, type ClientDef, type HubConfig, hubHome, type Level } from './store.ts';
 
 /** MCP's own rule: a tool is read-only only if it says so; a tool that is not read-only is destructive unless it says it is not. */
@@ -82,7 +83,7 @@ const SECRET_KEY = /pass(word)?|secret|token|api[-_]?key|auth|cookie|session|cre
 /** A one-line summary of tool arguments for the history: keys, short values, secrets hidden. */
 export function summarizeArgs(args: unknown, depth = 0): string {
   if (args === null || args === undefined) return '';
-  if (typeof args === 'string') return JSON.stringify(redactText(args.length > 60 ? `${args.slice(0, 57)}...` : args));
+  if (typeof args === 'string') return JSON.stringify(hideQuerySecrets(redactText(args.length > 60 ? `${args.slice(0, 57)}...` : args)));
   if (typeof args === 'number' || typeof args === 'boolean') return String(args);
   if (Array.isArray(args))
     return depth > 1

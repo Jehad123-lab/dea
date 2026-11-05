@@ -148,10 +148,14 @@ export { type CanvasScore, canvasLine, canvasScore, type ScoreFilesResult, score
 export { COVERS, type Gap, type ProbeStep, renderGaps } from './gaps.ts';
 export { dispatch, SESSION_METHODS, SessionClient, type SessionInfo, type SessionMethod, serveSession, sessionFile } from './hands/daemon.ts';
 export { type ActionResult, type ElementInfo, type HandsOptions, HandsSession, type LoggedAction, redactArgs, renderSessionReport } from './hands/session.ts';
+export { type AuditLine, auditPath, readAudit, writeAudit } from './hub/audit.ts';
+export { CONNECTORS, type Connector, findConnector } from './hub/builtin/index.ts';
 export { CATALOG, type CatalogEntry, findCatalog } from './hub/catalog.ts';
 export { connectServer, DEFAULT_CALLBACK_PORT, expandEnv, HubOAuth, listAllTools, type ToolInfo, waitForCallback } from './hub/client.ts';
-export { type CallResult, Hub, qualify, SEP, unqualify } from './hub/hub.ts';
+export { type CallResult, Hub, type HubOptions, qualify, SEP, unqualify } from './hub/hub.ts';
+export { type ApprovalRequest, type Approve, decideCall, hubMode } from './hub/modes.ts';
 export { grantFor, type HistoryLine, isDestructive, isReadOnly, logCall, mayCall, overLimit, readHistory, summarizeArgs, visibleTools } from './hub/policy.ts';
+export { isEnvVarName, Redactor } from './hub/redact.ts';
 export {
   type AppGrant,
   type ClientDef,
@@ -216,3 +220,6 @@ export {
   withTimings,
 } from './timings.ts';
 export type { DeaEvent, EventSink, Evidence, Fact, Label, RunMeta } from './types.ts';
+
+export * as web from './web/index.ts';
+export { read as readUrl, search as webSearch } from './web/index.ts';

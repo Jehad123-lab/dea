@@ -1,0 +1,111 @@
+{
+  "objects": [
+    {
+      "downloads": { "monthly": 94482864, "weekly": 33498264 },
+      "dependents": "5935",
+      "updated": "2026-11-05T09:56:51.209Z",
+      "searchScore": 2106.8835,
+      "package": {
+        "name": "three",
+        "keywords": [
+          "three",
+          "three.js",
+          "javascript",
+          "3d",
+          "virtual-reality",
+          "augmented-reality",
+          "webgl",
+          "webgl2",
+          "webaudio",
+          "webgpu",
+          "webxr",
+          "canvas",
+          "svg",
+          "html5"
+        ],
+        "version": "0.187.0",
+        "description": "JavaScript 3D library",
+        "sanitized_name": "three",
+        "publisher": { "email": "info@mrdoob.com", "actor": { "name": "mrdoob", "type": "user", "email": "info@mrdoob.com" }, "username": "mrdoob" },
+        "maintainers": [{ "email": "info@mrdoob.com", "username": "mrdoob" }, { "email": "michael.herzog@human-interactive.org", "username": "mugen87" }],
+        "license": "MIT",
+        "date": "2026-10-30T08:09:24.504Z",
+        "links": {
+          "homepage": "https://threejs.org/",
+          "repository": "git+https://github.com/mrdoob/three.js.git",
+          "bugs": "https://github.com/mrdoob/three.js/issues",
+          "npm": "https://www.npmjs.com/package/three"
+        }
+      },
+      "score": { "final": 2106.8835, "detail": { "popularity": 1, "quality": 1, "maintenance": 1 } },
+      "flags": { "insecure": 0 }
+    },
+    {
+      "downloads": { "monthly": 61849848, "weekly": 21744143 },
+      "dependents": "776",
+      "updated": "2026-11-05T09:57:27.952Z",
+      "searchScore": 540.913,
+      "package": {
+        "name": "@types/three",
+        "keywords": [],
+        "version": "0.187.0",
+        "description": "TypeScript definitions for three",
+        "sanitized_name": "@types/three",
+        "publisher": {
+          "email": "ts-npm-types@microsoft.com",
+          "actor": { "name": "types", "type": "user", "email": "ts-npm-types@microsoft.com" },
+          "username": "types"
+        },
+        "maintainers": [{ "email": "ts-npm-types@microsoft.com", "username": "types" }],
+        "license": "MIT",
+        "date": "2026-10-30T18:05:26.397Z",
+        "links": {
+          "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/three",
+          "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
+          "npm": "https://www.npmjs.com/package/@types/three"
+        }
+      },
+      "score": { "final": 540.913, "detail": { "popularity": 1, "quality": 1, "maintenance": 1 } },
+      "flags": { "insecure": 0 }
+    },
+    {
+      "downloads": { "monthly": 18022938, "weekly": 6116423 },
+      "dependents": "665",
+      "updated": "2026-11-05T10:01:05.651Z",
+      "searchScore": 466.04156,
+      "package": {
+        "name": "@react-three/drei",
+        "keywords": ["react", "three", "threejs", "react-three-fiber"],
+        "version": "10.7.9",
+        "description": "useful add-ons for react-three-fiber",
+        "sanitized_name": "@react-three/drei",
+        "publisher": {
+          "email": "npm-oidc-no-reply@github.com",
+          "actor": { "name": "gsimone", "type": "user", "email": "gianmarcosimone89@gmail.com" },
+          "trustedPublisher": { "oidcConfigId": "oidc:56a411f3-b7bc-405c-b456-8da06e84763c", "id": "github" },
+          "username": "GitHub Actions"
+        },
+        "maintainers": [
+          { "email": "gianmarcosimone89@gmail.com", "username": "gsimone" },
+          { "email": "drcmda@gmail.com", "username": "drcmda" },
+          { "email": "joshua.ellis18@gmail.com", "username": "tdfka_rick" },
+          { "email": "kjbaumgartner@gmail.com", "username": "krispyaa" },
+          { "email": "mail.zausa.giulio@gmail.com", "username": "giulioz" },
+          { "email": "stephenjcorwin@gmail.com", "username": "stephencorwin" }
+        ],
+        "license": "MIT",
+        "date": "2026-09-25T15:34:13.763Z",
+        "links": {
+          "homepage": "https://github.com/pmndrs/drei",
+          "repository": "git+https://github.com/pmndrs/drei.git",
+          "bugs": "https://github.com/pmndrs/drei/issues",
+          "npm": "https://www.npmjs.com/package/@react-three/drei"
+        }
+      },
+      "score": { "final": 466.04156, "detail": { "popularity": 1, "quality": 1, "maintenance": 1 } },
+      "flags": { "insecure": 0 }
+    }
+  ],
+  "total": 62702,
+  "time": "2026-11-05T14:01:17.255Z"
+}

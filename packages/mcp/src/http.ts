@@ -5,7 +5,7 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer, type IncomingMessage, type Server as NodeServer, type ServerResponse } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { Hub } from '@dea/core';
+import { Hub, hubMode, type Mode } from '@dea/core';
 import {
   createMcpHandler,
   hostHeaderValidationResponse,
@@ -96,6 +96,8 @@ export interface HttpOptions {
   hubHome?: string;
   /** extra Host header names to accept when bound to a non-loopback address */
   allowedHosts?: string[];
+  /** the permission mode for Hub calls (default: DEA_MODE, policy.json, else supervised). Over HTTP nobody can be asked, so supervised refuses changes. */
+  hubMode?: Mode;
   log?: (line: string) => void;
 }
 
@@ -174,7 +176,7 @@ export async function serveHttp(o: HttpOptions = {}): Promise<HttpServer> {
   const log = o.log ?? ((s: string) => console.error(s));
   const loopback = LOOPBACK.has(host);
 
-  const hub = new Hub(o.hubHome, { onPause: (c, why) => log(`dea-hub: ${c} ${why}`), onStderr: () => {} });
+  const hub = new Hub(o.hubHome, { onPause: (c, why) => log(`dea-hub: ${c} ${why}`), onStderr: () => {} }, { mode: o.hubMode ?? hubMode() });
   const states = new Map<string, ServerState>();
   const stateFor = (client: string) => {
     let s = states.get(client);
