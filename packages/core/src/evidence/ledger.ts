@@ -96,6 +96,27 @@ export interface LedgerInput {
     rebuild: { response: number | null } | null;
     inputs: Array<{ input: string; status: string; replay: string; rebuild: string; uniforms: string[]; evidence: string }>;
   } | null;
+  /** how the fresh load the interaction ran on was brought to the phase of the reference picture */
+  phase?: {
+    aligned: boolean | null;
+    refDiff: number | null;
+    bestDiff: number | null;
+    waitedMs: number;
+    note: string;
+    stable: boolean;
+    timeDriven: boolean;
+  } | null;
+  /** the whole page: what was read, and the kit's similarity to the original at each scroll stop */
+  pageStops?: {
+    views: Record<string, number | null>;
+    stops: Array<{ y: number; scores: Record<string, number | null> }>;
+    extent: number;
+    documentHeight: number;
+    elements: number;
+    counts: { static: number; fixed: number; moving: number };
+    limits: string[];
+    mechanism: string;
+  } | null;
   map?: PageMapInfo | null;
   boot?: BootInfo | null;
   build?: { ok: boolean; skipped?: string; step?: string } | null;
@@ -298,6 +319,84 @@ export function buildFindings(i: LedgerInput): Finding[] {
     });
   }
 
+  // ---- the phase the interaction ran from (time-driven scenes)
+  if (i.phase) {
+    const ph = i.phase;
+    add({
+      id: 'input.phase',
+      area: 'input',
+      claim:
+        ph.aligned === true
+          ? 'The scripted interaction started from the same phase of the site as the reference picture.'
+          : ph.aligned === false
+            ? 'The scripted interaction started from a different phase of the site than the reference picture: its numbers are not comparable run to run.'
+            : 'The phase the scripted interaction started from was not compared with a reference.',
+      label: ph.aligned === true ? 'Verified' : ph.aligned === false ? 'Unknown' : 'Inferred',
+      measurement: ph.note,
+      coverage: ph.aligned == null ? 'not-exercised' : 'partial',
+      limitations: [
+        "the phase is judged on a 64 × 40 grey thumbnail of the window, not on the site's own clock",
+        ph.timeDriven
+          ? 'the scene kept moving after it was loaded (time-driven), so "the same phase" means the same picture, not the same moment of an internal timeline'
+          : 'a scene whose state is not visible in the picture can differ underneath',
+      ],
+      nextProbe: ph.aligned === false ? 'dea stability <url> --runs 3 (measures how far two runs of the original itself agree)' : undefined,
+      data: { aligned: ph.aligned, refDiff: ph.refDiff, bestDiff: ph.bestDiff, waitedMs: ph.waitedMs, stable: ph.stable, timeDriven: ph.timeDriven },
+    });
+  }
+
+  // ---- the whole page, stop by stop
+  if (i.pageStops) {
+    const p = i.pageStops;
+    const views = Object.entries(p.views).filter(([, v]) => v != null) as Array<[string, number]>;
+    const low = p.stops.filter((s) => Object.values(s.scores).every((v) => v == null || v < 0.6));
+    const behindLoader = Boolean(i.diff?.referenceLoader);
+    add({
+      id: 'page.whole',
+      area: 'page',
+      claim: behindLoader
+        ? `The kit contains ${p.elements} elements over ${p.extent} px of ${p.documentHeight} px, but the original was still behind its loading screen when it was photographed, so the per-stop scores compare the kit with a loading screen and say nothing about the match.`
+        : `The kit contains the whole page: ${p.elements} elements over ${p.extent} px of ${p.documentHeight} px, placed in document coordinates, and it scrolls.`,
+      label: behindLoader ? 'Unknown' : 'Verified',
+      measurement: `${p.stops.length} scroll stops read on a fresh load (${p.mechanism} scroll; ${p.counts.static} static, ${p.counts.fixed} fixed, ${p.counts.moving} moving elements); kit against the original's screenshot at each stop, mean similarity: ${views.map(([k, v]) => `${k === 'kit' ? 'kit' : k.replace('__', '')} ${pct(v)}`).join(', ') || 'n/a'}; worst stops: ${[
+        ...p.stops,
+      ]
+        .sort(
+          (a, b) =>
+            Math.min(...Object.values(a.scores).filter((v): v is number => v != null), 1) -
+            Math.min(...Object.values(b.scores).filter((v): v is number => v != null), 1),
+        )
+        .slice(0, 3)
+        .map((s) => `${s.y}px ${pct(Math.min(...Object.values(s.scores).filter((v): v is number => v != null), 1))}`)
+        .join(', ')}`,
+      coverage: p.limits.length ? 'partial' : 'complete',
+      limitations: [
+        'the similarity is the coarse page score (colour, light layout, edges at 96 × 60), not a pixel match; read preview/page-stops.jpg',
+        "elements are placed absolutely at the width read, not rebuilt as the site's own flex/grid; resizing the window scales, it does not reflow",
+        'what happens on click, hover, a menu, a tab or a route change is not read',
+        ...p.limits,
+      ],
+      data: {
+        stops: p.stops.length,
+        extent: p.extent,
+        documentHeight: p.documentHeight,
+        elements: p.elements,
+        ...Object.fromEntries(views.map(([k, v]) => [`similarity_${k.replace('__', '') || 'kit'}`, v])),
+      },
+    });
+    if (low.length)
+      add({
+        id: 'page.weak',
+        area: 'page',
+        claim: `The kit does not match the original at ${low.length} of ${p.stops.length} scroll stops (${low.map((s) => `${s.y}px`).join(', ')}).`,
+        label: 'Unknown',
+        measurement: `similarity under 60% at those stops; usually a section drawn by a canvas, a video or a script the DOM read does not carry`,
+        coverage: 'partial',
+        limitations: ['look at preview/page-stops.jpg to see what differs'],
+        nextProbe: 'dea extract <url> with the section scrolled into view recorded as its own scene',
+      });
+  }
+
   // ---- scroll tape
   const st = r?.scrollTape;
   if (st) {
@@ -430,6 +529,7 @@ export async function hashFiles(files: Array<{ rel: string; abs: string }>): Pro
 /** What the page map saw that the kit does not contain: sections below the first screen (the kit rebuilds the first screen's DOM). */
 function pageUnknowns(i: LedgerInput, findings: Finding[]): LedgerUnknown[] {
   const m = i.map;
+  if (i.pageStops) return [];
   if (m?.mechanism !== 'native' || m.sections < 2) return [];
   return [
     {

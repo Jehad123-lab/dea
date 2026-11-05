@@ -5,6 +5,7 @@
 import { declaredUniforms } from '../code/uniforms.ts';
 import type { Driver } from '../debug/trace.ts';
 import { parseShader, THREE_BUILTIN_UNIFORMS } from '../design/shaders.ts';
+import { type PageLayer, pageAsLayout, pageIsWorthKeeping } from './pagelayer.ts';
 
 export type Target = 'react' | 'vanilla' | 'framer';
 
@@ -480,6 +481,8 @@ export interface HeroLayout {
     items: Record<string, Array<[number, number, number, number, number, number] | null>>;
     texts?: Record<string, string>;
   } | null;
+  /** ✔ the whole page: every element read at a series of scroll stops, in document coordinates (see pagelayer.ts) */
+  page?: PageLayer | null;
   /** ✔ graphics on the first screen: inline SVG with its computed paint, or an image by URL (the site's own, for study) */
   graphics?: Array<{
     k?: string;
@@ -490,6 +493,8 @@ export interface HeroLayout {
     /** where a playing video was (seconds) when the first screen was read: the kit starts it there */
     t?: number;
     media?: boolean;
+    /** a picture of a canvas the page draws into (not the page's scene) */
+    canvasSnap?: boolean;
     x: number;
     y: number;
     w: number;
@@ -527,16 +532,25 @@ const boxLines = (b: { h: number; fontSize: number; lineHeight: string }): numbe
  * hero. Verified: text, font, size, weight, colour and position at the reference size. Inferred: the units (the site's
  * own layout system, flex or grid, is not rebuilt).
  */
-export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text: string; html?: string; vt?: number; style: Record<string, string> }> {
+export function heroStyles(
+  l: HeroLayout,
+  opts: { yUnit?: 'vh' | 'vw' } = {},
+): Array<{ k?: string; tag: string; text: string; html?: string; vt?: number; win?: [number, number]; kf?: number[][]; style: Record<string, string> }> {
   const vw = (px: number) => `${r2((px / l.viewport.width) * 100)}vw`;
-  const vh = (px: number) => `${r2((px / l.viewport.height) * 100)}vh`;
+  const vhWin = (px: number) => `${r2((px / l.viewport.height) * 100)}vh`;
+  // a page laid out in document coordinates scales with its width (a document grows when the window narrows); a fixed element with its height
+  const docY = opts.yUnit === 'vw';
+  const vh = docY ? vw : vhWin;
+  const winOf = (b: unknown) => (b as { win?: [number, number] }).win;
+  const kfOf = (b: unknown) => (b as { kf?: number[][] }).kf;
+  const extra = (b: unknown) => ({ ...(winOf(b) ? { win: winOf(b) } : {}), ...(kfOf(b) ? { kf: kfOf(b) } : {}) });
   const tags = new Set(['h1', 'h2', 'h3', 'h4', 'p', 'span', 'a', 'li', 'small', 'strong', 'em', 'button', 'label']);
   const place = (b: { x: number; y: number; w: number; h: number; opacity: number }) => ({
-    position: 'absolute',
+    position: winOf(b) ? 'fixed' : 'absolute',
     left: vw(b.x),
-    top: vh(b.y),
+    top: winOf(b) ? vhWin(b.y) : vh(b.y),
     width: vw(b.w),
-    height: vh(b.h),
+    height: winOf(b) ? vhWin(b.h) : vh(b.h),
     margin: '0',
     ...(b.opacity < 1 ? { opacity: String(b.opacity) } : {}),
   });
@@ -546,6 +560,7 @@ export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text
     _z: s.zp,
     _o: s.o,
     _r: 0,
+    ...extra(s),
     tag: 'div',
     text: '',
     style: {
@@ -561,15 +576,16 @@ export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text
   }));
   const graphics = (l.graphics ?? []).map((gr) =>
     gr.kind === 'svg'
-      ? { k: gr.k, _z: gr.zp, _o: gr.o, _r: 1, tag: 'div', text: '', html: gr.svg ?? '', style: place(gr) }
+      ? { k: gr.k, _z: gr.zp, _o: gr.o, _r: 1, ...extra(gr), tag: 'div', text: '', html: gr.svg ?? '', style: place(gr) }
       : gr.kind === 'img'
-        ? { k: gr.k, _z: gr.zp, _o: gr.o, _r: 1, tag: 'img', text: '', html: gr.src ?? '', style: { ...place(gr), objectFit: gr.fit || 'fill' } }
+        ? { k: gr.k, _z: gr.zp, _o: gr.o, _r: 1, ...extra(gr), tag: 'img', text: '', html: gr.src ?? '', style: { ...place(gr), objectFit: gr.fit || 'fill' } }
         : gr.kind === 'video'
           ? {
               k: gr.k,
               _z: gr.zp,
               _o: gr.o,
               _r: 1,
+              ...extra(gr),
               tag: 'video',
               text: '',
               html: gr.src ?? '',
@@ -581,6 +597,7 @@ export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text
               _z: gr.zp,
               _o: gr.o,
               _r: 1,
+              ...extra(gr),
               tag: 'div',
               text: '',
               style: { ...place(gr), background: 'repeating-conic-gradient(#8a8a8a 0 25%, #6e6e6e 0 50%) 0 0 / 8px 8px' },
@@ -594,13 +611,14 @@ export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text
       _z: b.zp,
       _o: b.o,
       _r: 2,
+      ...extra(b),
       tag: tags.has(b.tag) ? (b.tag === 'a' || b.tag === 'button' ? 'span' : b.tag) : 'div',
       text: b.text,
       ...(b.rich && /<span style=|<br>/.test(b.rich) ? { html: b.rich } : {}),
       style: {
-        position: 'absolute',
+        position: winOf(b) ? 'fixed' : 'absolute',
         left: vw(b.x),
-        top: vh(b.y),
+        top: winOf(b) ? vhWin(b.y) : vh(b.y),
         width: vw(b.w + 2),
         margin: '0',
         fontFamily: b.fontFamily,
@@ -618,7 +636,9 @@ export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text
         // several lines keeps its measured height and clips what overflows, as the site's line clamp or overflow did
         ...(b.rot ? { transform: `rotate(${b.rot}deg)`, transformOrigin: '50% 50%' } : {}),
         ...(b.wm ? { writingMode: b.wm } : {}),
-        ...(boxLines(b) <= 1 || b.wm ? { whiteSpace: 'pre' } : { whiteSpace: 'pre-wrap', height: vh(b.h * 1.12 + 2), overflow: 'hidden' }),
+        ...(boxLines(b) <= 1 || b.wm
+          ? { whiteSpace: 'pre' }
+          : { whiteSpace: 'pre-wrap', height: winOf(b) ? vhWin(b.h * 1.12 + 2) : vh(b.h * 1.12 + 2), overflow: 'hidden' }),
       },
     })),
   ];
@@ -634,7 +654,7 @@ export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text
         return (a._o ?? 0) - (b._o ?? 0) || a._r - b._r;
       })
     : items;
-  return ordered.map(({ _z, _o, _r, ...it }) => it);
+  return ordered.map(({ _z, _o, _r, ...it }) => it) as ReturnType<typeof heroStyles>;
 }
 
 const cssText = (st: Record<string, string>) =>
@@ -750,8 +770,10 @@ export const scrollSpacer = (l: HeroLayout): number => {
 
 /** Hero.jsx for React: the first screen's text, placed as on the site. */
 export function heroJsx(l: HeroLayout): string {
+  const pm = pageModeOf(l);
+  if (pm) return pageJsx(l, pm);
   const items = heroStyles(l);
-  return `// The first screen's text, placed where the site placed it (read from the live page at ${l.viewport.width}×${l.viewport.height}).
+  return `${scrollScript(l) ? "import { useEffect } from 'react';\n\n" : ''}// The first screen's text, placed where the site placed it (read from the live page at ${l.viewport.width}×${l.viewport.height}).
 // ✔ text, fonts, sizes, weights, colours and positions. ≈ units: viewport-relative absolute placement, not the site's own flex/grid.
 const items = ${JSON.stringify(items, null, 2)};
 // ✔ where the site's canvas sat and the page background
@@ -789,6 +811,47 @@ ${scrollSpacer(l) ? '    <div style={{ height: scrollSpace }} />\n' : ''}    </>
 `;
 }
 
+/** Hero.jsx for a whole page: the same items in one document-coordinate layer, scrolling with the window. */
+function pageJsx(l: HeroLayout, pm: NonNullable<ReturnType<typeof pageModeOf>>): string {
+  const canvasScript = scrollScript(canvasScrollOnly(l));
+  return `import { useEffect } from 'react';
+
+// The whole page, placed where the site placed it (read from the live page at ${l.viewport.width}×${l.viewport.height}, scrolled stop by stop: ${pm.page.stops.length} stops over ${pm.page.extent} px of ${pm.page.documentHeight} px).
+// ✔ text, fonts, sizes, weights, colours and positions at the width read. ≈ units: absolute placement in viewport widths, not the site's own flex/grid.
+const items = ${JSON.stringify(pm.items, null, 2)};
+const sceneCss = ${JSON.stringify(sceneCss(l, '.dea-scene'))};
+const pageScript = ${JSON.stringify(pageScript(l))};
+const canvasScript = ${JSON.stringify(canvasScript)};
+
+export default function Hero() {
+  useEffect(() => {
+    const made = [pageScript, canvasScript].filter(Boolean).map((t) => { const s = document.createElement('script'); s.textContent = t; document.body.appendChild(s); return s; });
+    return () => made.forEach((s) => s.remove());
+  }, []);
+  return (
+    <>
+      <section className="dea-page" style={{ position: 'absolute', left: 0, top: 0, zIndex: 1, width: '100vw', height: '${pm.heightVw}vw', overflowX: 'hidden', pointerEvents: 'none' }}>
+        {sceneCss && <style>{sceneCss}</style>}
+        {items.map((it, i) => {
+          const Tag = it.tag;
+          const extra = { 'data-dea-k': it.k, 'data-dea-win': it.win ? it.win[0] + ',' + (Number.isFinite(it.win[1]) ? Math.round(it.win[1]) : 1e9) : undefined, 'data-dea-kf': it.kf ? JSON.stringify(it.kf) : undefined };
+          if (Tag === 'img') return <img key={i} {...extra} src={it.html} alt="" loading="lazy" style={it.style} />;
+          if (Tag === 'video') return <video key={i} {...extra} src={it.html} autoPlay muted loop playsInline style={it.style} />;
+          if (it.html) return <Tag key={i} {...extra} style={it.style} dangerouslySetInnerHTML={{ __html: it.html }} />;
+          return (
+            <Tag key={i} {...extra} data-dea-h="0" style={it.style}>
+              {it.text}
+            </Tag>
+          );
+        })}
+      </section>
+      <div style={{ position: 'relative', width: 1, height: '${pm.heightVw}vw' }} />
+    </>
+  );
+}
+`;
+}
+
 /** CSS that puts the WebGL canvas where the site had it and paints the page background (both read from the live page). */
 export function sceneCss(l: HeroLayout, selector = '#scene'): string {
   const vw = (px: number) => `${r2((px / l.viewport.width) * 100)}vw`;
@@ -804,8 +867,95 @@ export function sceneCss(l: HeroLayout, selector = '#scene'): string {
   return out.join('\n');
 }
 
+/** The page layer of a layout when there is one worth keeping, with the hero's items merged in. */
+export function pageModeOf(l: HeroLayout): { combined: HeroLayout; page: PageLayer; items: ReturnType<typeof heroStyles>; heightVw: number } | null {
+  if (!l.page || !pageIsWorthKeeping(l.page)) return null;
+  const combined = pageAsLayout(l, l.page);
+  return { combined, page: l.page, items: heroStyles(combined, { yUnit: 'vw' }), heightVw: r2((l.page.documentHeight / l.viewport.width) * 100) };
+}
+
+/** A layout whose scroll keyframes keep only the canvas: the page layer places every other element itself. */
+const canvasScrollOnly = (l: HeroLayout): HeroLayout => ({
+  ...l,
+  scroll: l.scroll && l.scroll.items.canvas ? { ...l.scroll, items: { canvas: l.scroll.items.canvas } } : null,
+});
+
+/**
+ * The scroll behaviour of the page layer (plain JavaScript): elements that move against the page get their box interpolated between
+ * the keyframes read at each scroll stop, and fixed elements show only over the scroll range they were seen in.
+ */
+export function pageScript(l: HeroLayout): string {
+  const vw = l.viewport.width;
+  const bgs = JSON.stringify(l.page?.backgrounds ?? []);
+  return `(function () {
+  var W = ${vw};
+  var BG = ${bgs};
+  var WR = ${l.page?.wheelRatio ?? 'null'};
+  // the original moves WR page px per px of wheel (smooth scroll, virtual scroll): the kit's wheel moves its page the same way
+  if (WR) window.addEventListener('wheel', function (e) { if (e.ctrlKey) return; e.preventDefault(); window.scrollBy(0, e.deltaY * WR); }, { passive: false });
+  if (BG.length) { document.documentElement.style.transition = 'background-color .35s'; document.body.style.transition = 'background-color .35s'; }
+  function bg(s) {
+    var best = BG[0];
+    for (var i = 1; i < BG.length; i++) if (Math.abs(BG[i][0] - s) < Math.abs(best[0] - s)) best = BG[i];
+    document.documentElement.style.background = best[1]; document.body.style.background = best[1];
+  }
+  var els = Array.prototype.slice.call(document.querySelectorAll('[data-dea-kf],[data-dea-win]'));
+  els.forEach(function (el) {
+    var kf = el.getAttribute('data-dea-kf'), win = el.getAttribute('data-dea-win');
+    el.__kf = kf ? JSON.parse(kf) : null;
+    el.__win = win ? win.split(',').map(Number) : null;
+  });
+  function at(kf, s) {
+    if (s <= kf[0][0]) return kf[0];
+    for (var j = 0; j < kf.length - 1; j++) if (s <= kf[j + 1][0]) {
+      var t = (s - kf[j][0]) / Math.max(1, kf[j + 1][0] - kf[j][0]), a = kf[j], b = kf[j + 1];
+      return a.map(function (v, n) { return v + (b[n] - v) * t; });
+    }
+    return kf[kf.length - 1];
+  }
+  function apply() {
+    var s = window.scrollY || document.documentElement.scrollTop || 0;
+    if (BG.length) bg(s);
+    els.forEach(function (el) {
+      if (el.__win) el.style.display = s >= el.__win[0] && s <= el.__win[1] ? '' : 'none';
+      if (el.__kf) {
+        var b = at(el.__kf, s), st = el.style;
+        st.left = (b[1] / W * 100) + 'vw'; st.top = (b[2] / W * 100) + 'vw'; st.width = (b[3] / W * 100) + 'vw';
+        if (el.getAttribute('data-dea-h') !== '0') st.height = (b[4] / W * 100) + 'vw';
+        st.opacity = String(b[5]);
+      }
+    });
+  }
+  addEventListener('scroll', apply, { passive: true });
+  apply();
+})();`;
+}
+
+/** The kit's whole page as plain HTML: every element in document coordinates in one layer, scrolling with the window. */
+export function pageLayerHtml(l: HeroLayout): string | null {
+  const pm = pageModeOf(l);
+  if (!pm) return null;
+  const css = sceneCss(l);
+  const canvasScript = scrollScript(canvasScrollOnly(l));
+  const attrs = (it: { k?: string; win?: [number, number]; kf?: number[][] }) =>
+    `${it.k ? ` data-dea-k="${escHtml(it.k).replace(/"/g, '&quot;')}"` : ''}${it.win ? ` data-dea-win="${it.win[0]},${Number.isFinite(it.win[1]) ? Math.round(it.win[1]) : 1e9}"` : ''}${it.kf ? ` data-dea-kf="${escHtml(JSON.stringify(it.kf.map((r) => r.map((v) => Math.round(v * 100) / 100)))).replace(/"/g, '&quot;')}"` : ''}`;
+  const body = pm.items
+    .map((it) => {
+      const st = escHtml(cssText(it.style)).replace(/"/g, '&quot;');
+      const a = attrs(it);
+      if (it.tag === 'video')
+        return `  <video${a} src="${escHtml(it.html ?? '').replace(/"/g, '&quot;')}" autoplay muted loop playsinline style="${st}"></video>`;
+      if (it.tag === 'img') return `  <img${a} src="${escHtml(it.html ?? '').replace(/"/g, '&quot;')}" alt="" loading="lazy" style="${st}">`;
+      return `  <${it.tag}${a}${it.html || !it.text ? '' : ' data-dea-h="0"'} style="${st}">${it.html ?? escHtml(it.text)}</${it.tag}>`;
+    })
+    .join('\n');
+  return `${css ? `<style>\n${css}\n</style>\n` : ''}<section class="dea-page" style="position: absolute; left: 0; top: 0; z-index: 1; width: 100vw; height: ${pm.heightVw}vw; overflow-x: hidden; pointer-events: none">\n${body}\n</section>\n<div class="dea-page-space" style="position: relative; width: 1px; height: ${pm.heightVw}vw"></div>\n<script>\n${pageScript(l).replace(/<\/script/gi, '<\\/script')}\n</script>${canvasScript ? `\n<script>\n${canvasScript.replace(/<\/script/gi, '<\\/script')}\n</script>` : ''}`;
+}
+
 /** The same hero as plain HTML, for the vanilla project and the preview. */
 export function heroHtml(l: HeroLayout): string {
+  const whole = pageLayerHtml(l);
+  if (whole) return whole;
   const css = sceneCss(l);
   const space = scrollSpacer(l);
   const script = scrollScript(l);

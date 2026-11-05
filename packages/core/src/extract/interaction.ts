@@ -7,6 +7,7 @@
 // in over 20 frames on the site may be at a different point in the kit when the frame is taken.
 
 import type { Page } from 'playwright';
+import type { PhaseInfo } from '../browser/phase.ts';
 
 export interface InteractionStep {
   name: string;
@@ -358,6 +359,8 @@ export interface InteractionResult {
   siteState?: Array<StepState | null>;
   /** uniforms the probe saw change that follow no input DEA can drive */
   unexplained: string[];
+  /** how the fresh load the site's frames were taken on was brought to the reference picture's phase */
+  phase?: PhaseInfo | null;
 }
 
 /** Mean response over the steps that move an input. */

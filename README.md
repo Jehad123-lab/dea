@@ -91,6 +91,7 @@ Real reports from these commands are in [`examples/`](examples/).
 | `dea api <url>` | The APIs the page talks to, as OpenAPI 3.1 (`api/openapi.json`) with auth kinds only, never values. |
 | `dea assets <url>` | Every visual asset the page uses: WebGL textures (PNG preview, format, wrap/filter, and which shader sampler draws each), render targets, GLB models, images, KTX2/HDR, video, Lottie, Rive, fonts. Writes `assets/` + `assets.md`. |
 | `dea extract <url> --to react\|vanilla\|framer` | A kit you can use: tokens (`tokens.css`, Tailwind preset, W3C `tokens.json`), motion (`timeline.js`, `keyframes.css`), the first screen's text placed as on the site, shaders as three.js modules with uniform values and drivers from a live trace, the render pipeline, textures by path; then a build check, a visual diff, research and a "Gap → path to result" section. `--section`, `--own-assets`, `--verify-build`, `--reference`, `--library`, `--batch`. |
+| `dea stability <url> --runs N` | How much the ORIGINAL site disagrees with itself: the scripted interaction on N fresh loads, with a fixed wait and with phase alignment (the noise floor for any interaction score). |
 | `dea trace <url>` | Live debug: every WebGL call that matters (shader compiles, uniforms with values over time, texture uploads) with the code that made it, what drives each uniform (clock, scroll, pointer, viewport), and breakpoints (`--break uniform:uTime`, `--break texImage2D`, `--break url:main.js:120`) that return the caller's stack and variables. |
 | `dea library add\|list\|search\|use` | Decode once, reuse everywhere: save kits, find them by site, technique, shader, uniform, ease, colour or font, copy one into a new project. |
 | `dea motion <url>` | How it moves: the GSAP timeline tree and ScrollTriggers, CSS/WAAPI animations, Lottie, Rive, Framer, three.js clips, and a frame recording fitted to clocks, eases and springs. Writes `motion.md` and a runnable `motion/timeline.js`. |
@@ -508,6 +509,38 @@ What changed:
 the motion that touches it. `--reference shot.png` compares against your own screenshot (for example one taken on a
 machine with a GPU). `--library <name> --tag hero` saves the kit; `--batch urls.txt` extracts a list of sites.
 
+### The whole page (`dea extract`, not `--quick`)
+
+The kit follows the page below the first screen. After the first screen is chosen, extract loads the page fresh, waits until
+the scene is stable (see below), scrolls it one stop at a time (every 0.8 screens; a page that only answers the wheel is
+driven by the wheel and its px-per-step is measured), waits for each stop to settle (lazy content has loaded, lazy images
+are in) and reads every visible text block, box, image, video and canvas at its place in the document.
+Everything is merged into document coordinates and sorted by how it behaved over the stops: **static** (one place), **fixed**
+(a header; it stays in the window and is shown only over the stops where it was seen) or **moving** (keyframes by scroll).
+The kit then has the page's height, the same elements at the same scroll positions, a fixed header that stays put, the page's
+background at each stop, and a small canvas that is not the 3D scene (a chart, a map) as a picture of what it showed.
+
+- **Scored per scroll stop.** The kit is opened at each stop and compared with the original's screenshot of that stop (same
+  scorer as the first screen). `preview/page-stops.jpg` is a contact sheet (original above, kit below; the first, the last and
+  the two worst stops are always in it), `page-stops.json` has every number, and `extract.md` has a "The whole page" section.
+- **Every label stays.** The whole-page read is *Verified* (with the stops it covers and its limits), the stops under 60% are an
+  *Unknown* naming them, and what the page does that the read cannot see (click, hover, menus, forms, other routes) is listed as
+  *not reproduced*. Replay, rebuild and `--own-assets` are scored separately, and a first-frame match still proves nothing about
+  motion. `--own-assets` keeps the layout and swaps every picture for a placeholder of the same size.
+- **Canvases in closed shadow roots.** DEA's page hook records every `attachShadow`, so a canvas the page draws inside a closed
+  shadow root (igloo.inc does) is found by the page map, the canvas ranking and the layout read. No `querySelector` can reach it.
+- **"Scene stable" instead of a fixed wait.** After a load the run waits until the 64x40 grey thumbnail of the page changes by
+  less than 0.8 (of 255) for three reads in a row, no DOM change and no request is in flight. A scene that is still moving at the
+  cap is reported as time-driven, not as stable.
+- **Phase alignment.** A time-driven scene (igloo.inc) looks different at every moment, so a scripted interaction started at a
+  fixed time compares two different pictures. The fresh load now waits until its picture is within 6 (of 255) of the reference
+  picture, and the interaction, the run and the ledger record `phase` (aligned or not, how far, how long). An unaligned run is
+  an *Unknown* in the ledger, and its interaction score is marked not comparable.
+- **`dea stability <url> --runs N --mode both|aligned|fixed`**: runs the same interaction on N fresh loads of the ORIGINAL
+  and compares each with run 0, with the old fixed wait and with phase alignment. That is the noise floor: a kit cannot be
+  expected to agree with the site more than the site agrees with itself. Writes `stability.json` / `stability.md`.
+
+
 ## Live debug (`dea trace`)
 
 When reading the code is not enough, watch it run. `dea trace` wraps WebGL before the page's scripts start and records,
@@ -666,6 +699,37 @@ Then ask: *"Decode the design of https://threejs.org/examples/webgl_animation_ke
 
 Test it with the MCP Inspector: `npx @modelcontextprotocol/inspector node packages/mcp/bin/dea-mcp.mjs`.
 
+## Same inputs, same outputs, whichever AI drives it
+
+An AI client chooses commands and options. It does not produce any number, label or finding: every result an MCP tool
+returns is computed by DEA's code from the inputs (the site, a saved run, the options). So two clients (a different
+model, a different app, a different call order) that make the same call read the same result.
+
+How it is kept true:
+
+- **One shape.** The structured tools (`search`, `read`, `report`, `list_runs`, `detect_stack`, `inspect_site`, `extract`)
+  answer `{ schema: "dea.result/1", tool, note, result }`. `content[0]` is that object as canonical JSON (keys sorted,
+  numbers rounded to 3 decimals, array order meaningful and fixed by DEA). `structuredContent` carries the same object plus
+  `meta`. `content[1]` repeats `meta` as text.
+- **Volatile fields live in `meta`**, never in `result`: run ids, timestamps (`fetched_at`, `madeAt`), timings, the machine,
+  file hashes, verified/cached state of a search, source status. They are true, and different on every call.
+- **Fixed defaults and normal form.** Omitted options mean the same as their documented default; `search` sorts the sources
+  into DEA's own order, trims and de-duplicates them, so the order an AI listed them in does not change the answer.
+- **Proof in the test suite.** `packages/mcp/test/determinism.test.ts` calls the tools through two clients (other client name,
+  other call order, other argument order and spelling, other clock) against a recorded web fixture and a saved run, and asserts
+  the `result` text is identical; `packages/core/test/determinism.e2e.test.ts` extracts the same local page twice in a real
+  browser and asserts the evidence ledger (scores, page map, findings) is identical except `meta`.
+
+Where it does **not** hold, and how DEA says so:
+
+- A live site changes (content, A/B tests, ads); the same URL is a different input tomorrow. `meta` carries the time.
+- Network timing and a loaded machine change what a site shows within a time budget. DEA waits for a stable scene, not a fixed
+  time, and says when it could not (`phase` in the evidence ledger).
+- Software WebGL (no GPU) runs 0.3 to 0.8 fps, so time-driven scenes land in different phases. DEA aligns the start of a
+  comparison to the reference picture (`dea.phase`), and reports the spread of repeated runs (`n`, mean, sd, min, max)
+  instead of one number. Where a site disagrees with itself, the number is labelled with that spread.
+- Free web search returns what the sources return today; `meta.label` says verified (live), cached or mixed.
+
 ## Use it from code
 
 ```ts
@@ -755,9 +819,14 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
   its captured second made it worse (a black frame) and was removed.
 - Pointer-driven draws are replayed from the live pointer for the uniforms DEA can fit (a position, or a step times a
   gain); a site that derives them another way (accumulated velocity, random colours) is replayed with the recorded values.
-- Extract reads the first screen's DOM and the busiest canvas. Scroll-driven 3D is followed through the scroll tape (stops, not a
-  continuous recording), and the page map lists what each stop showed, but content further down the page that is plain HTML,
-  other routes, and canvas drawing that starts empty (a whiteboard) are not rebuilt.
+- Extract reads the whole page's DOM at scroll stops and the busiest canvas. The page layer is absolutely positioned boxes at
+  the width it was read (no reflow at other widths), and click, hover, menu and form states, other routes and canvas drawing
+  that starts empty (a whiteboard) are not rebuilt. A canvas that is not the scene is a still picture of one moment. A virtual
+  (wheel-only) scroll is read by the wheel and kept as native scrolling in the kit; it is tested on a purpose-written page only.
+  Scroll-driven 3D is followed through the scroll tape (stops, not a continuous recording).
+- "Scene stable" and "in phase" are judged on a 64x40 grey thumbnail: a change smaller than that is not seen. A time-driven scene
+  (igloo.inc) can be started in the same phase as the reference, but its animation over scroll is still not reproduced, and the
+  noise floor from `dea stability` is measured over a handful of runs, not a population.
 - The scroll tape plays recorded stops: between two stops the picture is the nearest stop (float uniforms and uploads are
   blended only when the recorded frames line up), and state the site keeps between stops (history, springs) is not recorded.
 - DEA Hub: apps that refuse automatic OAuth sign-up (GitHub, Slack, Figma, Asana, HubSpot, Box) need your own OAuth

@@ -1,6 +1,7 @@
 // A page map for a page with no WebGL to record (a DOM page): the same stops and the same reading of the DOM, without frames.
 
 import type { Browser } from 'playwright';
+import { installObservers } from '../browser/open.ts';
 import { STOP_DOM } from '../replay/capture.ts';
 import { buildPageMap, type PageMapDoc, type ScrollTapeFit } from '../replay/scrolltape.ts';
 
@@ -20,6 +21,8 @@ export async function domPageMap(
   opts: { stops?: number; waitMs?: number } = {},
 ): Promise<PageMapDoc | null> {
   const context = await browser.newContext({ viewport });
+  // the observers record every attachShadow, so a canvas inside a closed shadow root is still found
+  await installObservers(context, true).catch(() => {});
   try {
     const page = await context.newPage();
     await page.goto(url, { waitUntil: 'load', timeout: 45_000 }).catch(() => null);

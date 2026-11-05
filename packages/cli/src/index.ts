@@ -23,6 +23,7 @@ import {
   librarySearch,
   libraryUse,
   listRuns,
+  measureStability,
   planInvestigation,
   type RunDoc,
   readRun,
@@ -33,6 +34,7 @@ import {
   runInvestigation,
   type StepKind,
   scoreFiles,
+  stabilityMd,
   stackSite,
   startBudget,
   Timings,
@@ -267,6 +269,7 @@ common(
     .option('--no-replay', "do not record the site's WebGL frames (no capture replay, no editable rebuild)")
     .option('--max-capture-mb <mb>', 'the largest recording kept, after compaction', '64')
     .option('--no-research', 'do not search free sources for the techniques found')
+    .option('--no-page', 'keep to the first screen: do not read the page below it (the whole page is read by default)')
     .option('--batch <file>', 'extract every URL in a text file (one per line)')
     .option('--reference <image>', 'your own screenshot of the original to compare against (e.g. taken on a machine with a GPU)')
     .option('--reference-ms <ms>', 'watch the original this long for the reference screenshot (default: until the page settles, up to 45 s)')
@@ -298,6 +301,7 @@ common(
       trace: boolean;
       replay: boolean;
       research: boolean;
+      page: boolean;
       reference?: string;
       referenceMs?: string;
       maxCaptureMb: string;
@@ -376,6 +380,7 @@ common(
                 noReplay: !flags.replay,
                 maxCaptureMb: Number(flags.maxCaptureMb) || 64,
                 noResearch: !flags.research,
+                noPage: !flags.page,
               });
               if (flags.json)
                 rows.push(
@@ -468,6 +473,34 @@ program
       for (const l of r.links ?? []) process.stdout.write(`- ${l.text}: ${l.url}\n`);
     }),
   );
+
+common(
+  program
+    .command('stability')
+    .description(
+      'how repeatable is the interaction measurement on this site? runs the scripted pointer and scroll on several fresh loads of the ORIGINAL and compares each run with the first: the noise floor of the numbers, with the old fixed wait against the phase-aligned start',
+    )
+    .argument('<url>', 'site to measure')
+    .option('--runs <n>', 'fresh loads, the first being the reference (default 3)', '3')
+    .addOption(new Option('--mode <mode>', 'how each later run starts').choices(['both', 'aligned', 'fixed']).default('both'))
+    .option('--cap <seconds>', 'longest wait for a scene to settle or reach the reference phase', '90'),
+).action((url: string, flags: CommonFlags & { runs: string; mode: 'both' | 'aligned' | 'fixed'; cap: string }) =>
+  run(async () => {
+    const base = options(flags);
+    const out = join(process.env.DEA_HOME ?? '.dea', 'stability', new Date().toISOString().replace(/[:.]/g, '-'));
+    const r = await measureStability(url, {
+      runs: Number(flags.runs) || 3,
+      mode: flags.mode,
+      viewport: base.viewport,
+      browser: base.browser,
+      headless: base.headless,
+      capMs: (Number(flags.cap) || 90) * 1000,
+      outDir: out,
+      onProgress: base.onProgress,
+    });
+    process.stdout.write(flags.json ? `${JSON.stringify(r, null, 2)}\n` : `\n${stabilityMd(r)}\nSaved in ${out}\n`);
+  }),
+);
 
 const library = program
   .command('library')

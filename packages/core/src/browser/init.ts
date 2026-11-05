@@ -18,6 +18,33 @@ export const INIT_SCRIPT = String.raw`(() => {
     errors: [],
   });
   const now = () => Math.round(performance.now() - t0);
+
+  // Every shadow root, open or closed. attachShadow is the only way to make one, so this sees what a query cannot: a
+  // closed root answers shadowRoot with null, and a canvas inside one is not found by querySelectorAll either.
+  D.shadowHosts = new WeakMap();
+  D.shadows = [];
+  try {
+    const attach = Element.prototype.attachShadow;
+    Element.prototype.attachShadow = function (init) {
+      const root = attach.call(this, init);
+      try {
+        D.shadowHosts.set(this, root);
+        if (D.shadows.length < 800) D.shadows.push(new WeakRef(root));
+      } catch (e) {}
+      return root;
+    };
+  } catch (e) {}
+  /** the shadow root of an element, open or closed */
+  D.rootOf = (el) => el.shadowRoot || D.shadowHosts.get(el) || null;
+  /** elements matching a selector in the document and in every connected shadow root */
+  D.deep = (q) => {
+    const out = [...document.querySelectorAll(q)];
+    for (const w of D.shadows) {
+      const r = w.deref();
+      if (r && r.host && r.host.isConnected) out.push(...r.querySelectorAll(q));
+    }
+    return out;
+  };
   const MAX_SHADERS = 400;
   const MAX_SRC = 200000;
 

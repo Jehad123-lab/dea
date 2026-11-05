@@ -28,6 +28,17 @@ The first release: decode a website with evidence, use what comes out, and let A
 - Every report ends with "Gap → path to result": what is known, what is missing, the best reconstruction now, and the
   next probe. `dea investigate` runs those probes itself.
 
+### Same result whichever AI drives it
+
+- Structured MCP answers: `search`, `read`, `report`, `list_runs`, `detect_stack`, `inspect_site` and `extract` return
+  `{ schema: "dea.result/1", tool, note, result }` as canonical JSON in `content[0]` (keys sorted, numbers rounded to 3
+  decimals); run ids, times, timings, machine, file hashes and cache state are in `meta` (`structuredContent.meta`,
+  `content[1]`), never in `result`.
+- `search` asks the sources in DEA's own fixed order whatever order the caller listed them in.
+- Tests: two clients with different call order, argument order and clock read the same `result` text; the same local
+  page extracted twice gives the same evidence ledger (real-browser test).
+- README: "Same inputs, same outputs, whichever AI drives it", with where it does not hold.
+
 ### Use
 
 - `dea extract --to react|vanilla|framer`: design tokens (CSS variables, a Tailwind preset, W3C tokens for Figma
@@ -161,6 +172,26 @@ Found by running igloo.inc and the WebGL fluid simulation; each rule is general.
 - A page with no WebGL gets its page map too (`page-map.json` / `.md`, found by scrolling a fresh load a screen at a time):
   the sections in view at each stop, how far the probe got, and an Unknown in the ledger saying which sections the kit does not
   contain. The map lists the innermost sections (a wrapper that holds other sections is not one).
+
+### The whole page, and time-driven scenes
+
+- `dea extract` follows the whole page: a fresh load, scene stable, then one stop per 0.8 screens (native scroll, or a wheel-only
+  virtual scroll with its measured px per step), each stop settled so lazy content has loaded. Elements are merged into document
+  coordinates and classed static, fixed (a header that stays in the window) or moving (keyframes by scroll); the kit has the page's
+  height, the same elements at the same scroll positions, the background at each stop, and small canvases as pictures.
+- The kit is scored at every scroll stop (`preview/page-stops.jpg`, `page-stops.json`, a "The whole page" section in `extract.md`);
+  the ledger gets `page.whole` (Verified), `page.weak` (Unknown, the stops under 60%) and `input.phase`. `--own-assets` keeps the
+  layout and uses placeholders for pictures.
+- Canvases in closed shadow roots are found (the page hook records every `attachShadow`; igloo.inc keeps its canvas in one, which
+  no query reaches). The page map, the canvas ranking and the layout read use it.
+- A "scene stable" wait replaces the fixed wait before the fresh-load reference: a picture thumbnail, DOM changes and the network
+  must be quiet; a scene still moving at the cap is reported as time-driven.
+- Phase alignment for time-driven scenes: the fresh load waits until its picture is close to the reference picture; the result is
+  recorded in `interaction.json` and the ledger, and an unaligned run is an Unknown.
+- `dea stability <url> --runs N --mode both|aligned|fixed`: the interaction on N fresh loads of the original compared with the
+  first, with a fixed wait and with phase alignment (`stability.json` / `stability.md`), the noise floor for interaction scores.
+- When no first-screen reading beats the plain heading, the whole-page read can stand on its own if its first screen is no worse.
+- A screenshot that fails once under heavy software WebGL is retried, then taken from the page's own surface.
 
 ### Hub: free search and built-in connectors
 

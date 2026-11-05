@@ -4,6 +4,8 @@ import { extname, join, normalize } from 'node:path';
 import type { Browser, Page } from 'playwright';
 import { NAME_SHIM } from '../browser/init.ts';
 import { installObservers, LOADER_VISIBLE } from '../browser/open.ts';
+import { alignToReference, type PhaseInfo, phaseInfo } from '../browser/phase.ts';
+import { thumbOfImage } from '../browser/settle.ts';
 import { assertNotBotWall } from '../browser/wall.ts';
 import { currentCache } from '../cache.ts';
 import {
@@ -65,7 +67,7 @@ export function previewHtml(mods: ShaderModule[], threeVersion: string, hero: st
 <title>DEA rebuild preview</title>
 <link rel="stylesheet" href="../tokens/tokens.css" />
 <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.${v}.0/build/three.module.js", "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.${v}.0/examples/jsm/" } }</script>
-<style>html, body { margin: 0; height: 100%; overflow: hidden; } #scene { position: fixed; inset: 0; } .dea-hero { position: relative; z-index: 1; } h1 { position: relative; margin: 30vh 8vw 0; font-weight: 500; line-height: 1.05; }</style>
+<style>${hero?.includes('class="dea-page"') ? 'html, body { margin: 0; overflow-x: hidden; } body { position: relative; }' : 'html, body { margin: 0; height: 100%; overflow: hidden; }'} #scene { position: fixed; inset: 0; } .dea-hero { position: relative; z-index: 1; } h1 { position: relative; margin: 30vh 8vw 0; font-weight: 500; line-height: 1.05; }</style>
 </head>
 <body>
 <div id="scene"></div>
@@ -301,21 +303,31 @@ export interface LayoutBox {
 }
 
 /** Read the visible text blocks of the first screen (or of one section), each with its box and computed type. */
-export const LAYOUT_READ = (section: string | null) => `(() => {
+export interface LayoutReadOptions {
+  /** read for the whole page: larger caps, big background panels kept, and fixed or sticky elements flagged (`fx`: 1 fixed, 2 sticky) */
+  page?: boolean;
+}
+
+export const LAYOUT_READ = (section: string | null, o: LayoutReadOptions = {}) => `(() => {
+  const PAGE = ${o.page ? 'true' : 'false'};
+  const CAP = PAGE ? { boxes: 500, shapes: 400, graphics: 120, scan: 30000 } : { boxes: 150, shapes: 100, graphics: 40, scan: 4000 };
   const root = ${section ? `document.querySelector(${JSON.stringify(section)})` : 'document.body'} || document.body;
   const out = [];
   const W = innerWidth, H = innerHeight;
+  // the parent of a node, through a shadow root to its host
+  const up = (n) => n.parentElement || (n.getRootNode && n.getRootNode().host) || null;
+  const rootOf = (el) => (window.__DEA__ && window.__DEA__.rootOf ? window.__DEA__.rootOf(el) : el.shadowRoot);
   // a key that names the same element at another scroll position: its path through the DOM
-  const keyOf = (el, pe) => { const p = []; for (let n = el; n && n.nodeType === 1 && n !== document.documentElement; n = n.parentElement) { let i = 1; for (let s = n.previousElementSibling; s; s = s.previousElementSibling) i++; p.push(n.tagName.toLowerCase() + ':' + i); } return p.reverse().join('>') + (pe || ''); };
+  const keyOf = (el, pe) => { const p = []; for (let n = el; n && n.nodeType === 1 && n !== document.documentElement; n = n.parentElement || (n.getRootNode && n.getRootNode().host) || null) { let i = 1; for (let s = n.previousElementSibling; s; s = s.previousElementSibling) i++; p.push(n.tagName.toLowerCase() + ':' + i); } return p.reverse().join('>') + (pe || ''); };
   // where an element paints: the z-index of each stacking context on the way down (position + z-index, fixed or sticky, opacity,
   // transforms, filters), then its own level (positioned above in-flow); equal paths paint in document order
   const zinfo = new Map();
   const zpath = (el) => {
-    const up = [];
-    for (let n = el; n && n !== document.documentElement; n = n.parentElement) up.push(n);
+    const chain = [];
+    for (let n = el; n && n !== document.documentElement; n = up(n)) chain.push(n);
     const path = [];
     let inPos = false;
-    for (const n of up.reverse()) {
+    for (const n of chain.reverse()) {
       let v = zinfo.get(n);
       if (!v) {
         const c = getComputedStyle(n);
@@ -335,6 +347,9 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     }
     return path;
   };
+  // a fixed or sticky element (a header, a pinned panel) keeps its place in the window while the page scrolls
+  const fixedOf = (el) => { let f = 0; for (let n = el; n && n !== document.documentElement; n = up(n)) { const p = getComputedStyle(n).position; if (p === 'fixed') return 1; if (p === 'sticky') f = 2; } return f; };
+  const fxOf = (el) => { if (!PAGE) return {}; const f = fixedOf(el); return f ? { fx: f } : {}; };
   const docOrder = new Map();
   { let i = 0; for (const n of root.querySelectorAll('*')) docOrder.set(n, i++); }
   const LOADER = /(^|[\\s_-])(pre)?loader([\\s_-]|$)|preload/i;
@@ -365,7 +380,7 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
   };
   const seen = new Set();
   const walk = (el) => {
-    if (out.length >= 150) return;
+    if (out.length >= CAP.boxes) return;
     if (skip && el !== root && (el.getAttribute('role') === 'progressbar' || LOADER.test(String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className) + ' ' + el.id))) return;
     let cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return;
@@ -388,7 +403,7 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
       const r = el.getBoundingClientRect();
       if (r.width > 2 && r.height > 2 && r.bottom > 0 && r.right > 0 && r.top < H && r.left < W) {
         let op = 1;
-        for (let p = el; p && p !== document.documentElement; p = p.parentElement) op *= +getComputedStyle(p).opacity;
+        for (let p = el; p && p !== document.documentElement; p = up(p)) op *= +getComputedStyle(p).opacity;
         // rotated text (a vertical label): the box the kit needs is the unrotated one, turned about its centre
         let rot = 0, gx = r.left, gy = r.top, gw = r.width, gh = r.height;
         {
@@ -398,19 +413,22 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
           if (Math.abs(a) > 1 && el.offsetWidth > 0 && el.offsetHeight > 0) { rot = Math.round(a * 10) / 10; gw = el.offsetWidth; gh = el.offsetHeight; gx = r.left + r.width / 2 - gw / 2; gy = r.top + r.height / 2 - gh / 2; }
         }
         if (op >= 0.05)
-          out.push({ __el: el, k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, tag: el.tagName.toLowerCase(), text: (el.innerText || own).trim().slice(0, 200), rich: el.children.length ? runs(el, 0).trim().slice(0, 1200) : '', deco: cs.textDecorationLine !== 'none' ? cs.textDecorationLine : '', fstyle: cs.fontStyle, x: gx, y: gy, w: gw, h: gh, ...(rot ? { rot } : {}), ...(cs.writingMode && cs.writingMode !== 'horizontal-tb' ? { wm: cs.writingMode } : {}),
+          out.push({ __el: el, ...fxOf(el), k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, tag: el.tagName.toLowerCase(), text: (el.innerText || own).trim().slice(0, 200), rich: el.children.length ? runs(el, 0).trim().slice(0, 1200) : '', deco: cs.textDecorationLine !== 'none' ? cs.textDecorationLine : '', fstyle: cs.fontStyle, x: gx, y: gy, w: gw, h: gh, ...(rot ? { rot } : {}), ...(cs.writingMode && cs.writingMode !== 'horizontal-tb' ? { wm: cs.writingMode } : {}),
             fontFamily: cs.fontFamily, fontSize: parseFloat(cs.fontSize), fontWeight: cs.fontWeight, letterSpacing: cs.letterSpacing,
             lineHeight: cs.lineHeight, color: cs.color, textTransform: cs.textTransform, textAlign: cs.textAlign, opacity: Math.round(op * 100) / 100 });
         return;
       }
     }
     for (const c of el.children) walk(c);
+    const sr = rootOf(el);
+    if (sr) for (const c of sr.children) walk(c);
   };
   walk(root);
   if (!out.length) { skip = false; walk(root); }
   // the part of an element its overflow-clipping ancestors let through (0..1): a label slid out of its button is not seen
   const shown = (el, r) => {
-    let x0 = Math.max(r.left, 0), y0 = Math.max(r.top, 0), x1 = Math.min(r.right, W), y1 = Math.min(r.bottom, H);
+    // a page read slices the page by the window, so the window's edge hides nothing: only an element's own clipping ancestors do
+    let x0 = PAGE ? r.left : Math.max(r.left, 0), y0 = PAGE ? r.top : Math.max(r.top, 0), x1 = PAGE ? r.right : Math.min(r.right, W), y1 = PAGE ? r.bottom : Math.min(r.bottom, H);
     // only the containing-block chain clips: a fixed element escapes every ancestor, an absolute one the static ancestors
     let mode = getComputedStyle(el).position;
     for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
@@ -426,8 +444,8 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     }
     return (Math.max(0, x1 - x0) * Math.max(0, y1 - y0)) / Math.max(1, r.width * r.height);
   };
-  const opacityOf = (el) => { let op = 1; for (let p = el; p && p !== document.documentElement; p = p.parentElement) op *= +getComputedStyle(p).opacity; return Math.round(op * 100) / 100; };
-  const hiddenUp = (el) => { for (let p = el; p && p !== document.documentElement; p = p.parentElement) { const cs = getComputedStyle(p); if (cs.display === 'none' || cs.visibility === 'hidden') return true; if (p !== root && LOADER.test(String(p.className && p.className.baseVal !== undefined ? p.className.baseVal : p.className) + ' ' + p.id)) return true; } return false; };
+  const opacityOf = (el) => { let op = 1; for (let p = el; p && p !== document.documentElement; p = up(p)) op *= +getComputedStyle(p).opacity; return Math.round(op * 100) / 100; };
+  const hiddenUp = (el) => { for (let p = el; p && p !== document.documentElement; p = up(p)) { const cs = getComputedStyle(p); if (cs.display === 'none' || cs.visibility === 'hidden') return true; if (p !== root && LOADER.test(String(p.className && p.className.baseVal !== undefined ? p.className.baseVal : p.className) + ' ' + p.id)) return true; } return false; };
   const boxes = out.filter((b, i) => {
     const el = b.__el;
     delete b.__el;
@@ -453,7 +471,7 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
   // the first screen's flat shapes (pills, buttons, badges): a background colour or gradient, a border, rounded corners
   const shapes = [];
   const all = root.querySelectorAll('*');
-  for (let i = 0; i < all.length && i < 4000 && shapes.length < 100; i++) {
+  for (let i = 0; i < all.length && i < CAP.scan && shapes.length < CAP.shapes; i++) {
     const el = all[i];
     if (el.closest('svg') || el.tagName === 'CANVAS') continue;
     const cs = getComputedStyle(el);
@@ -468,16 +486,19 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     // a big shape counts only as an overlay over the picture: a gradient or a see-through colour on a positioned layer
     // that does not hold the canvas (a vignette, a fade to black at the bottom)
     const big = r.width * r.height > W * H * 0.25;
-    if (big && hasUrl) { if (el.querySelector('canvas')) continue; }
+    // a page panel (a full-width section with its own colour) is a shape of the page; only a panel that holds the canvas stays out
+    // (a small canvas, one read back as a picture, does not keep its panel out)
+    if (PAGE && big) { const inside = (window.__DEA__ && window.__DEA__.deep ? window.__DEA__.deep('canvas') : [...el.querySelectorAll('canvas')]).filter((c) => el.contains(c) || (c.getRootNode && el.contains(c.getRootNode().host || null))); if (inside.some((c) => { const cr = c.getBoundingClientRect(); return cr.width * cr.height > W * H * 0.6; })) continue; }
+    else if (big && hasUrl) { if (el.querySelector('canvas')) continue; }
     else if (big && !((grad || (bg && /rgba\\(.*, 0?\\.\\d+\\)$/.test(bg))) && cs.position !== 'static' && !el.querySelector('canvas'))) continue;
     if (hiddenUp(el) || shown(el, r) < 0.5) continue;
     const op = opacityOf(el);
     if (op < 0.05) continue;
-    shapes.push({ k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, x: r.left, y: r.top, w: r.width, h: r.height, background: bg, gradient: grad, border, radius: cs.borderRadius, filter: null, shadow: cs.boxShadow !== 'none' ? cs.boxShadow : null, ...(hasUrl ? { bgSize: cs.backgroundSize, bgPos: cs.backgroundPosition, bgRepeat: cs.backgroundRepeat, media: big } : {}), opacity: op });
+    shapes.push({ k: keyOf(el), ...fxOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, x: r.left, y: r.top, w: r.width, h: r.height, background: bg, gradient: grad, border, radius: cs.borderRadius, filter: null, shadow: cs.boxShadow !== 'none' ? cs.boxShadow : null, ...(hasUrl ? { bgSize: cs.backgroundSize, bgPos: cs.backgroundPosition, bgRepeat: cs.backgroundRepeat, media: big } : {}), opacity: op });
   }
   // a gradient painted by a ::before or ::after: a fade laid over the picture (a dark band at the bottom of a section, a
   // blurred spot) is an overlay too, and the picture under it is the same canvas. Its box comes from its own offsets and size.
-  for (let i = 0; i < all.length && i < 4000 && shapes.length < 110; i++) {
+  for (let i = 0; i < all.length && i < CAP.scan && shapes.length < CAP.shapes + 10; i++) {
     const el = all[i];
     if (el.closest('svg') || el.tagName === 'CANVAS') continue;
     for (const pe of ['::before', '::after']) {
@@ -500,14 +521,14 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
       if (hiddenUp(el) || shown(el, { left: x, top: y, right: x + w, bottom: y + h, width: w, height: h }) < 0.5) continue;
       const op = Math.round(opacityOf(el) * (+ps.opacity) * 100) / 100;
       if (op < 0.05) continue;
-      shapes.push({ k: keyOf(el, pe), x, y, w, h, background: null, gradient: ps.backgroundImage, border: null, radius: ps.borderRadius, filter: ps.filter !== 'none' ? ps.filter : null, opacity: op });
+      shapes.push({ k: keyOf(el, pe), ...fxOf(el), x, y, w, h, background: null, gradient: ps.backgroundImage, border: null, radius: ps.borderRadius, filter: ps.filter !== 'none' ? ps.filter : null, opacity: op });
     }
   }
   // the first screen's graphics: inline SVG (a logo, an icon) with its computed paint inlined, and small images
   const graphics = [];
   const PAINT = ['fill', 'stroke', 'stroke-width', 'opacity', 'fill-opacity', 'stroke-opacity', 'fill-rule'];
   for (const el of root.querySelectorAll('svg, img, video')) {
-    if (graphics.length >= 40) break;
+    if (graphics.length >= CAP.graphics) break;
     if (el.tagName.toLowerCase() === 'svg' && el.parentElement && el.parentElement.closest('svg')) continue;
     const r = el.getBoundingClientRect();
     if (!(r.width >= 8 && r.height >= 8 && r.bottom > 0 && r.right > 0 && r.top < H && r.left < W)) continue;
@@ -523,12 +544,12 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
       const stillPoster = /^https?:/.test(el.poster || '') && (el.readyState < 2 || (el.paused && el.currentTime < 0.05));
       const kind = stillPoster ? 'img' : /^https?:/.test(vs) ? 'video' : /^https?:/.test(el.poster || '') ? 'img' : null;
       if (!kind) continue;
-      graphics.push({ k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, kind, x: r.left, y: r.top, w: r.width, h: r.height, src: kind === 'video' ? vs : el.poster, poster: el.poster || undefined, t: kind === 'video' && !el.paused ? Math.round(el.currentTime * 10) / 10 : undefined, fit: getComputedStyle(el).objectFit, media: bigG, opacity: op });
+      graphics.push({ k: keyOf(el), ...fxOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, kind, x: r.left, y: r.top, w: r.width, h: r.height, src: kind === 'video' ? vs : el.poster, poster: el.poster || undefined, t: kind === 'video' && !el.paused ? Math.round(el.currentTime * 10) / 10 : undefined, fit: getComputedStyle(el).objectFit, media: bigG, opacity: op });
       continue;
     }
     if (el.tagName.toLowerCase() === 'img') {
       if (!el.complete || !el.naturalWidth || !/^https?:/.test(el.currentSrc || el.src)) continue;
-      graphics.push({ k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, kind: 'img', x: r.left, y: r.top, w: r.width, h: r.height, src: el.currentSrc || el.src, fit: getComputedStyle(el).objectFit, media: bigG, opacity: op });
+      graphics.push({ k: keyOf(el), ...fxOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, kind: 'img', x: r.left, y: r.top, w: r.width, h: r.height, src: el.currentSrc || el.src, fit: getComputedStyle(el).objectFit, media: bigG, opacity: op });
       continue;
     }
     const clone = el.cloneNode(true);
@@ -559,10 +580,31 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     clone.style.display = 'block';
     const svg = clone.outerHTML;
     if (svg.length > 40000) continue;
-    graphics.push({ k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, kind: 'svg', x: r.left, y: r.top, w: r.width, h: r.height, svg, opacity: op });
+    graphics.push({ k: keyOf(el), ...fxOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, kind: 'svg', x: r.left, y: r.top, w: r.width, h: r.height, svg, opacity: op });
   }
   let canvas = null;
-  for (const c of root.querySelectorAll('canvas')) {
+  // a canvas that is not the page's scene (a chart, a map, a 2D drawing) and can be read back becomes a picture of what it shows,
+  // so the section it sits in is not an empty hole in the kit; a canvas that reads back blank (WebGL without a kept buffer) stays out
+  if (PAGE) {
+    const snap = (window.__DEA__ && window.__DEA__.deep ? window.__DEA__.deep('canvas') : [...root.querySelectorAll('canvas')]);
+    let bytes = 0;
+    for (const c of snap) {
+      if (graphics.length >= CAP.graphics || bytes > 900000) break;
+      const r = c.getBoundingClientRect();
+      if (!(r.width >= 24 && r.height >= 24 && r.bottom > 0 && r.right > 0 && r.top < H && r.left < W)) continue;
+      if (r.width * r.height > W * H * 0.6) continue;
+      if (hiddenUp(c) || opacityOf(c) < 0.05) continue;
+      let url = '';
+      try { url = c.toDataURL('image/webp', 0.7); } catch (e) { continue; }
+      if (url.length < 900 || url.length > 260000) continue;
+      bytes += url.length;
+      graphics.push({ k: keyOf(c), ...fxOf(c), zp: zpath(c), o: docOrder.get(c) ?? 0, kind: 'img', x: r.left, y: r.top, w: r.width, h: r.height, src: url, fit: 'fill', canvasSnap: true, opacity: opacityOf(c) });
+    }
+  }
+  // canvases in the document and in shadow roots, open or closed (the observers record every attachShadow)
+  const inRoot = (c) => { for (let n = c; n; n = n.parentElement || (n.getRootNode && n.getRootNode().host) || null) if (n === root) return true; return false; };
+  const canvasList = window.__DEA__ && window.__DEA__.deep ? window.__DEA__.deep('canvas').filter(inRoot) : [...root.querySelectorAll('canvas')];
+  for (const c of canvasList) {
     const r = c.getBoundingClientRect();
     const vis = Math.max(0, Math.min(r.right, W) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, H) - Math.max(r.top, 0));
     if (vis < W * H * 0.05 || getComputedStyle(c).visibility === 'hidden') continue;
@@ -785,6 +827,8 @@ export async function referenceShot(
   interaction?: Buffer[];
   /** how first-screen elements move with scroll (keyframes at a few scroll positions), when the page scrolls */
   layoutScroll?: ScrollLayout | null;
+  /** how the fresh load the interaction ran on was brought to the phase of the reference picture */
+  phase?: PhaseInfo | null;
   /** what the page changed during each step of the interaction script (uniforms, CPU uploads, draw sizes) */
   interactionState?: Array<StepState | null>;
   /** every float uniform per frame beside the pointer, scroll and window size, while the probe moved them */
@@ -917,6 +961,7 @@ export async function referenceShot(
           let interactionState: Array<StepState | null> | undefined;
           let layoutScroll: ScrollLayout | null | undefined;
           let probe: ProbeData | null | undefined;
+          let phase: PhaseInfo | null = null;
           if (interact) {
             // the scroll tape moved the page (a story that plays forward does not always come back to the top), so the scripted
             // interaction runs on a fresh load of the site, held as long as the reference was: its "rest" is then the first screen
@@ -925,7 +970,11 @@ export async function referenceShot(
               const fresh = await timed('reload the site for the scripted interaction', async () => {
                 const p = await context.newPage();
                 await p.goto(url, { waitUntil: 'load', timeout: 60_000 }).catch(() => null);
-                await p.waitForTimeout(Math.min(Math.max(atMs, 6000), 150_000));
+                // not "wait as long as the reference took": wait until the scene is stable and shows the picture the reference showed
+                // (the same phase of an intro or a loop), up to 1.5 × the reference's time
+                const ref = await thumbOfImage(p, `data:image/png;base64,${buf.toString('base64')}`);
+                const al = await alignToReference(p, ref, { capMs: Math.min(Math.max(atMs * 1.5, 20_000), 150_000) });
+                phase = phaseInfo(al);
                 return p;
               }).catch(() => null);
               if (fresh) {
@@ -950,6 +999,7 @@ export async function referenceShot(
             interactionState,
             layoutScroll,
             probe,
+            phase,
           };
         }
         return {
@@ -1002,6 +1052,30 @@ export async function sideBySide(page: Page, a: string, b: string, labels: [stri
   return Buffer.from(url.slice(url.indexOf(',') + 1), 'base64');
 }
 
+/**
+ * A screenshot of a page that is drawing heavy WebGL on a software GPU can fail once with "Unable to capture screenshot" while
+ * the compositor is busy. Retry after a pause, then take the frame from the page's own surface instead of the compositor's.
+ */
+export async function safeScreenshot(page: Page): Promise<Buffer> {
+  let last: unknown;
+  for (let i = 0; i < 3; i++) {
+    try {
+      return await page.screenshot({ type: 'png', timeout: 60_000 });
+    } catch (e) {
+      last = e;
+      await page.waitForTimeout(1500 * (i + 1)).catch(() => {});
+    }
+  }
+  try {
+    const cdp = await page.context().newCDPSession(page);
+    const r = (await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: false } as never)) as { data: string };
+    await cdp.detach().catch(() => {});
+    return Buffer.from(r.data, 'base64');
+  } catch {
+    throw last;
+  }
+}
+
 /** Render the preview with parameters and return a PNG data URL of the first screen. */
 export async function renderPreview(
   browser: Browser,
@@ -1015,7 +1089,7 @@ export async function renderPreview(
     // a first compile of many programs on a software GPU can take a while; the wait ends as soon as the page is ready
     await page.waitForFunction('window.__deaReady === true', undefined, { timeout: 120_000 }).catch(() => {});
     const error = (await page.evaluate('window.__deaError || null')) as string | null;
-    const png = `data:image/png;base64,${(await page.screenshot({ type: 'png' })).toString('base64')}`;
+    const png = `data:image/png;base64,${(await safeScreenshot(page)).toString('base64')}`;
     return { png, error: error ?? undefined };
   } finally {
     await page.close();

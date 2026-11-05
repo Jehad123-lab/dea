@@ -37,6 +37,8 @@ export {
   settle,
   withSharedBrowser,
 } from './browser/open.ts';
+export { alignToReference, type PhaseInfo } from './browser/phase.ts';
+export { type SettleOptions, type SettleResult, settleScene } from './browser/settle.ts';
 export { BotProtectionError, type BotWall, classifyBotWall, type WallEvidence } from './browser/wall.ts';
 export { type CacheOptions, type CacheStats, ContentCache, cacheKey, currentCache, fmtMb, withCache } from './cache.ts';
 export { type ApiCall, buildOpenApi, inferSchema, isApiCall, isAssetUrl, isTelemetry, mergeSchema, templatePath } from './code/api.ts';
@@ -78,10 +80,26 @@ export { colorName, contrast, groupColors } from './design/colors.ts';
 export { easingName } from './design/css.ts';
 export { type DesignDoc, type DesignOptions, type DesignResult, decodeDesign, designSummary } from './design/index.ts';
 export { parseShader, summarizeShaders } from './design/shaders.ts';
+export {
+  type Answer,
+  answer,
+  canonical,
+  canonicalJson,
+  ledgerAnswer,
+  RESULT_SCHEMA,
+  readAnswer,
+  roundDeep,
+  searchAnswer,
+  splitMeta,
+  VOLATILE_KEYS,
+  variance,
+} from './determinism.ts';
 export { streamRun } from './events.ts';
 export {
+  buildLedger,
   type EvidenceLedger,
   type Finding as EvidenceFinding,
+  type LedgerInput,
   type LedgerQuery,
   queryLedger,
   readLedger,
@@ -126,6 +144,7 @@ export {
   libraryUse,
   scoreEntry,
 } from './extract/library.ts';
+export { mergeStops, type PageLayer, pageIsWorthKeeping } from './extract/pagelayer.ts';
 export {
   analyse,
   detectTechniques,
@@ -145,6 +164,7 @@ export {
   type Technique,
 } from './extract/research.ts';
 export { type CanvasScore, canvasLine, canvasScore, type ScoreFilesResult, scoreFiles } from './extract/score.ts';
+export { measureStability, type StabilityOptions, type StabilityResult, stabilityMd } from './extract/stability.ts';
 export { COVERS, type Gap, type ProbeStep, renderGaps } from './gaps.ts';
 export { dispatch, SESSION_METHODS, SessionClient, type SessionInfo, type SessionMethod, serveSession, sessionFile } from './hands/daemon.ts';
 export { type ActionResult, type ElementInfo, type HandsOptions, HandsSession, type LoggedAction, redactArgs, renderSessionReport } from './hands/session.ts';

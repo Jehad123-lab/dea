@@ -924,8 +924,8 @@ export const STOP_DOM = `(() => {
   // a wrapper that contains another section is not itself a section of the page: the innermost ones are listed
   const all = [...set]; for (const el of all) if (all.some((o) => o !== el && el.contains(o))) set.delete(el);
   const inView = [...set].map((el) => ({ sel: sel(el), heading: heading(el), share: Math.round(share(el.getBoundingClientRect()) * 100) / 100 })).filter((x) => x.share > 0.05).sort((a, b) => b.share - a.share).slice(0, 6);
-  // open shadow roots are searched too: a canvas inside a web component is still the page's canvas
-  const deep = (q) => { const out = [...document.querySelectorAll(q)]; let hosts = 0; const walk = (root) => { for (const el of root.querySelectorAll('*')) { if (el.shadowRoot && hosts++ < 300) { out.push(...el.shadowRoot.querySelectorAll(q)); walk(el.shadowRoot); } } }; walk(document); return out; };
+  // shadow roots are searched too, open or closed (the observers record every attachShadow): a canvas inside a web component is still the page's canvas
+  const deep = (q) => { if (window.__DEA__ && window.__DEA__.deep) return window.__DEA__.deep(q); const out = [...document.querySelectorAll(q)]; let hosts = 0; const walk = (root) => { for (const el of root.querySelectorAll('*')) { if (el.shadowRoot && hosts++ < 300) { out.push(...el.shadowRoot.querySelectorAll(q)); walk(el.shadowRoot); } } }; walk(document); return out; };
   const canvases = deep('canvas').map((el) => ({ sel: sel(el), share: Math.round(share(el.getBoundingClientRect()) * 100) / 100 })).filter((x) => x.share > 0.05).slice(0, 6);
   return { scrollY: Math.round(scrollY), docHeight: document.documentElement.scrollHeight, viewport: [vw, vh], inView, canvases };
 })()`;

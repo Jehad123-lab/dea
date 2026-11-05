@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   type ActionResult,
+  answer,
   deaHome,
   decodeAssets,
   decodeCode,
@@ -14,6 +15,7 @@ import {
   inspectSite,
   investigateInBackground,
   investigationStatus,
+  ledgerAnswer,
   libraryList,
   librarySearch,
   libraryUse,
@@ -23,11 +25,14 @@ import {
   type Mode,
   queryLedger,
   type RunDoc,
+  readAnswer,
   readLedger,
   readRun,
   readUrl,
   renderReport,
   resolveRun,
+  searchAnswer,
+  splitMeta,
   stackSite,
   traceWebGL,
   webSearch,
@@ -52,6 +57,19 @@ const fail = (e: unknown) => ({ isError: true, content: [text(`DEA could not fin
 const clip = (s: string, n = 24_000) => (s.length > n ? `${s.slice(0, n)}\n\n[cut at ${n} characters; the full file is in the run folder]` : s);
 
 /**
+ * A structured answer. content[0] is the deterministic part, as canonical JSON (keys sorted, numbers rounded): a function of the
+ * tool's arguments and the thing it looked at, produced by DEA's code, so any client that makes the same call reads the same text.
+ * content[1] is `meta` (timestamps, run ids, timings, cache state) and any prose DEA adds for people. structuredContent carries both.
+ */
+function structured(tool: string, result: unknown, meta: Record<string, unknown> = {}, more: Text[] = []) {
+  const a = answer(tool, DATA_NOTE, result, meta);
+  return {
+    content: [text(a.text), text(`meta (changes between calls, not part of the result): ${JSON.stringify(a.meta)}`), ...more],
+    structuredContent: { ...a.body, meta: a.meta } as Record<string, unknown>,
+  };
+}
+
+/**
  * DEA's tools. The decode tools are read-only. browse / interact / submit are DEA's hands and ask the policy first.
  * Registered in a fixed order so the tool list never shuffles between versions.
  */
@@ -60,6 +78,8 @@ export interface ServerOptions {
   launcher?: string[];
   /** state kept between server instances (HTTP makes one instance per request): the open browser for the hands tools */
   state?: ServerState;
+  /** how search and read reach the web (tests pass a recorded fetch, a fixed clock and a private cache folder) */
+  web?: { fetch?: typeof fetch; sleep?: (ms: number) => Promise<void>; now?: () => number; home?: string };
 }
 export interface ServerState {
   hands: HandsSession | null;
@@ -215,7 +235,11 @@ export function createServer(opts: ServerOptions = {}): McpServer {
     async ({ url, browser, to, section, ownAssets, referenceMs, diff, verifyBuild }) => {
       try {
         const r = await extract(url, { browser, to, section, ownAssets, referenceMs, noDiff: diff === false, verifyBuild });
-        return { content: [text(`${DATA_NOTE}\n\n${r.summary}\n\n${clip(r.extractMd)}\n\nFiles: ${r.out}\nRun id: ${r.runId}`)] };
+        const ledger = (await readLedger(join(r.dir, 'extract'))) ?? (await readLedger(r.dir));
+        const a = ledger ? ledgerAnswer(queryLedger(ledger, { detail: 'full' })) : { result: { error: 'no evidence ledger was written' }, meta: {} };
+        return structured('extract', { url, evidence: a.result }, { runId: r.runId, ...a.meta, files: r.out }, [
+          text(`${r.summary}\n\n${clip(r.extractMd)}\n\nFiles: ${r.out}\nRun id: ${r.runId}`),
+        ]);
       } catch (e) {
         return fail(e);
       }
@@ -294,8 +318,9 @@ export function createServer(opts: ServerOptions = {}): McpServer {
     },
     async ({ query, sources, limit, fresh }) => {
       try {
-        const r = await webSearch(query, { sources, limit, fresh });
-        return { content: [text(`${DATA_NOTE}\n\n${JSON.stringify(r, null, 2)}`)] };
+        const r = await webSearch(query, { sources, limit, fresh, ...opts.web });
+        const a = searchAnswer(r);
+        return structured('search', a.result, a.meta);
       } catch (e) {
         return fail(e);
       }
@@ -318,8 +343,9 @@ export function createServer(opts: ServerOptions = {}): McpServer {
     },
     async ({ url: u, maxChars, links, fresh }) => {
       try {
-        const r = await readUrl(u, { maxChars, links, fresh });
-        return { content: [text(`${DATA_NOTE}\n\n${JSON.stringify(r, null, 2)}`)] };
+        const r = await readUrl(u, { maxChars, links, fresh, ...opts.web });
+        const a = readAnswer(r);
+        return structured('read', a.result, a.meta);
       } catch (e) {
         return fail(e);
       }
@@ -396,7 +422,9 @@ export function createServer(opts: ServerOptions = {}): McpServer {
       try {
         const r = await inspectSite(url, { browser });
         const facts = r.run.facts.map((f) => ({ claim: f.claim, label: f.label, evidence: f.evidence.slice(0, 2), ...(f.why ? { why: f.why } : {}) }));
-        return { content: [text(`${r.summary}\n\nRun id: ${r.runId}\n\n${DATA_NOTE}`), text(JSON.stringify({ runId: r.runId, facts }, null, 1))] };
+        return structured('inspect_site', { url: r.run.meta.finalUrl, title: r.run.meta.title, facts }, { runId: r.runId }, [
+          text(`${r.summary}\n\nRun id: ${r.runId}`),
+        ]);
       } catch (e) {
         return fail(e);
       }
@@ -427,12 +455,9 @@ export function createServer(opts: ServerOptions = {}): McpServer {
         const lines = stack.map(
           (h) => `- ${h.name}${h.version ? ` ${h.version}` : ''} (${h.category}) [${h.label}] ${h.evidence[0]?.source}: ${h.evidence[0]?.pointer}`,
         );
-        return {
-          content: [
-            text(`${r.run.meta.title} (${r.run.meta.finalUrl})\n${lines.join('\n') || 'Nothing DEA recognises was found.'}\n\nRun id: ${r.runId}`),
-            text(JSON.stringify({ runId: r.runId, stack }, null, 1)),
-          ],
-        };
+        return structured('detect_stack', { url: r.run.meta.finalUrl, title: r.run.meta.title, stack }, { runId: r.runId }, [
+          text(`${r.run.meta.title} (${r.run.meta.finalUrl})\n${lines.join('\n') || 'Nothing DEA recognises was found.'}`),
+        ]);
       } catch (e) {
         return fail(e);
       }
@@ -464,7 +489,8 @@ export function createServer(opts: ServerOptions = {}): McpServer {
         if (which === 'evidence') {
           const ledger = (await readLedger(join(dir, 'extract'))) ?? (await readLedger(dir));
           if (!ledger) return fail(new Error('That run has no evidence ledger; call extract first (evidence.json is written by extract).'));
-          return { content: [text(`${DATA_NOTE}\n\n${clip(JSON.stringify(queryLedger(ledger, { id: finding, area, label, detail }), null, 1), 40_000)}`)] };
+          const a = ledgerAnswer(queryLedger(ledger, { id: finding, area, label, detail }));
+          return structured('report', { which, ledger: a.result }, { run: basename(dir), ...a.meta });
         }
         if (which !== 'report' && which !== 'json') {
           const md = await readFile(join(dir, `${which}.md`), 'utf8').catch(() => null);
@@ -474,11 +500,14 @@ export function createServer(opts: ServerOptions = {}): McpServer {
                 `That run has no ${which}.md; call ${({ design: 'decode_design', api: 'decode_api', assets: 'decode_assets', motion: 'decode_motion', extract: 'extract' } as Record<string, string>)[which] ?? 'decode_code'} first.`,
               ),
             );
-          return { content: [text(`${DATA_NOTE}\n\n${clip(md, 40_000)}`)] };
+          return structured('report', { which, text: clip(md, 40_000) }, { run: basename(dir) });
         }
         const doc = await readRun<RunDoc>(dir);
-        if (which === 'json') return { content: [text(clip(JSON.stringify(doc)))] };
-        return { content: [text(`${DATA_NOTE}\n\n${clip(renderReport(doc))}`)] };
+        if (which === 'json') {
+          const { stable, meta } = splitMeta(doc);
+          return structured('report', { which, run: stable }, { run: basename(dir), ...meta });
+        }
+        return structured('report', { which, text: clip(renderReport(doc)) }, { run: basename(dir) });
       } catch (e) {
         return fail(e);
       }
@@ -496,7 +525,7 @@ export function createServer(opts: ServerOptions = {}): McpServer {
     async ({ limit }) => {
       const runs = await listRuns(undefined, limit ?? 20);
       if (!runs.length) return { content: [text('No runs yet. Call inspect_site or decode_design first.')] };
-      return { content: [text(runs.map((r) => `${r.id}  ${r.kind}  ${r.title || r.url}`).join('\n'))] };
+      return structured('list_runs', { runs: runs.map((r) => ({ id: r.id, kind: r.kind, title: r.title || r.url })) });
     },
   );
 

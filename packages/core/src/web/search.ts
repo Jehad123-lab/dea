@@ -48,8 +48,13 @@ export async function search(query: string, o: SearchOptions = {}): Promise<Sear
   const ask = Math.max(limit, 10); // each source is asked for a few more than shown, so a later, larger question can reuse the cache
   const dir = webCacheHome(o.home);
   const ttl = o.ttlMs ?? 3_600_000;
-  const names = o.sources?.length ? o.sources : route(query, env);
   const all = new Map(sourceList(env).map((s) => [s.name, s]));
+  // the order the caller listed the sources in is not part of the question: DEA asks, and interleaves, in its own fixed order
+  const order = [...all.keys()];
+  const rank = (n: string) => (order.includes(n) ? order.indexOf(n) : order.length);
+  const names = [...new Set(o.sources?.length ? o.sources.map((n) => n.trim().toLowerCase()) : route(query, env))].sort(
+    (a, b) => rank(a) - rank(b) || a.localeCompare(b),
+  );
   const stamp = new Date(now()).toISOString();
   const reports: SourceReport[] = [];
   const perSource: WebResult[][] = [];
@@ -136,7 +141,7 @@ export async function search(query: string, o: SearchOptions = {}): Promise<Sear
   ]
     .filter(Boolean)
     .join(' ');
-  return { query, label, fetched_at: stamp, results: final, sources: reports, evidence };
+  return { query: query.trim(), label, fetched_at: stamp, results: final, sources: reports, evidence };
 }
 
 export interface ReadOptions {

@@ -6,12 +6,12 @@ import { launchBrowser } from '../src/browser/open.ts';
 import { domPageMap } from '../src/extract/pagemap.ts';
 import { serveDir } from '../src/extract/preview.ts';
 
-// A DOM page written for this test (four tall sections, one with a canvas inside an open shadow root): the page map of a page with
+// A DOM page written for this test (four tall sections, one with a canvas inside a CLOSED shadow root (shadowRoot answers null, querySelectorAll cannot see it)): the page map of a page with
 // no WebGL to record still says which section is in view at which scroll position.
 const PAGE = `<!doctype html><html><head><style>body{margin:0}section{height:520px;width:100%}</style></head><body>
 <section id="a"><h1>Alpha</h1></section><section id="b"><h2>Beta</h2><div id="host"></div></section>
 <section id="c"><h2>Gamma</h2></section><section id="d"><h2>Delta</h2></section>
-<script>const r=document.getElementById('host').attachShadow({mode:'open'});r.innerHTML='<canvas width=800 height=300 style="width:100%;height:300px"></canvas>';</script>
+<script>const r=document.getElementById('host').attachShadow({mode:'closed'});r.innerHTML='<canvas width=800 height=300 style="width:100%;height:300px"></canvas>';</script>
 </body></html>`;
 
 describe.skipIf(!process.env.DEA_E2E)('page map without WebGL (real browser)', () => {

@@ -7,6 +7,7 @@ import { basename, join } from 'node:path';
 import type { Browser } from 'playwright';
 import { decodeAssets } from '../assets/index.ts';
 import { launchBrowser, releaseBrowser, withSharedBrowser } from '../browser/open.ts';
+import type { PhaseInfo } from '../browser/phase.ts';
 import { type CacheStats, ContentCache, cacheKey, currentCache, fmtMb, withCache } from '../cache.ts';
 import { type Driver, driverText, type TraceDoc, traceWebGL } from '../debug/trace.ts';
 import { type DesignDoc, decodeDesign } from '../design/index.ts';
@@ -26,6 +27,7 @@ import { buildPageMap, fitScrollTape, pageMapMd, type ScrollTapeFit, tapeMoved }
 import { fitTape } from '../replay/tape.ts';
 import type { InspectOptions } from '../see/inspect.ts';
 import { currentTimings, overBudget, type StageTiming, Timings, type TimingsDoc, timed, withTimings } from '../timings.ts';
+import { type FullPageResult, type PageStopsResult, pageStopsMd, readFullPage, scorePageStops, stopsSheet } from './fullpage.ts';
 import {
   type HeroLayout,
   heroHtml,
@@ -57,6 +59,7 @@ import {
   setDragStep,
 } from './interaction.ts';
 import { type KitManifest, libraryAdd } from './library.ts';
+import { ownAssetsPage, pageIsWorthKeeping } from './pagelayer.ts';
 import { domPageMap } from './pagemap.ts';
 import {
   compareImages,
@@ -125,6 +128,8 @@ export interface ExtractOptions extends InspectOptions {
   tags?: string[];
   /** skip searching free sources for the techniques DEA recognises */
   noResearch?: boolean;
+  /** read only the first screen's DOM, not the whole page */
+  noPage?: boolean;
   /** your own screenshot of the original (PNG/JPEG), e.g. from a machine with a GPU, instead of DEA's */
   reference?: string;
   /** how long DEA watches the original for its reference screenshot (default 45 s) */
@@ -209,6 +214,8 @@ export interface ExtractResult {
   timings?: TimingsDoc;
   /** the interaction check: scripted pointer and scroll, site vs kit, and what each input does in the kit */
   interaction?: InteractionResult | null;
+  /** the whole page: the kit scored at each scroll stop against the original's screenshot there */
+  pageStops?: PageStopsResult | null;
   /** what the content cache served and kept in this run; absent with --no-cache */
   cache?: CacheStats & { dir: string; sizeBytes: number | null; capBytes: number };
   /** true in quick mode: a rough result */
@@ -274,7 +281,13 @@ async function referenceFor(
   const d = cache ? await cache.get('capture', key) : null;
   if (cache && d) {
     try {
-      const m = JSON.parse(await readFile(join(d, 'meta.json'), 'utf8')) as { atMs: number; loader: boolean; made: string; recordingError?: string };
+      const m = JSON.parse(await readFile(join(d, 'meta.json'), 'utf8')) as {
+        atMs: number;
+        loader: boolean;
+        made: string;
+        recordingError?: string;
+        phase?: PhaseInfo | null;
+      };
       const png = `data:image/png;base64,${(await readFile(join(d, 'ref.png'))).toString('base64')}`;
       const layout = JSON.parse(await readFile(join(d, 'layout.json'), 'utf8'));
       const recording = existsSync(join(d, 'capture.bin'))
@@ -292,7 +305,7 @@ async function referenceFor(
         loader: m.loader,
         layout,
         ...(record ? { recording, ...(m.recordingError ? { recordingError: m.recordingError } : {}) } : {}),
-        ...(interact ? { probe, interaction: interaction.length ? interaction : undefined } : {}),
+        ...(interact ? { probe, interaction: interaction.length ? interaction : undefined, phase: m.phase ?? null } : {}),
       };
     } catch {
       /* a damaged entry: take it again */
@@ -320,7 +333,14 @@ async function referenceFor(
       .put(
         'capture',
         key,
-        { url, atMs: r.atMs, loader: r.loader, made: new Date().toISOString(), ...(r.recordingError ? { recordingError: r.recordingError } : {}) },
+        {
+          url,
+          atMs: r.atMs,
+          loader: r.loader,
+          made: new Date().toISOString(),
+          ...(r.recordingError ? { recordingError: r.recordingError } : {}),
+          ...(r.phase ? { phase: r.phase } : {}),
+        },
         files,
       )
       .catch(() => {});
@@ -678,6 +698,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   let replayError: string | null = null;
   let probeReport: ProbeReport | null = null;
   let interaction: InteractionResult | null = null;
+  let pageStops: PageStopsResult | null = null;
   let layout: HeroLayout | null = null;
   let standin: Standin | null = null;
   const rgbHex = (c: string | null | undefined): string | null => {
@@ -743,6 +764,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
         }
       }
       let hasScene = false;
+      let fullPage: FullPageResult | null = null;
       let rebuildDoc: { pipeline: import('../replay/rebuild.ts').PipelineDoc; stats: RebuildStats } | null = null;
       if (recording) {
         say('recorded the WebGL frames behind that screenshot; building the render graph and the replay');
@@ -993,6 +1015,45 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
                 `first screen: ${Object.keys(layout.scroll.items).length} element(s) move with scroll (keyframes at ${layout.scroll.positions.join(', ')} px)`,
               );
           }
+          // the whole page, not only the first screen: every element read at a series of scroll stops (fresh load, settled).
+          // When no first-screen reading beat the plain heading, the page read can still stand on its own: it starts from no
+          // first-screen items and the page supplies all of them, kept only when the first screen is not worse than the heading
+          if (!quick && !opts.noPage && !opts.reference && !opts.section && ref.loader) {
+            // a page read behind a loading screen copies the loading screen at every stop: better no page layer than a wrong one
+            say('the original is still behind its loading screen: not reading the page below it (the read would copy the loader at every stop)');
+          }
+          if (!quick && !opts.noPage && !opts.reference && !opts.section && !ref.loader && !budgetSkip('whole-page read')) {
+            fullPage = await timed('read the whole page (scroll stops)', () =>
+              readFullPage(browser as Browser, url, vp, { shots: true, onProgress: say, reference: ref.loader ? null : ref.png }).catch((e) => {
+                say(`whole-page read failed: ${(e as Error).message.split('\n')[0]}`);
+                return null;
+              }),
+            );
+            if (fullPage && pageIsWorthKeeping(fullPage.layer)) {
+              const standalone = !layout;
+              const hero: HeroLayout = layout ?? { ...layoutCandidates[0], boxes: [], shapes: [], graphics: [] };
+              const withPage: HeroLayout = { ...hero, page: opts.ownAssets ? ownAssetsPage(fullPage.layer) : fullPage.layer };
+              if (standalone) {
+                await put('preview/index.html', previewHtml(mods, threeVersion, heroHtml(withPage)));
+                const sc = await render({ ...params, ...judge, background: rgbHex(withPage.background) ?? params.background });
+                // the plain heading has nothing below the first screen, so a slightly lower first screen is still the better kit
+                if (sc >= pickScore - 0.1) {
+                  layout = withPage;
+                  say(
+                    `no first-screen reading beat the plain heading; the whole-page read is kept for what it adds below the first screen (first screen ${Math.round(sc * 100)}% vs ${Math.round(pickScore * 100)}% for the heading)`,
+                  );
+                } else {
+                  say(
+                    `the whole-page read (${Math.round(sc * 100)}% on the first screen) is more than 10 points under the plain heading (${Math.round(pickScore * 100)}%); leaving it out`,
+                  );
+                  fullPage = null;
+                }
+              } else layout = withPage;
+            } else if (fullPage) {
+              say('the page has no more than its first screen to scroll through; keeping the first-screen kit');
+              fullPage = null;
+            }
+          }
           if (layout) {
             // ✔ the page's own background, read from the live page
             params = { ...params, background: rgbHex(layout.background) ?? params.background };
@@ -1221,6 +1282,58 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           referenceLoader: ref.loader,
           canvas: { start: canvasStart, final: canvasFinal },
         };
+        // per-stop score of the whole page: the kit scrolled to each stop the original was read at, against the original's screenshot there
+        if (layout?.page && fullPage?.shots.length && !budgetSkip('per-stop page score')) {
+          const doneP = mark('score the page at each scroll stop', doneScore);
+          try {
+            say(`scoring the kit at each of the ${fullPage.layer.stops.length} scroll stops`);
+            const shipsCanvas = params.program === '__replay' || params.program === '__rebuild';
+            const views = [...(shipsCanvas ? [] : ['']), ...(replay && recDoc ? ['__replay'] : []), ...(replay?.rebuild && rebuildDoc ? ['__rebuild'] : [])];
+            pageStops = await scorePageStops(browser as Browser, server.url, views, fullPage.layer.stops, fullPage.shots, vp, cmp, params, compareImages);
+            const labels = fullPage.layer.stops.map((s) => `${s.y}px`);
+            // only stops the kit was scored at can stand in the sheet (a view that draws a canvas scores an even sample)
+            const scoredAt = [...Array(fullPage.layer.stops.length).keys()].filter((i) =>
+              Object.values(pageStops?.stops[i]?.scores ?? {}).some((x) => typeof x === 'number'),
+            );
+            const universe = scoredAt.length ? scoredAt : [...Array(fullPage.layer.stops.length).keys()];
+            const n = universe.length;
+            const worst = universe
+              .map((i) => ({ i, v: Math.min(...Object.values(pageStops?.stops[i]?.scores ?? {}).filter((x): x is number => typeof x === 'number'), 1) }))
+              .sort((a, b) => a.v - b.v)
+              .slice(0, 2)
+              .map((x) => x.i);
+            // at most 8 columns: the first and last stops, the two the kit gets worst, and an even spread for the rest
+            const cols =
+              n <= 8
+                ? universe
+                : (() => {
+                    const pick = new Set([universe[0] as number, universe[n - 1] as number, ...worst]);
+                    for (const k of [...Array(8).keys()]) if (pick.size < 8) pick.add(universe[Math.round((k * (n - 1)) / 7)] as number);
+                    return [...pick].sort((a, b) => a - b);
+                  })();
+            const rowsP = [
+              { label: 'original', frames: fullPage.shots },
+              ...views.map((v) => ({
+                label: v === '__replay' ? 'replay' : v === '__rebuild' ? 'rebuild' : 'kit',
+                frames: pageStops?.kitShots[v || 'kit'] ?? [],
+              })),
+            ];
+            await put('preview/page-stops.jpg', await stopsSheet(cmp, rowsP, labels, cols));
+            await put(
+              'page-stops.json',
+              `${JSON.stringify({ stops: pageStops.stops, mean: pageStops.mean, page: { stops: fullPage.layer.stops, extent: fullPage.layer.extent, documentHeight: fullPage.layer.documentHeight, counts: fullPage.layer.counts, limits: fullPage.layer.limits, mechanism: fullPage.layer.mechanism, ratio: fullPage.layer.ratio } }, null, 2)}\n`,
+            );
+            say(
+              `page at each stop (similarity to the original, mean): ${Object.entries(pageStops.mean)
+                .map(([k, v]) => `${k === 'kit' ? 'kit' : k.replace('__', '')} ${v != null ? pct(v) : 'n/a'}`)
+                .join(', ')}`,
+            );
+          } catch (e) {
+            say(`per-stop score failed: ${(e as Error).message.split('\n')[0]}`);
+          } finally {
+            doneP();
+          }
+        }
         // live interaction: the same scripted pointer and scroll on the kit (replay and rebuild, running live) as on the site
         if (!quick && replay && 'interaction' in ref && ref.interaction?.length && !budgetSkip('interaction check')) {
           const doneI = mark('interaction check (scripted pointer + scroll, site vs kit)', doneScore);
@@ -1238,6 +1351,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
               rebuild: null,
               inputs: [],
               unexplained: probeReport?.unexplained ?? [],
+              phase: 'phase' in ref ? (ref.phase ?? null) : null,
             };
             for (const prog of ['__replay', '__rebuild'] as const) {
               if (prog === '__rebuild' && !replay.rebuild) continue;
@@ -1361,8 +1475,12 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     replay,
     replayError,
   });
-  const md = interaction ? `${mdBase.trimEnd()}\n\n${interactionMd(interaction)}\n` : mdBase;
+  const mdI = interaction ? `${mdBase.trimEnd()}\n\n${interactionMd(interaction)}\n` : mdBase;
+  const md = (layout as HeroLayout | null)?.page
+    ? `${mdI.trimEnd()}\n\n${pageStopsMd((layout as HeroLayout).page as NonNullable<HeroLayout['page']>, pageStops)}`
+    : mdI;
   // the evidence ledger: the same facts as data (label, measurement, coverage, limits, next probe), for agents and for the MCP
+  const layoutPage = (layout as HeroLayout | null)?.page ?? null;
   const ledger = await buildLedger({
     url,
     runId: w.id,
@@ -1372,6 +1490,29 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     diff: diff ? { start: diff.start, final: diff.final, referenceLoader: diff.referenceLoader, referenceAtMs: diff.referenceAtMs } : null,
     replay,
     interaction,
+    phase: interaction?.phase
+      ? {
+          aligned: interaction.phase.aligned,
+          refDiff: interaction.phase.refDiff,
+          bestDiff: interaction.phase.bestDiff,
+          waitedMs: interaction.phase.waitedMs,
+          note: interaction.phase.note,
+          stable: interaction.phase.settle.stable,
+          timeDriven: interaction.phase.settle.timeDriven,
+        }
+      : null,
+    pageStops: pageStops
+      ? {
+          views: pageStops.mean,
+          stops: pageStops.stops,
+          extent: layoutPage?.extent ?? 0,
+          documentHeight: layoutPage?.documentHeight ?? 0,
+          elements: layoutPage ? layoutPage.boxes.length + layoutPage.shapes.length + layoutPage.graphics.length : 0,
+          counts: layoutPage?.counts ?? { static: 0, fixed: 0, moving: 0 },
+          limits: layoutPage?.limits ?? [],
+          mechanism: layoutPage?.mechanism ?? 'native',
+        }
+      : null,
     build,
     gaps,
     map: replay?.map ?? domMapInfo,
@@ -1479,7 +1620,24 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   ].join('\n');
   w.emit({ type: 'run.finished', runId: w.id, dir: w.dir, summary, at: new Date().toISOString() });
   doneWrite();
-  return { runId: w.id, dir: w.dir, out, target, files, shaders: mods, diff, replay, build, gaps, techniques, extractMd: md, summary, quick, interaction };
+  return {
+    runId: w.id,
+    dir: w.dir,
+    out,
+    target,
+    files,
+    shaders: mods,
+    diff,
+    replay,
+    build,
+    gaps,
+    techniques,
+    extractMd: md,
+    summary,
+    quick,
+    interaction,
+    pageStops,
+  };
 }
 
 const pct = (x: number) => `${Math.round(x * 1000) / 10}%`;

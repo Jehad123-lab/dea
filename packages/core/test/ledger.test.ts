@@ -146,3 +146,87 @@ describe('evidence ledger', () => {
     expect(f.find((x) => x.id === 'boot.timeline')?.claim).toMatch(/3 shader program/);
   });
 });
+
+describe('evidence ledger: the whole page and the phase', () => {
+  const pageStops = (over = {}) => ({
+    views: { kit: 0.82 } as Record<string, number | null>,
+    stops: [
+      { y: 0, scores: { kit: 0.96 } },
+      { y: 720, scores: { kit: 0.7 } },
+      { y: 5040, scores: { kit: 0.24 } },
+    ],
+    extent: 5040,
+    documentHeight: 6000,
+    elements: 300,
+    counts: { static: 290, fixed: 2, moving: 1 },
+    limits: [] as string[],
+    mechanism: 'native',
+    ...over,
+  });
+  it('labels the whole-page read Verified, with the stops, the mean and what it does not cover', () => {
+    const f = buildFindings(base({ pageStops: pageStops() }));
+    const w = f.find((x) => x.id === 'page.whole');
+    expect(w?.label).toBe('Verified');
+    expect(w?.measurement).toMatch(/3 scroll stops/);
+    expect(w?.measurement).toMatch(/kit 82%/);
+    expect(w?.limitations.join(' ')).toMatch(/click, hover/);
+    expect(w?.coverage).toBe('complete');
+  });
+  it('names the stops where the kit does not match as an Unknown finding', () => {
+    const f = buildFindings(base({ pageStops: pageStops() }));
+    const weak = f.find((x) => x.id === 'page.weak');
+    expect(weak?.label).toBe('Unknown');
+    expect(weak?.claim).toMatch(/5040px/);
+    expect(weak?.claim).not.toMatch(/720px/);
+  });
+  it('a read cut short by its limits is partial coverage', () => {
+    const f = buildFindings(base({ pageStops: pageStops({ limits: ['the read stopped at 40000 px'] }) }));
+    expect(f.find((x) => x.id === 'page.whole')?.coverage).toBe('partial');
+  });
+  it('a phase that never matched is Unknown and says the numbers are not comparable', () => {
+    const f = buildFindings(
+      base({ phase: { aligned: false, refDiff: 40, bestDiff: 22, waitedMs: 90_000, note: 'never matched', stable: false, timeDriven: true } }),
+    );
+    const p = f.find((x) => x.id === 'input.phase');
+    expect(p?.label).toBe('Unknown');
+    expect(p?.claim).toMatch(/not comparable/);
+    expect(p?.limitations.join(' ')).toMatch(/time-driven/);
+  });
+  it('a matched phase is Verified', () => {
+    const f = buildFindings(base({ phase: { aligned: true, refDiff: 2, bestDiff: 2, waitedMs: 9000, note: 'matched', stable: true, timeDriven: false } }));
+    expect(f.find((x) => x.id === 'input.phase')?.label).toBe('Verified');
+  });
+  it('the whole-page read replaces the "page below the first screen" unknown', async () => {
+    const m = { mechanism: 'native', sections: 4, extent: 5000, stops: 9, canvases: 0, documentHeight: 6000, sceneChanges: 0 } as unknown as LedgerInput['map'];
+    const without = await buildLedger(base({ map: m }));
+    expect(without.unknowns.some((u) => /below the first screen/.test(u.topic))).toBe(true);
+    const withPage = await buildLedger(base({ map: m, pageStops: pageStops() }));
+    expect(withPage.unknowns.some((u) => /below the first screen/.test(u.topic))).toBe(false);
+  });
+});
+
+describe('evidence ledger: a whole-page read photographed behind a loading screen', () => {
+  it('is Unknown, not Verified', () => {
+    const f = buildFindings(
+      base({
+        diff: { start: 0.3, final: 0.3, referenceLoader: true, referenceAtMs: 45_000 },
+        pageStops: {
+          views: { kit: 0.29 },
+          stops: [
+            { y: 0, scores: { kit: 0.3 } },
+            { y: 720, scores: { kit: 0.28 } },
+          ],
+          extent: 720,
+          documentHeight: 1600,
+          elements: 40,
+          counts: { static: 40, fixed: 0, moving: 0 },
+          limits: [],
+          mechanism: 'native',
+        },
+      }),
+    );
+    const w = f.find((x) => x.id === 'page.whole');
+    expect(w?.label).toBe('Unknown');
+    expect(w?.claim).toMatch(/loading screen/);
+  });
+});
