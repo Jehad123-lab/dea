@@ -429,6 +429,10 @@ export interface HeroLayout {
     rich?: string;
     deco?: string;
     fstyle?: string;
+    /** ✔ rotation (degrees) of rotated text, and the box is then the unrotated one */
+    rot?: number;
+    /** ✔ writing mode of vertical text */
+    wm?: string;
     x: number;
     y: number;
     w: number;
@@ -602,7 +606,9 @@ export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text
         ...(b.opacity < 1 ? { opacity: String(b.opacity) } : {}),
         // a line that was one line stays one line (a different font must not wrap it onto its neighbour); a block of
         // several lines keeps its measured height and clips what overflows, as the site's line clamp or overflow did
-        ...(boxLines(b) <= 1 ? { whiteSpace: 'pre' } : { whiteSpace: 'pre-wrap', height: vh(b.h * 1.12 + 2), overflow: 'hidden' }),
+        ...(b.rot ? { transform: `rotate(${b.rot}deg)`, transformOrigin: '50% 50%' } : {}),
+        ...(b.wm ? { writingMode: b.wm } : {}),
+        ...(boxLines(b) <= 1 || b.wm ? { whiteSpace: 'pre' } : { whiteSpace: 'pre-wrap', height: vh(b.h * 1.12 + 2), overflow: 'hidden' }),
       },
     })),
   ];

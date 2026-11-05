@@ -380,8 +380,16 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
       if (r.width > 2 && r.height > 2 && r.bottom > 0 && r.right > 0 && r.top < H && r.left < W) {
         let op = 1;
         for (let p = el; p && p !== document.documentElement; p = p.parentElement) op *= +getComputedStyle(p).opacity;
+        // rotated text (a vertical label): the box the kit needs is the unrotated one, turned about its centre
+        let rot = 0, gx = r.left, gy = r.top, gw = r.width, gh = r.height;
+        {
+          let m = new DOMMatrix();
+          for (let q = el; q && q.nodeType === 1; q = q.parentElement) { const t = getComputedStyle(q).transform; if (t && t !== 'none') m = new DOMMatrix(t).multiply(m); }
+          const a = (Math.atan2(m.b, m.a) * 180) / Math.PI;
+          if (Math.abs(a) > 1 && el.offsetWidth > 0 && el.offsetHeight > 0) { rot = Math.round(a * 10) / 10; gw = el.offsetWidth; gh = el.offsetHeight; gx = r.left + r.width / 2 - gw / 2; gy = r.top + r.height / 2 - gh / 2; }
+        }
         if (op >= 0.05)
-          out.push({ __el: el, k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, tag: el.tagName.toLowerCase(), text: (el.innerText || own).trim().slice(0, 200), rich: el.children.length ? runs(el, 0).trim().slice(0, 1200) : '', deco: cs.textDecorationLine !== 'none' ? cs.textDecorationLine : '', fstyle: cs.fontStyle, x: r.left, y: r.top, w: r.width, h: r.height,
+          out.push({ __el: el, k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, tag: el.tagName.toLowerCase(), text: (el.innerText || own).trim().slice(0, 200), rich: el.children.length ? runs(el, 0).trim().slice(0, 1200) : '', deco: cs.textDecorationLine !== 'none' ? cs.textDecorationLine : '', fstyle: cs.fontStyle, x: gx, y: gy, w: gw, h: gh, ...(rot ? { rot } : {}), ...(cs.writingMode && cs.writingMode !== 'horizontal-tb' ? { wm: cs.writingMode } : {}),
             fontFamily: cs.fontFamily, fontSize: parseFloat(cs.fontSize), fontWeight: cs.fontWeight, letterSpacing: cs.letterSpacing,
             lineHeight: cs.lineHeight, color: cs.color, textTransform: cs.textTransform, textAlign: cs.textAlign, opacity: Math.round(op * 100) / 100 });
         return;
@@ -481,7 +489,9 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     if (el.tagName.toLowerCase() === 'video') {
       // a background or hero video: the kit plays the same file (by URL, for study); a blob: stream falls back to its poster
       const vs = el.currentSrc || el.src;
-      const kind = /^https?:/.test(vs) ? 'video' : /^https?:/.test(el.poster || '') ? 'img' : null;
+      // a video that has not shown a frame yet (lazy, not started) is its poster picture on the page: the kit shows the same still
+      const stillPoster = /^https?:/.test(el.poster || '') && (el.readyState < 2 || (el.paused && el.currentTime < 0.05));
+      const kind = stillPoster ? 'img' : /^https?:/.test(vs) ? 'video' : /^https?:/.test(el.poster || '') ? 'img' : null;
       if (!kind) continue;
       graphics.push({ k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, kind, x: r.left, y: r.top, w: r.width, h: r.height, src: kind === 'video' ? vs : el.poster, poster: el.poster || undefined, t: kind === 'video' && !el.paused ? Math.round(el.currentTime * 10) / 10 : undefined, fit: getComputedStyle(el).objectFit, media: bigG, opacity: op });
       continue;

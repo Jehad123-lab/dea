@@ -208,4 +208,17 @@ describe('text boxes and video layers of the first screen', () => {
     l.graphics = [{ k: 'v', zp: [0], o: 1, kind: 'video', x: 0, y: 0, w: 500, h: 300, src: 'https://x.test/a.webm', t: 7.5, opacity: 1 }];
     expect(heroStyles(l).find((i) => i.k === 'v')).toMatchObject({ vt: 7.5 });
   });
+  it('turns rotated and vertical text the way the site had it', () => {
+    const l = layout();
+    const b = l.boxes[0];
+    l.boxes = [
+      { ...b, k: 'r', rot: -90, h: 20 },
+      { ...b, k: 'v', wm: 'vertical-rl', h: 200 },
+    ];
+    const s = heroStyles(l);
+    expect(s.find((i) => i.k === 'r')?.style.transform).toBe('rotate(-90deg)');
+    const v = s.find((i) => i.k === 'v');
+    expect(v?.style.writingMode).toBe('vertical-rl');
+    expect(v?.style.height).toBeUndefined();
+  });
 });
