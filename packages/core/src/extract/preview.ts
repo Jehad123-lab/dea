@@ -360,6 +360,8 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     if (skip && el !== root && (el.getAttribute('role') === 'progressbar' || LOADER.test(String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className) + ' ' + el.id))) return;
     let cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return;
+    // text kept only for screen readers (clipped to nothing) is not on the page
+    if (/rect\\(\\s*[01](px)?[ ,]/.test(cs.clip) || /inset\\(\\s*(50|100)%/.test(cs.clipPath)) return;
     const own = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' ').replace(/\\s+/g, ' ').trim()
     || (el.tagName === 'INPUT' && /^(button|submit|reset)$/.test(el.type) ? String(el.value || '').trim() : '');
     if (own && !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(el.tagName)) {
@@ -481,7 +483,7 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
       const vs = el.currentSrc || el.src;
       const kind = /^https?:/.test(vs) ? 'video' : /^https?:/.test(el.poster || '') ? 'img' : null;
       if (!kind) continue;
-      graphics.push({ k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, kind, x: r.left, y: r.top, w: r.width, h: r.height, src: kind === 'video' ? vs : el.poster, poster: el.poster || undefined, fit: getComputedStyle(el).objectFit, media: bigG, opacity: op });
+      graphics.push({ k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, kind, x: r.left, y: r.top, w: r.width, h: r.height, src: kind === 'video' ? vs : el.poster, poster: el.poster || undefined, t: kind === 'video' && !el.paused ? Math.round(el.currentTime * 10) / 10 : undefined, fit: getComputedStyle(el).objectFit, media: bigG, opacity: op });
       continue;
     }
     if (el.tagName.toLowerCase() === 'img') {
@@ -495,6 +497,21 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
       const cs = getComputedStyle(a[k]);
       b[k].setAttribute('style', PAINT.map((p) => p + ':' + cs.getPropertyValue(p)).join(';'));
       b[k].removeAttribute('class');
+    }
+    // an icon that points at a shared sprite (<use href="#id">) is nothing on its own: bring the referenced shapes along
+    const NS = 'http://www.w3.org/2000/svg';
+    let defs = null;
+    for (const u of clone.querySelectorAll('use')) {
+      const ref = u.getAttribute('href') || u.getAttribute('xlink:href') || '';
+      if (ref[0] !== '#' || ref.length < 2) continue;
+      const id = ref.slice(1);
+      if (Array.from(clone.querySelectorAll('[id]')).some((n) => n.id === id)) continue;
+      const target = document.getElementById(id);
+      if (!target) continue;
+      defs ??= clone.insertBefore(document.createElementNS(NS, 'defs'), clone.firstChild);
+      const copy = target.cloneNode(true);
+      for (const n of [copy, ...copy.querySelectorAll('*')]) n.removeAttribute('class');
+      defs.appendChild(copy);
     }
     clone.setAttribute('width', '100%');
     clone.setAttribute('height', '100%');

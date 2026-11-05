@@ -185,3 +185,27 @@ describe('scroll keyframes of the first screen', () => {
     expect(scrollSpacer(layout())).toBe(0);
   });
 });
+
+describe('text boxes and video layers of the first screen', () => {
+  it('keeps a one-line text on one line and clips a several-line block at its measured height', () => {
+    const l = layout();
+    const b = l.boxes[0];
+    l.boxes = [
+      { ...b, k: 'one', fontSize: 16, lineHeight: '20px', h: 20 },
+      { ...b, k: 'many', fontSize: 16, lineHeight: '20px', h: 80 },
+    ];
+    const s = heroStyles(l);
+    const one = s.find((i) => i.k === 'one');
+    const many = s.find((i) => i.k === 'many');
+    expect(one?.style.whiteSpace).toBe('pre');
+    expect(one?.style.height).toBeUndefined();
+    expect(many?.style.whiteSpace).toBe('pre-wrap');
+    expect(many?.style.overflow).toBe('hidden');
+    expect(many?.style.height).toBeDefined();
+  });
+  it('starts a playing video where it was when the first screen was read', () => {
+    const l = layout();
+    l.graphics = [{ k: 'v', zp: [0], o: 1, kind: 'video', x: 0, y: 0, w: 500, h: 300, src: 'https://x.test/a.webm', t: 7.5, opacity: 1 }];
+    expect(heroStyles(l).find((i) => i.k === 'v')).toMatchObject({ vt: 7.5 });
+  });
+});

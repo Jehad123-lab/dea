@@ -483,6 +483,8 @@ export interface HeroLayout {
     o?: number;
     kind: 'svg' | 'img' | 'video' | 'placeholder';
     poster?: string;
+    /** where a playing video was (seconds) when the first screen was read: the kit starts it there */
+    t?: number;
     media?: boolean;
     x: number;
     y: number;
@@ -549,7 +551,17 @@ export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text
       : gr.kind === 'img'
         ? { k: gr.k, _z: gr.zp, _o: gr.o, _r: 1, tag: 'img', text: '', html: gr.src ?? '', style: { ...place(gr), objectFit: gr.fit || 'fill' } }
         : gr.kind === 'video'
-          ? { k: gr.k, _z: gr.zp, _o: gr.o, _r: 1, tag: 'video', text: '', html: gr.src ?? '', style: { ...place(gr), objectFit: gr.fit || 'fill' } }
+          ? {
+              k: gr.k,
+              _z: gr.zp,
+              _o: gr.o,
+              _r: 1,
+              tag: 'video',
+              text: '',
+              html: gr.src ?? '',
+              ...(gr.t ? { vt: gr.t } : {}),
+              style: { ...place(gr), objectFit: gr.fit || 'fill' },
+            }
           : {
               k: gr.k,
               _z: gr.zp,
@@ -746,7 +758,7 @@ ${scrollScript(l) ? "  useEffect(() => { const s = document.createElement('scrip
         const Tag = it.tag;
         // an image by URL, an inline SVG read from the page, or a text block
         if (Tag === 'img') return <img key={i} data-dea-k={it.k} src={it.html} alt="" style={it.style} />;
-        if (Tag === 'video') return <video key={i} data-dea-k={it.k} src={it.html} autoPlay muted loop playsInline style={it.style} />;
+        if (Tag === 'video') return <video key={i} data-dea-k={it.k} src={it.html} autoPlay muted loop playsInline onLoadedMetadata={(e) => { if (it.vt && e.currentTarget.duration > it.vt) e.currentTarget.currentTime = it.vt; }} style={it.style} />;
         if (it.html) return <Tag key={i} data-dea-k={it.k} style={it.style} dangerouslySetInnerHTML={{ __html: it.html }} />;
         return (
           <Tag key={i} data-dea-k={it.k} data-dea-h="0" style={it.style}>

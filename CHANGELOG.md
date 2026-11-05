@@ -82,6 +82,29 @@ The first release: decode a website with evidence, use what comes out, and let A
   measures 8 live frames, patches the capture (`hold: "last"`) when they flip and measures again.
 - The capture cache is keyed by the recorder's source, so a changed recorder never serves old probe data.
 
+### General engine (round 6: other public sites)
+
+Found by running other sites; each rule is general, none is written for one site.
+
+- A bot-protection wall (PerimeterX, Cloudflare, DataDome, Akamai, Imperva, Kasada, captcha pages) is detected from the
+  response status and headers, the page's own words and its challenge markers, and DEA stops with `Blocked by bot
+  protection (<vendor>)` and a non-zero exit. It never tries to get past the wall, never solves a captcha, and writes no
+  kit, so a block page is not mistaken for the site. A site that only loads a protection script is not called a wall.
+- Paint order inside positioned elements: content of a positioned element without a z-index paints with that element, not
+  below it (a white button's label no longer hides under the button; the nav bar no longer covers its own links).
+- The capture cache key now includes the first-screen reader, so a reader change takes the capture again instead of
+  reusing an older reading.
+- A first-screen colour written in a newer colour space (oklch, oklab, lab, `color()`) is read back as sRGB, so the page
+  background no longer falls back to a design token.
+- Inline SVG icons that point at a shared sprite (`<use href="#id">`) are rebuilt with the shapes they reference.
+- Button-like inputs (`type=button|submit|reset`) put their `value` on the page as text.
+- Text that was one line stays one line; a block of several lines keeps its measured height and clips as the site did.
+- Text kept only for screen readers (clipped to nothing) is not drawn.
+- A playing hero video starts the kit's `<video>` at the second it had reached when the first screen was read.
+- First-screen `<video>`, large images and CSS `url()` backgrounds become layers; fonts are emitted rule by rule with
+  weight, style and `unicode-range`; text runs keep bold, colour and underline; box shadows and the page background
+  (sampled at nine points) are kept.
+
 ### Act and connect
 
 - Hands (`dea session`, MCP `browse` / `interact` / `submit`): a browser that stays open, with a policy file; submits

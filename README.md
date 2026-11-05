@@ -638,6 +638,13 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
 - `dea trace` reads values when WebGL receives them; on three.js sites the line that changes `.value` runs earlier in the
   frame, so "set by" points at the frame loop's render call, and driver kinds are correlations (Inferred).
 - Pages behind a login are not decoded; Hands never automates logins or payments.
+- Sites behind bot protection (PerimeterX, DataDome, Cloudflare challenges, ...) are reported as `Blocked by bot
+  protection` and not captured. DEA does not bypass protection or solve captchas.
+- A page that changes with time (a playing hero video, a colour that cycles, an intro) is read at one moment and the
+  kit's copy runs on its own clock, so the page score of such a site moves from run to run; look at the side-by-side
+  image, not only the number.
+- Extract reads the first screen. Content further down the page, other routes, and canvas drawing that starts empty (a
+  whiteboard) are not rebuilt.
 - DEA Hub: apps that refuse automatic OAuth sign-up (GitHub, Slack, Figma, Asana, HubSpot, Box) need your own OAuth
   client id or a token. Hub runs locally over stdio; a remote URL for it is Phase 9.
 - `investigate` without a language model writes claims and evidence, not prose; its planner is keyword rules.
