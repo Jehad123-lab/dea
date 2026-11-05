@@ -9,7 +9,7 @@ import { currentCache } from '../cache.ts';
 import { pullRecording, REPLAY_CAPTURE_SCRIPT, type Recording, recordFrames, recordTape, releaseFrames } from '../replay/capture.ts';
 import { type ProbeData, probeInputs } from '../replay/inputs.ts';
 import { currentTimings, timed } from '../timings.ts';
-import type { ShaderModule } from './generate.ts';
+import { type ShaderModule, threeRevision } from './generate.ts';
 import { runInteractionWithState, type StepState } from './interaction.ts';
 import type { Params } from './research.ts';
 
@@ -48,7 +48,7 @@ export async function serveDir(root: string): Promise<{ url: string; close: () =
 
 /** preview/index.html: the rebuild's first screen (tokens + heading + one shader program), driven by parameters in the URL hash. */
 export function previewHtml(mods: ShaderModule[], threeVersion: string, hero: string | null = null): string {
-  const v = threeVersion.replace(/^r/, '');
+  const v = threeRevision(threeVersion);
   return `<!doctype html>
 <html lang="en">
 <head>

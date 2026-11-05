@@ -38,6 +38,7 @@ import {
   type Standin,
   shaderModule,
   type Target,
+  threeRevision,
   tokenFiles,
   withScroll,
 } from './generate.ts';
@@ -495,7 +496,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   };
   const title = designRun?.meta?.title ?? url;
   const heading = (designRun?.page?.headings?.find((h) => h.level === 1)?.text ?? title).slice(0, 80);
-  const threeVersion = String(design?.stack?.find((s) => /three/i.test(s.name))?.version ?? '170').replace(/^r/, '');
+  const threeVersion = threeRevision(design?.stack?.find((s) => /three/i.test(s.name))?.version);
 
   say('writing design tokens');
   let tree = motion?.gsap?.tree ?? [];

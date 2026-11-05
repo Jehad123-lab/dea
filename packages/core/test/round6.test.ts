@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type HeroLayout, heroHtml, heroStyles, scrollScript, scrollSpacer, withScroll } from '../src/extract/generate.ts';
+import { type HeroLayout, heroHtml, heroStyles, scrollScript, scrollSpacer, threeRevision, withScroll } from '../src/extract/generate.ts';
 import { diffStates, type StepState } from '../src/extract/interaction.ts';
 import { holdsOutOfSample } from '../src/replay/inputs.ts';
 
@@ -220,5 +220,17 @@ describe('text boxes and video layers of the first screen', () => {
     const v = s.find((i) => i.k === 'v');
     expect(v?.style.writingMode).toBe('vertical-rl');
     expect(v?.style.height).toBeUndefined();
+  });
+});
+
+describe('three.js revision', () => {
+  it('reads a servable revision out of what sites report', () => {
+    expect(threeRevision('170')).toBe('170');
+    expect(threeRevision('r161')).toBe('161');
+    expect(threeRevision('0.178.0')).toBe('178');
+    expect(threeRevision('178 - modified by a studio')).toBe('178');
+    expect(threeRevision('0.178 - modified by a studio.0')).toBe('178');
+    expect(threeRevision(undefined)).toBe('170');
+    expect(threeRevision('dev')).toBe('170');
   });
 });

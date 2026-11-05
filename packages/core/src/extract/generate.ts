@@ -502,6 +502,16 @@ export interface HeroLayout {
 }
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
+
+/**
+ * The three.js revision number out of whatever a site reports: "170", "r170", "0.170.0", or a fork's own words such as
+ * "178 - modified by <studio>" (which is not a version npm or a CDN can serve). 170 when nothing in it looks like one.
+ */
+export function threeRevision(v: unknown): string {
+  const s = String(v ?? '');
+  const m = /^\s*r?0\.(\d{2,3})(?:\.|\b)/.exec(s) ?? /(\d{2,3})/.exec(s);
+  return m?.[1] ?? '170';
+}
 /** How many lines a measured text block was set in (its height over its line height). */
 const boxLines = (b: { h: number; fontSize: number; lineHeight: string }): number => {
   const lh = /px$/.test(b.lineHeight)
@@ -881,8 +891,8 @@ export function projectFiles(
   const m = o.mods[0];
   const files: Record<string, string> = {};
   // the editable rebuild needs three.js r170 or newer (render targets around existing framebuffers, per-material blend colour)
-  const minor = Number(o.threeVersion.replace(/^r/, '').replace(/^0\./, '').split('.')[0]) || 170;
-  const three = `^0.${o.rebuild ? Math.max(170, minor) : o.threeVersion.replace(/^r/, '')}.0`;
+  const minor = Number(threeRevision(o.threeVersion));
+  const three = `^0.${o.rebuild ? Math.max(170, minor) : threeRevision(o.threeVersion)}.0`;
   if (target === 'vanilla') {
     files['scene.js'] =
       `// A minimal three.js scene that runs the site's main shader program.\nimport * as THREE from 'three';\n${m ? `import { createMaterial, update } from './${m.file}';` : ''}\n${o.standin ? "import { createParticles } from './standins/particles.js';\n" : ''}\nexport function mountScene(el = document.body) {\n${m ? sceneBody(o.mods, '  ') : '  // no custom shader program was found on the site'}\n${m && o.standin ? `  scene.add(createParticles(THREE, ${JSON.stringify({ spread: o.standin.spread, x: o.standin.x, y: o.standin.y, color: o.standin.color })})); // ≈ technique stand-in, not the site's code\n` : ''}  return () => { renderer.setAnimationLoop(null); window.removeEventListener('resize', onResize); renderer.dispose(); el.removeChild(renderer.domElement); };\n}\n`;
@@ -912,7 +922,7 @@ export function projectFiles(
 // Textures: upload them to your Framer project (or any https URL) and paste the URLs in the property panel.
 import { useEffect, useRef } from "react"
 import { addPropertyControls, ControlType } from "framer"
-import * as THREE from "https://esm.sh/three@0.${o.threeVersion.replace(/^r/, '')}.0"
+import * as THREE from "https://esm.sh/three@0.${threeRevision(o.threeVersion)}.0"
 
 const vertexShader = \`${m ? esc(m.vertex) : ''}\`
 const fragmentShader = \`${m ? esc(m.fragment) : ''}\`
