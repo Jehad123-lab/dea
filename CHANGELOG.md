@@ -100,7 +100,13 @@ Found by running other sites; each rule is general, none is written for one site
 - Button-like inputs (`type=button|submit|reset`) put their `value` on the page as text.
 - Text that was one line stays one line; a block of several lines keeps its measured height and clips as the site did.
 - Text kept only for screen readers (clipped to nothing) is not drawn.
-- A playing hero video starts the kit's `<video>` at the second it had reached when the first screen was read.
+- A playing hero video starts the kit's `<video>` at the second it had reached when the first screen was read; a video
+  that had not shown a frame yet is drawn as its poster picture.
+- Rotated text (a vertical label) is placed as its unrotated box turned about its centre; `writing-mode` is kept.
+- Text a mask hides (a rolling label keeps a second copy of each letter behind its overflow clip) is read as what shows.
+- The three.js revision is read out of whatever a site reports (`170`, `r170`, `0.170.0`, or a fork's own words such as
+  `178 - modified by <studio>`), so the rebuild preview and the project point at a version a CDN serves. Before this, a
+  fork's version string made the editable rebuild of one heavy site draw nothing (canvas 27.9%); after it, 98.9%.
 - First-screen `<video>`, large images and CSS `url()` backgrounds become layers; fonts are emitted rule by rule with
   weight, style and `unicode-range`; text runs keep bold, colour and underline; box shadows and the page background
   (sampled at nine points) are kept.

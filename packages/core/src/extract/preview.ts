@@ -419,7 +419,28 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
   };
   const opacityOf = (el) => { let op = 1; for (let p = el; p && p !== document.documentElement; p = p.parentElement) op *= +getComputedStyle(p).opacity; return Math.round(op * 100) / 100; };
   const hiddenUp = (el) => { for (let p = el; p && p !== document.documentElement; p = p.parentElement) { const cs = getComputedStyle(p); if (cs.display === 'none' || cs.visibility === 'hidden') return true; if (p !== root && LOADER.test(String(p.className && p.className.baseVal !== undefined ? p.className.baseVal : p.className) + ' ' + p.id)) return true; } return false; };
-  const boxes = out.filter((b, i) => { const el = b.__el; delete b.__el; return !el || shown(el, el.getBoundingClientRect()) >= 0.5; });
+  const boxes = out.filter((b, i) => {
+    const el = b.__el;
+    delete b.__el;
+    if (!el) return true;
+    if (shown(el, el.getBoundingClientRect()) < 0.5) return false;
+    // text a mask hides (a rolling label keeps a second copy of each letter behind its overflow clip) is not on the page: keep what shows
+    try {
+      const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let vis = '', all = '';
+      for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+        const t = n.textContent.replace(/\\s+/g, ' ');
+        all += t;
+        if (!t.trim()) { vis += t; continue; }
+        const rg = document.createRange();
+        rg.selectNodeContents(n);
+        const rr = rg.getBoundingClientRect();
+        if (rr.width > 0 && n.parentElement && shown(n.parentElement, rr) >= 0.5) vis += t;
+      }
+      if (vis.trim() && vis.trim() !== all.trim()) { b.text = vis.trim().slice(0, 200); b.rich = ''; }
+    } catch {}
+    return true;
+  });
   // the first screen's flat shapes (pills, buttons, badges): a background colour or gradient, a border, rounded corners
   const shapes = [];
   const all = root.querySelectorAll('*');
