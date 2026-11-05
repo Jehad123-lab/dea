@@ -50,6 +50,7 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
       };
       infos.set(gl, I);
       CAP.contexts.push(new WeakRef(gl));
+      if (CAP.tCanvas == null) CAP.tCanvas = Math.round(performance.now());
     }
     return I;
   };
@@ -507,8 +508,14 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
   // the scroll signal: the page's own scroll when it can scroll, else the sum of the wheel it was given (a fixed-stage site that
   // moves its scene by wheel events scrolls nothing, and scrollY would stay 0)
   CAP.wheel = 0;
+  CAP.moved = false;
+  CAP.links = []; CAP.tCanvas = null; CAP.tDraw = null; CAP.tArm = null;
   try { addEventListener('wheel', (e) => { CAP.wheel = Math.max(0, CAP.wheel + e.deltaY); }, { capture: true, passive: true }); } catch (e) {}
-  const scrollSignal = () => (document.documentElement.scrollHeight > innerHeight + 2 ? Math.round(scrollY) : Math.round(CAP.wheel));
+  // a page scrolls natively once its own scroll position has moved by a real amount (a page whose document is a few px taller than the
+  // window, or that moves its content by a transform, answers the wheel without scrolling: the sum of the wheel is its signal)
+  try { addEventListener('scroll', () => { if (scrollY >= Math.max(40, innerHeight * 0.2)) CAP.moved = true; }, { capture: true, passive: true }); } catch (e) {}
+  const scrollSignal = () => (CAP.moved ? Math.round(scrollY) : Math.round(CAP.wheel));
+  CAP.signal = scrollSignal;
 
   // ---- state diff: what the page changed during a window (uniforms, CPU uploads, texture uploads, draw sizes) -------------
   // Used by the interaction check, on the site and on the kit with the same script, so what moved on one and not on the other
@@ -562,7 +569,7 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
     const varying = []; for (const [k, s] of D.sig) if (s.size > 1) varying.push({ draw: k, sizes: [...s].slice(0, 6) });
     return { frames: D.frames, draws: D.draws, verts: D.verts, uniforms, uploads, tex, varying, ms: Math.round(performance.now() - D.t0) };
   };
-  CAP.probeStart = () => { CAP.probe = { t0: performance.now(), cur: {}, series: {}, env: [], phases: [], mx: -1, my: -1, mats: new Map(), nkeys: 0 }; CAP.wheel = 0; return true; };
+  CAP.probeStart = () => { CAP.probe = { t0: performance.now(), cur: {}, series: {}, env: [], phases: [], mx: -1, my: -1, mats: new Map(), nkeys: 0 }; CAP.wheel = 0; CAP.moved = false; return true; };
   CAP.probeStop = () => { const P = CAP.probe; CAP.probe = null; return P ? { series: P.series, env: P.env, phases: P.phases } : null; };
   CAP.probeMark = (name) => { if (CAP.probe) CAP.probe.phases.push([name, CAP.probe.env.length]); return true; };
   CAP.probeFrames = () => (CAP.probe ? CAP.probe.env.length : -1);
@@ -643,7 +650,7 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
         if (state && state.readFb && R.pendFb.has(state.readFb)) { R.pendFb.delete(state.readFb); snapFbBound(I, I.v2 ? 0x8ca8 : 0x8d40, state.readFb); }
         if (state && state.vao && R.pendVao.has(state.vao)) { R.pendVao.delete(state.vao); snapVaoBound(I, state.vao); }
       } catch (e) { err('bound state: ' + e); }
-      R.frames.push({ state, cmds: R.cmds, t0: performance.now(), ts: lastTs, ptr: CAP.ptr ? [CAP.ptr[0], CAP.ptr[1]] : null });
+      R.frames.push({ state, cmds: R.cmds, t0: performance.now(), ts: lastTs, ptr: CAP.ptr ? [CAP.ptr[0], CAP.ptr[1]] : null, sc: scrollSignal() });
     }
   };
 
@@ -661,6 +668,7 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
   CAP.release = () => { CAP.hold = false; const h = held.splice(0); for (const cb of h) raf0.call(window, cb); };
   CAP.arm = (opts) => {
     for (const r of CAP.contexts) { const gl = r.deref(); if (!gl) continue; for (const n of ['EXT_color_buffer_float', 'EXT_color_buffer_half_float', 'WEBGL_color_buffer_float']) { try { call(gl, 'getExtension', n); } catch (e) {} } }
+    CAP.tArm = Math.round(performance.now());
     CAP.opts = Object.assign({ frames: 2, hold: true }, opts || {}); CAP.state = 'armed'; CAP.errors.length = 0; return true; };
 
   // ---- wrapping -------------------------------------------------------------------------------------------------------
@@ -689,7 +697,8 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
     if (CAP.diff) { try { diffNote(I, name, a, ret); } catch (e) {} }
     switch (name) {
       case 'drawArrays': case 'drawElements': case 'drawArraysInstanced': case 'drawElementsInstanced': case 'drawRangeElements':
-        I.draws++; if (CAP.probe) { try { probeDraw(I); } catch (e) {} } break;
+        I.draws++; if (CAP.tDraw == null) CAP.tDraw = Math.round(performance.now()); if (CAP.probe) { try { probeDraw(I); } catch (e) {} } break;
+      case 'linkProgram': if (CAP.links.length < 400) CAP.links.push(Math.round(performance.now())); break;
       case 'useProgram': I.curProg = a[0] ? keep(a[0]) : 0; break;
       case 'getUniformLocation': if (ret) I.locs.set(ret, { p: keep(a[0]), n: a[1] }); break;
       case 'getExtension': if (ret) { I.exts.set(a[0], ret); wrapExt(I, a[0], ret); } break;
@@ -778,9 +787,10 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
       canvas: { w: gl.drawingBufferWidth, h: gl.drawingBufferHeight, cssW: b.width, cssH: b.height, x: b.left, y: b.top,
         style: { position: cs.position, zIndex: cs.zIndex, opacity: cs.opacity, mixBlendMode: cs.mixBlendMode, filter: cs.filter, background: cs.backgroundColor } },
       dpr: devicePixelRatio, attrs, extensions: [...I.exts.keys()],
-      snap: R.snap, frames: R.frames.map((f) => ({ state: f.state, cmds: f.cmds, ms: f.ms || 0, ts: f.ts, ptr: f.ptr })),
+      snap: R.snap, frames: R.frames.map((f) => ({ state: f.state, cmds: f.cmds, ms: f.ms || 0, ts: f.ts, ptr: f.ptr, sc: f.sc })),
       errors: CAP.errors.slice(), overflow: !!R.overflow, binBytes: bin.size, url: location.href, at: new Date().toISOString(),
       contexts: CAP.contexts.length,
+      boot: { canvas: CAP.tCanvas, draw: CAP.tDraw, links: CAP.links.slice(), armed: CAP.tArm },
     };
     // pack the binary
     const all = new Uint8Array(bin.size); let o = 0;
@@ -866,6 +876,118 @@ export async function recordTape(
   if (opts.drag) await page.mouse.up().catch(() => {});
   while (Date.now() - t0 < limit && (await stateOf()) !== 'done') await page.waitForTimeout(150);
   return { ok: true, move, still };
+}
+
+/** One stop of the scroll tape: the scroll signal there, the recorded frames that belong to it (indices within the tape), the DOM then. */
+export interface ScrollStop {
+  /** the scroll signal: the page's scrollY once it scrolls natively, else the sum of the wheel it was given (px) */
+  sc: number;
+  /** the sum of the wheel it was given by then (px): the one input a kit can be given the same way as the site */
+  wh: number;
+  /** first and last tape frame of this stop; the last one is the settled picture */
+  f0: number;
+  f1: number;
+  /** what the page looked like in the DOM at this stop (the sections in view, the scroll metrics) */
+  dom?: StopDom | null;
+}
+
+export interface StopDom {
+  scrollY: number;
+  docHeight: number;
+  viewport: [number, number];
+  /** sections (landmarks) with the share of the window they cover, largest first */
+  inView: Array<{ sel: string; heading: string; share: number }>;
+  /** visible canvases: selector and the share of the window */
+  canvases: Array<{ sel: string; share: number }>;
+}
+
+export interface ScrollTapeRecording {
+  /** frames added after the rest and pointer-tape frames */
+  frames: number;
+  /** ordered as recorded: the stops going down, then home (scroll 0 again, which puts back the state the site had at the top) */
+  stops: ScrollStop[];
+  /** the page scrolls natively, or only answers the wheel */
+  mechanism: 'native' | 'virtual';
+  step: number;
+  settle: number;
+}
+
+/** What a section and the canvases in view are, read at a scroll stop (runs in the page). */
+export const STOP_DOM = `(() => {
+  const vw = innerWidth, vh = innerHeight;
+  const sel = (el) => { if (el.id) return '#' + el.id; const c = (typeof el.className === 'string' ? el.className : '').trim().split(/\\s+/).filter(Boolean).slice(0, 2).join('.'); return el.tagName.toLowerCase() + (c ? '.' + c : ''); };
+  const share = (r) => { const w = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0)); const h = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0)); return (w * h) / (vw * vh); };
+  const heading = (el) => { const h = el.querySelector('h1, h2, h3, [role=heading]'); return h ? (h.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80) : ''; };
+  const big = (el) => { const r = el.getBoundingClientRect(); return r.width >= vw * 0.5 && r.height >= vh * 0.2; };
+  const set = new Set();
+  for (const el of document.querySelectorAll('header, nav, main > *, section, footer, [data-section], article, body > *, #root > *, #app > *, #__next > *')) if (big(el) && !/^(script|style|canvas|noscript)$/i.test(el.tagName)) set.add(el);
+  // a wrapper that contains another section is not itself a section of the page: the innermost ones are listed
+  const all = [...set]; for (const el of all) if (all.some((o) => o !== el && el.contains(o))) set.delete(el);
+  const inView = [...set].map((el) => ({ sel: sel(el), heading: heading(el), share: Math.round(share(el.getBoundingClientRect()) * 100) / 100 })).filter((x) => x.share > 0.05).sort((a, b) => b.share - a.share).slice(0, 6);
+  // open shadow roots are searched too: a canvas inside a web component is still the page's canvas
+  const deep = (q) => { const out = [...document.querySelectorAll(q)]; let hosts = 0; const walk = (root) => { for (const el of root.querySelectorAll('*')) { if (el.shadowRoot && hosts++ < 300) { out.push(...el.shadowRoot.querySelectorAll(q)); walk(el.shadowRoot); } } }; walk(document); return out; };
+  const canvases = deep('canvas').map((el) => ({ sel: sel(el), share: Math.round(share(el.getBoundingClientRect()) * 100) / 100 })).filter((x) => x.share > 0.05).slice(0, 6);
+  return { scrollY: Math.round(scrollY), docHeight: document.documentElement.scrollHeight, viewport: [vw, vh], inView, canvases };
+})()`;
+
+/**
+ * Continue the recording while the page is scrolled, a stop at a time: a wheel step, then `settle` frames. The wheel is the
+ * one input every scroll mechanism answers (a native scroll, a virtual scroll that moves one container by a transform, a
+ * fixed stage that moves its scene by the wheel). The last stop returns to the top, so the buffers the site uploads only when
+ * something changes hold the state of the top again. Frames carry the scroll signal (`sc`); each stop's DOM is read beside them.
+ */
+export async function recordScrollTape(
+  page: Page,
+  opts: { stops?: number; step?: number; settle?: number; timeoutMs?: number } = {},
+): Promise<{ ok: true; rec: ScrollTapeRecording } | { ok: false; error: string }> {
+  const K = opts.stops ?? 8;
+  const vp = page.viewportSize() ?? { width: 1440, height: 900 };
+  const step = opts.step ?? Math.round(vp.height * 0.45);
+  const settle = opts.settle ?? 4;
+  const limit = opts.timeoutMs ?? 300_000;
+  type Cap = { cont: (n: number, hold: boolean) => boolean; nframes: () => number; state: string; wheel: number };
+  const nf = () => page.evaluate(() => (window as unknown as { __DEA_CAP__: Cap }).__DEA_CAP__.nframes()).catch(() => -1);
+  const stateOf = () => page.evaluate(() => (window as unknown as { __DEA_CAP__: Cap }).__DEA_CAP__.state).catch(() => 'gone');
+  const signal = () =>
+    page
+      .evaluate(() => {
+        return (window as unknown as { __DEA_CAP__: { signal: () => number } }).__DEA_CAP__.signal();
+      })
+      .catch(() => 0);
+  const t0 = Date.now();
+  const base = await nf();
+  if (base < 0) return { ok: false, error: 'the recorder was not in the page' };
+  let at = 0;
+  const stops: ScrollStop[] = [];
+  const segment = async (delta: number): Promise<ScrollStop | null> => {
+    if (delta) await page.mouse.wheel(0, delta).catch(() => {});
+    const before = await nf();
+    const ok = await page.evaluate((n) => (window as unknown as { __DEA_CAP__: Cap }).__DEA_CAP__.cont(n, true), settle).catch(() => false);
+    if (!ok) return null;
+    while (Date.now() - t0 < limit && (await nf()) < before + settle) await page.waitForTimeout(80);
+    while (Date.now() - t0 < limit && (await stateOf()) !== 'done') await page.waitForTimeout(120);
+    if (Date.now() - t0 >= limit) return null;
+    const n = await nf();
+    const dom = (await page.evaluate(STOP_DOM).catch(() => null)) as StopDom | null;
+    const wh = (await page.evaluate(() => (window as unknown as { __DEA_CAP__: { wheel: number } }).__DEA_CAP__.wheel).catch(() => 0)) as number;
+    const stop: ScrollStop = { sc: await signal(), wh: Math.round(wh), f0: at, f1: n - base - 1, dom };
+    at = n - base;
+    return stop;
+  };
+  for (let i = 0; i < K; i++) {
+    const s = await segment(step);
+    if (!s) return stops.length ? finish() : { ok: false, error: 'the scroll tape timed out or the recorder stopped' };
+    stops.push(s);
+  }
+  const top = await segment(-(K + 1) * step);
+  if (top) stops.push({ ...top, sc: 0, wh: 0 });
+  return finish();
+  async function finish(): Promise<{ ok: true; rec: ScrollTapeRecording }> {
+    const native = (await page.evaluate('window.__DEA_CAP__.moved === true').catch(() => false)) as boolean;
+    // a page that scrolls natively is put back at the top whatever the tape did
+    await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
+    return { ok: true, rec: { frames: at, stops, mechanism: native ? 'native' : 'virtual', step, settle } };
+  }
 }
 
 /** How many press listeners (mousedown, pointerdown, touchstart) the page has registered. */

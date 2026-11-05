@@ -50,3 +50,10 @@ bundle only DEA's own code; every package below is installed from npm as a norma
 - **Wappalyzer / simple-wappalyzer / webappanalyzer** fingerprint data is GPL-3.0. DEA uses its own small
   stack detector (`packages/core/src/see/stack.ts`) so no GPL code or data ends up in DEA. A Wappalyzer
   plugin may be offered later as a separate, optional install.
+
+## Ideas from other projects (no code or text copied)
+
+- [REA](https://github.com/morluto/rea) (MIT licence, by morluto): its way of returning findings as records that carry
+  their evidence, limitations, coverage and open unknowns, and of reading a large result summary-first. DEA's evidence
+  ledger (`evidence.json`, MCP `report` with `which: evidence`) is written from scratch for web decodes; no REA code or
+  documentation text is included.

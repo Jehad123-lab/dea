@@ -21,7 +21,9 @@ import {
   loadPolicy,
   MODES,
   type Mode,
+  queryLedger,
   type RunDoc,
+  readLedger,
   readRun,
   renderReport,
   resolveRun,
@@ -389,19 +391,28 @@ export function createServer(opts: ServerOptions = {}): McpServer {
     {
       title: 'Read a saved report',
       description:
-        'Read a saved run: report.md (stack, network, page, WebGL), design.md (design decode), explain.md (code teardown), code.md, api.md, assets.md, motion.md, extract.md, or run.json. Use run "latest" for the newest.',
+        'Read a saved run: report.md (stack, network, page, WebGL), design.md (design decode), explain.md (code teardown), code.md, api.md, assets.md, motion.md, extract.md, or run.json. Use run "latest" for the newest. which="evidence" reads an extract run\'s evidence ledger as data: every finding with its label (Verified / Inferred / Unknown), the measurement behind it, its coverage and limits, and the unknowns with their next probe; it answers a summary first, then one finding by id (finding) or a slice (area, label).',
       inputSchema: z.object({
         run: z.string().default('latest').describe('Run id, a unique part of it, or "latest".'),
         which: z
-          .enum(['report', 'design', 'explain', 'code', 'api', 'assets', 'motion', 'extract', 'json'])
+          .enum(['report', 'design', 'explain', 'code', 'api', 'assets', 'motion', 'extract', 'json', 'evidence'])
           .default('report')
-          .describe('report.md, design.md, explain.md, code.md, api.md, assets.md, motion.md, extract.md, or run.json'),
+          .describe('report.md, design.md, explain.md, code.md, api.md, assets.md, motion.md, extract.md, run.json, or the evidence ledger of an extract run'),
+        finding: z.string().optional().describe('evidence: one finding by id (e.g. "scroll.tape"), with its measurement, limits and next probe'),
+        area: z.enum(['scene', 'input', 'scroll', 'page', 'boot', 'build', 'assets', 'run']).optional().describe('evidence: only the findings of one area'),
+        label: z.enum(['Verified', 'Inferred', 'Unknown']).optional().describe('evidence: only findings with this label'),
+        detail: z.enum(['summary', 'full']).default('summary').describe('evidence: summary (one line per finding) or full'),
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ run, which }) => {
+    async ({ run, which, finding, area, label, detail }) => {
       try {
         const dir = await resolveRun(run ?? 'latest');
+        if (which === 'evidence') {
+          const ledger = (await readLedger(join(dir, 'extract'))) ?? (await readLedger(dir));
+          if (!ledger) return fail(new Error('That run has no evidence ledger; call extract first (evidence.json is written by extract).'));
+          return { content: [text(`${DATA_NOTE}\n\n${clip(JSON.stringify(queryLedger(ledger, { id: finding, area, label, detail }), null, 1), 40_000)}`)] };
+        }
         if (which !== 'report' && which !== 'json') {
           const md = await readFile(join(dir, `${which}.md`), 'utf8').catch(() => null);
           if (!md)

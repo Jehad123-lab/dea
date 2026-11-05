@@ -140,6 +140,27 @@ Found by running igloo.inc and the WebGL fluid simulation; each rule is general.
 - The canvas to record is ranked by the part of it that is on screen (a taller canvas further down the page no longer wins
   over the first screen's), with canvases wholly off screen as the fallback.
 - A hero video that was playing starts at the second it had reached in the kit's React page (a hold in the static preview was tried and removed: it showed a black frame).
+- The scroll tape: extract records the page at scroll stops (a wheel step, then settled frames, eight stops and back to the
+  top; native scroll or a virtual scroll that only answers the wheel) and the replay and the editable rebuild play the
+  stop nearest to the live, eased scroll, with the uploads of skipped stops applied first and float uniforms and uploads
+  blended between two stops when the frames line up. Verified on a purpose-written virtual-scroll scene (replay and rebuild
+  forward, backward and between stops); the kit follows scroll-driven scenes that a straight-line fit of one uniform could not.
+- The scroll signal: the page's own `scrollY` once it has moved by a real amount, else the sum of the wheel (a document a few
+  pixels taller than the window used to read as native scrolling while the wheel drove a virtual scroll).
+- Page map (`page-map.json` / `.md`): per scroll stop, the programs and draws, the change against the top, the sections and
+  canvases in view, and where the scene changes.
+- Evidence ledger (`evidence.json` / `.md`) and MCP `report` with `which: evidence`: every finding with its label, measurement,
+  coverage (`complete`, `partial`, `not-exercised`), limits and next probe; unknowns link to findings; kit files carry sha-256;
+  summary first, one finding or a slice on request. Absence is not concluded from partial coverage.
+- Boot timeline: first canvas, first draw and program links from the recorder, so a reference taken while shaders were still
+  linking is reported.
+- The scripted interaction check runs on a fresh load of the site whenever a scroll tape was recorded (a story that plays forward
+  does not always rewind, and the original's "rest" was then a later scene than the kit's), and its scroll part now has three
+  depths (400, 1200 and 2000 px of wheel) so the tape is compared at more than the first stop.
+- The page map finds canvases inside open shadow roots and sections that are direct children of `body`, `#root`, `#app` or `#__next`.
+- A page with no WebGL gets its page map too (`page-map.json` / `.md`, found by scrolling a fresh load a screen at a time):
+  the sections in view at each stop, how far the probe got, and an Unknown in the ledger saying which sections the kit does not
+  contain. The map lists the innermost sections (a wrapper that holds other sections is not one).
 
 ### Act and connect
 

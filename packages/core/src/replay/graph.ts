@@ -67,7 +67,7 @@ export interface CaptureDoc {
     framebuffers: Array<{ id: number; atts: Array<{ a: number; type: number; tex?: number; rb?: number; level?: number }>; draw: number[]; read: number }>;
     vaos: Array<VaoSnap & { id: number }>;
   };
-  frames: Array<{ state: FrameState | null; cmds: Cmd[]; ms: number; ts?: number; ptr?: [number, number] | null }>;
+  frames: Array<{ state: FrameState | null; cmds: Cmd[]; ms: number; ts?: number; ptr?: [number, number] | null; sc?: number }>;
   /** the recording continued while the pointer moved along a known path: frames from `from` on are the tape ('move' frames with the pointer moving, then 'still' frames as it settles) */
   tape?: {
     from: number;
@@ -80,8 +80,21 @@ export interface CaptureDoc {
   };
   /** the tape's frames (split off `frames` after the recording is compacted): rebuild and replay play them while the pointer moves */
   tapeFrames?: CaptureDoc['frames'];
+  /** the recording continued while the page was scrolled, a stop at a time: frames from `from` on (see scrolltape.ts) */
+  scroll?: {
+    from: number;
+    mechanism: 'native' | 'virtual';
+    step: number;
+    settle: number;
+    stops: Array<{ sc: number; f0: number; f1: number; dom?: unknown }>;
+    fit?: import('./scrolltape.ts').ScrollTapeFit;
+  };
+  /** the scroll tape's frames (split off `frames`): replay and rebuild play the stop nearest to the live scroll */
+  scrollFrames?: CaptureDoc['frames'];
   /** a second tape recorded with the button held (pages that listen for a press): `from` is its first frame */
   tapeDrag?: { from: number; move: number; still: number };
+  /** when the page's WebGL came up, in ms since navigation: the first canvas, the first draw, every program link, and when the recorder was armed */
+  boot?: { canvas: number | null; draw: number | null; links: number[]; armed: number | null };
   errors: string[];
   overflow: boolean;
   binBytes: number;

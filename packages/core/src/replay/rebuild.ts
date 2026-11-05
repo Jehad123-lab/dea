@@ -147,6 +147,8 @@ export interface PipelineDoc {
   frames: Array<{ steps: Step[] }>;
   /** the last `n` frames are the pointer tape (see tape.ts): played while the pointer moves, uploads re-anchored to the live pointer's path */
   tape?: { n: number; move: number; still: number; drag?: boolean; w: number; h: number; anchors: unknown[]; uniforms?: unknown[] };
+  /** after the tape: the scroll tape (see scrolltape.ts), `n` frames, the stops with tape-relative frame indices */
+  scroll?: { n: number; k: number; ratio: number; aligned: boolean; stops: Array<{ sc: number; wh: number; f0: number; f1: number }> };
   clocks: Array<{ program: number; uniform: string; base: number; rate: number }>;
   /** uniforms that follow the pointer, scroll or window size: value = scale × eased input + offset */
   inputs: import('./inputs.ts').InputMap[];
@@ -420,7 +422,7 @@ export function rebuildPipeline(
   const vaosInit = new Map<number, { attrs: Map<number, VaoAttr>; el: number }>();
   for (const v of doc.snap.vaos) vaosInit.set(v.id, { attrs: new Map(v.attrs.map((a) => [a.i, { ...a }])), el: v.el });
 
-  [...doc.frames, ...(doc.tapeFrames ?? [])].forEach((f, fi) => {
+  [...doc.frames, ...(doc.tapeFrames ?? []), ...(doc.scrollFrames ?? [])].forEach((f, fi) => {
     const steps: Step[] = [];
     frames.push({ steps });
     const st = f.state;
@@ -469,7 +471,7 @@ export function rebuildPipeline(
     const occ = new Map<string, number>();
     const lastOcc = new Map<string, number>();
     const tapeTk = (pid: number): Record<string, number> | undefined => {
-      if (fi < doc.frames.length || !doc.tape?.uniforms?.length) return undefined;
+      if (fi < doc.frames.length || fi >= doc.frames.length + (doc.tapeFrames?.length ?? 0) || !doc.tape?.uniforms?.length) return undefined;
       const tk: Record<string, number> = {};
       for (const u of doc.tape.uniforms) {
         const o = lastOcc.get(`${u.p}|${u.n}`);
@@ -1102,6 +1104,17 @@ export function rebuildPipeline(
           },
         }
       : {}),
+    ...(doc.scroll?.fit && doc.scrollFrames?.length
+      ? {
+          scroll: {
+            n: doc.scrollFrames.length,
+            k: doc.scroll.fit.k,
+            ratio: doc.scroll.fit.ratio,
+            aligned: doc.scroll.fit.aligned,
+            stops: doc.scroll.fit.stops.map((x) => ({ sc: x.sc, wh: x.wh, f0: x.f0, f1: x.f1 })),
+          },
+        }
+      : {}),
     clocks,
     inputs: (doc.inputs ?? []).filter((m) => m.kind !== 'clock'),
     viewport: doc.viewport ?? null,
@@ -1158,7 +1171,8 @@ export function rebuildMd(p: PipelineDoc, stats: RebuildStats, score: { canvas: 
   }
   L.push('## Passes');
   L.push('');
-  for (const ps of p.passes.filter((x) => x.frame === p.frames.length - 1 || p.frames.length === 1))
+  const restLen = p.frames.length - (p.tape?.n ?? 0) - (p.scroll?.n ?? 0);
+  for (const ps of p.passes.filter((x) => x.frame === restLen - 1 || restLen === 1))
     L.push(`- ${ps.index}: ${ps.role} → ${ps.target} (${ps.programs.length} program${ps.programs.length === 1 ? '' : 's'}) ≈ ${ps.why}`);
   L.push('');
   return `${L.join('\n')}\n`;

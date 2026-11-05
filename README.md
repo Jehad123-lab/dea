@@ -329,6 +329,41 @@ a positioned layer), and inline SVG logos with their computed paint. Labels hidd
 waiting below "Menu") are left out. Fonts the site loads are copied with their weight and style, so an italic file
 cannot stand in for the upright one. With `--own-assets`, logos and images become placeholders of the same size.
 
+**Scroll-driven scenes (the scroll tape).** A scene that changes as you scroll is not always a straight-line function of
+one uniform: the site may ease the scroll itself, step a timeline, or move hundreds of instances on the CPU and upload the
+result. So after the pointer tape, extract continues the recording while the page is scrolled, a stop at a time (a wheel
+step, then a few settled frames; eight stops about half a window apart, then back to the top), and reads the DOM beside each
+stop. The wheel is the one input every scroll mechanism answers: a native scroll, a *virtual scroll* that never scrolls the
+document and moves one container by a transform, or a fixed stage that moves its scene by wheel events. The scroll signal is
+the page's own `scrollY` once it has moved by a real amount, otherwise the sum of the wheel it was given. The replay and the
+editable rebuild then play the recorded stop nearest to the live, eased scroll, apply first the uploads of the stops the scroll
+skipped over (a buffer the site re-uploads only when something changes holds the right bytes), and blend float uniforms and
+float uploads between two stops when the recorded frames line up. Verified: the stops, their frames and what changed
+between them (read from the recording). Inferred: the picture between two stops. Unknown: state the site keeps between
+stops (history, springs) and anything past the probed extent. The fit says how many buffers the site re-uploaded and how
+many of them in full at every stop (the others are exact only when scrolling forward). A scroll that changed nothing the
+recorder could see is reported as that, with the stops and the mechanism, not as "no scroll input".
+
+**Page map (`page-map.json`, `page-map.md`).** A page with no WebGL gets one from a plain scroll of a fresh load (the sections and canvases in view at each screen). For a scene with WebGL, from the same stops: for each scroll position, which programs drew and how
+many draws, how much of the recorded state differs from the top of the page, which sections (`header`, `section`, `main > *`,
+`[data-section]`) and canvases are in view with the share of the window, and a scene change flag where the program set or
+the draw count changes. It covers as much of the page as the probe scrolled (for a virtual scroll there is no document
+height, so the extent is how far the wheel was driven), only the busiest WebGL canvas is recorded, and routes behind links
+are not followed.
+
+**Evidence ledger (`evidence.json`, `evidence.md`).** Every finding as data: an id (`scene.replay`, `input.scroll`,
+`scroll.tape`, `page.map`, `boot.timeline`, ...), the label (Verified / Inferred / Unknown), the measurement behind it,
+how much of the thing was exercised (`complete`, `partial`, `not-exercised`), what limits it, and the probe that would
+close it; unknowns link to the findings they follow from; the kit's files carry their sha-256. Absence is never concluded
+from partial coverage: "no input answered" is Unknown when the probe could not reach the input. A replay of one held frame
+is recorded as what it is (the recording plays back), not as proof of motion. Agents read it with the MCP `report` tool and
+`which: "evidence"` (a summary first, then one finding by `finding`, or a slice by `area` or `label`).
+The shape is borrowed from how REA (MIT) returns findings with their evidence and unknowns; the code is DEA's own.
+
+**Boot timeline.** The recorder notes when the page's WebGL came up (first canvas, first draw, every program link, in ms
+since navigation). `boot.timeline` says whether shader programs were still being linked just before the reference frames
+were taken, which is how a reference that is really a loading screen is caught.
+
 **What moves and what is frozen.** Live (`rb.start()`, `replay.start()`) holds the recorded camera: the two recorded
 frames carry slightly different camera matrices (a dolly caught mid-move), and playing them one after the other made the
 picture shake, so every frame takes the float and matrix uniforms of the last recorded frame while every pass, the
@@ -379,7 +414,9 @@ the reference reused (1709 s the first time). `--quick` skips both. Scores now, 
 
 The interaction score is how well the places where the picture changed after a scripted pointer move or wheel turn agree
 between the site and the kit (0–100%); the first two columns are scores of the recorded reference frame, which both
-kits reproduce by construction, so the last column is the one that says how alive the kit is.
+kits reproduce by construction, so the last column is the one that says how alive the kit is. The script is a pointer glide,
+three wheel depths (400, 1200 and 2000 px) and, for pages that listen for a press, a drag; when a scroll tape was recorded the
+site part runs on a fresh load of the page, because a scroll-driven story does not always rewind to its first screen.
 
 What changed:
 
@@ -546,7 +583,7 @@ so into the run. Use `--no-gpu-mask` to see exactly what a GPU-less visitor gets
 | `get_run_status` | Steps, progress and the proven report of an investigation |
 | `inspect_site` | Open a URL and save the evidence |
 | `detect_stack` | What a URL is built with, with proof |
-| `report` | Read a saved `report.md`, `design.md`, `explain.md`, `code.md`, `api.md` or `run.json` |
+| `report` | Read a saved `report.md`, `design.md`, `explain.md`, `code.md`, `api.md`, `run.json`, or an extract's evidence ledger (`which: evidence`: summary first, then one finding or a slice) |
 | `list_runs` | List saved runs |
 | `browse` | Hands: open, snapshot, scroll, screenshot, tabs |
 | `interact` | Hands: click, type, fill, select, hover (never submits) |
@@ -660,8 +697,11 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
   its captured second made it worse (a black frame) and was removed.
 - Pointer-driven draws are replayed from the live pointer for the uniforms DEA can fit (a position, or a step times a
   gain); a site that derives them another way (accumulated velocity, random colours) is replayed with the recorded values.
-- Extract reads the first screen. Content further down the page, other routes, and canvas drawing that starts empty (a
-  whiteboard) are not rebuilt.
+- Extract reads the first screen's DOM and the busiest canvas. Scroll-driven 3D is followed through the scroll tape (stops, not a
+  continuous recording), and the page map lists what each stop showed, but content further down the page that is plain HTML,
+  other routes, and canvas drawing that starts empty (a whiteboard) are not rebuilt.
+- The scroll tape plays recorded stops: between two stops the picture is the nearest stop (float uniforms and uploads are
+  blended only when the recorded frames line up), and state the site keeps between stops (history, springs) is not recorded.
 - DEA Hub: apps that refuse automatic OAuth sign-up (GitHub, Slack, Figma, Asana, HubSpot, Box) need your own OAuth
   client id or a token. Hub runs locally over stdio; a remote URL for it is Phase 9.
 - `investigate` without a language model writes claims and evidence, not prose; its planner is keyword rules.

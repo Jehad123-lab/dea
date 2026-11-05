@@ -79,6 +79,14 @@ export { easingName } from './design/css.ts';
 export { type DesignDoc, type DesignOptions, type DesignResult, decodeDesign, designSummary } from './design/index.ts';
 export { parseShader, summarizeShaders } from './design/shaders.ts';
 export { streamRun } from './events.ts';
+export {
+  type EvidenceLedger,
+  type Finding as EvidenceFinding,
+  type LedgerQuery,
+  queryLedger,
+  readLedger,
+  renderLedgerMd,
+} from './evidence/ledger.ts';
 export { deaHome, isRunId, listRuns, newRunId, type RunSummary, RunWriter, readRun, resolveRun, runsDir } from './evidence/run.ts';
 export { isSecretHeader, isSecretParam, redactBody, redactText, redactUrl, stripHar } from './evidence/secrets.ts';
 export {

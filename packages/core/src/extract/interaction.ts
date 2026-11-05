@@ -60,6 +60,25 @@ export const INTERACTION_SCRIPT: InteractionStep[] = [
       await page.waitForTimeout(900);
     },
   },
+  // further down: the scroll tape is checked at three depths of wheel (400, 1200 and 2000 px), not only at the first stop
+  {
+    name: 'scroll to 1200',
+    does: 'mouse wheel down 800 px more (1200 px in all)',
+    input: 'scroll',
+    run: async (page) => {
+      await page.mouse.wheel(0, 800);
+      await page.waitForTimeout(1200);
+    },
+  },
+  {
+    name: 'scroll to 2000',
+    does: 'mouse wheel down 800 px more (2000 px in all)',
+    input: 'scroll',
+    run: async (page) => {
+      await page.mouse.wheel(0, 800);
+      await page.waitForTimeout(1200);
+    },
+  },
 ];
 
 /** A drag: press at the centre, move to 70% across and 40% down, release. Added only for pages that listen for a press. */

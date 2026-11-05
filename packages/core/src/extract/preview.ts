@@ -6,9 +6,18 @@ import { NAME_SHIM } from '../browser/init.ts';
 import { installObservers, LOADER_VISIBLE } from '../browser/open.ts';
 import { assertNotBotWall } from '../browser/wall.ts';
 import { currentCache } from '../cache.ts';
-import { pressListeners, pullRecording, REPLAY_CAPTURE_SCRIPT, type Recording, recordFrames, recordTape, releaseFrames } from '../replay/capture.ts';
+import {
+  pressListeners,
+  pullRecording,
+  REPLAY_CAPTURE_SCRIPT,
+  type Recording,
+  recordFrames,
+  recordScrollTape,
+  recordTape,
+  releaseFrames,
+} from '../replay/capture.ts';
 import { type ProbeData, probeInputs } from '../replay/inputs.ts';
-import { currentTimings, timed } from '../timings.ts';
+import { currentTimings, overBudget, timed } from '../timings.ts';
 import { type ShaderModule, threeRevision } from './generate.ts';
 import { runInteractionWithState, type StepState, setDragStep } from './interaction.ts';
 import type { Params } from './research.ts';
@@ -881,11 +890,26 @@ export async function referenceShot(
                 recordTape(page, { drag: true }).catch((e) => ({ ok: false as const, error: String(e) })),
               )
             : null;
+        // the scroll tape: the recording continued while the page is scrolled, a stop at a time (what a scroll-driven scene did)
+        const scrollTape =
+          interact && !overBudget()
+            ? await timed('record the scroll tape', () => recordScrollTape(page).catch((e) => ({ ok: false as const, error: String(e) })))
+            : null;
         setDragStep(presses > 0);
         const recording = await timed('read the recording out of the page', () => pullRecording(page).catch(() => null));
         if (recording && tape?.ok) recording.doc.tape = { from: frames, move: tape.move, still: tape.still };
         if (recording && tape?.ok && dragTape?.ok)
           recording.doc.tapeDrag = { from: frames + tape.move + tape.still, move: dragTape.move, still: dragTape.still };
+        if (recording && scrollTape?.ok) {
+          const from = frames + (tape?.ok ? tape.move + tape.still : 0) + (dragTape?.ok ? dragTape.move + dragTape.still : 0);
+          recording.doc.scroll = {
+            from,
+            mechanism: scrollTape.rec.mechanism,
+            step: scrollTape.rec.step,
+            settle: scrollTape.rec.settle,
+            stops: scrollTape.rec.stops,
+          };
+        }
         await releaseFrames(page);
         if (buf && recording) {
           const atMs = Date.now() - t0;
@@ -894,12 +918,27 @@ export async function referenceShot(
           let layoutScroll: ScrollLayout | null | undefined;
           let probe: ProbeData | null | undefined;
           if (interact) {
-            const ran = await timed('scripted pointer and scroll on the site', () => runInteractionWithState(page).catch(() => undefined));
+            // the scroll tape moved the page (a story that plays forward does not always come back to the top), so the scripted
+            // interaction runs on a fresh load of the site, held as long as the reference was: its "rest" is then the first screen
+            let ipage = page;
+            if (scrollTape?.ok && !overBudget()) {
+              const fresh = await timed('reload the site for the scripted interaction', async () => {
+                const p = await context.newPage();
+                await p.goto(url, { waitUntil: 'load', timeout: 60_000 }).catch(() => null);
+                await p.waitForTimeout(Math.min(Math.max(atMs, 6000), 150_000));
+                return p;
+              }).catch(() => null);
+              if (fresh) {
+                await page.close().catch(() => {});
+                ipage = fresh;
+              }
+            }
+            const ran = await timed('scripted pointer and scroll on the site', () => runInteractionWithState(ipage).catch(() => undefined));
             interaction = ran?.frames;
             interactionState = ran?.states;
-            await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
-            probe = await timed('input probe (pointer, scroll, resize)', () => probeInputs(page).catch(() => null));
-            layoutScroll = await timed('first-screen boxes at a few scroll positions', () => readScrollLayouts(page, section).catch(() => null));
+            await ipage.evaluate('window.scrollTo(0, 0)').catch(() => {});
+            probe = await timed('input probe (pointer, scroll, resize)', () => probeInputs(ipage).catch(() => null));
+            layoutScroll = await timed('first-screen boxes at a few scroll positions', () => readScrollLayouts(ipage, section).catch(() => null));
           }
           return {
             png: `data:image/png;base64,${buf.toString('base64')}`,

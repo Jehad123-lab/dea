@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cpus, platform, totalmem } from 'node:os';
 import { basename, join } from 'node:path';
 import type { Browser } from 'playwright';
 import { decodeAssets } from '../assets/index.ts';
@@ -9,6 +10,7 @@ import { launchBrowser, releaseBrowser, withSharedBrowser } from '../browser/ope
 import { type CacheStats, ContentCache, cacheKey, currentCache, fmtMb, withCache } from '../cache.ts';
 import { type Driver, driverText, type TraceDoc, traceWebGL } from '../debug/trace.ts';
 import { type DesignDoc, decodeDesign } from '../design/index.ts';
+import { type BootInfo, bootInfo, buildLedger, type PageMapInfo, renderLedgerMd, type ScrollTapeInfo } from '../evidence/ledger.ts';
 import { newRunId, RunWriter, resolveRun, runsDir } from '../evidence/run.ts';
 import { type Gap, renderGaps } from '../gaps.ts';
 import { decodeMotion, type GsapNode, gsapModule, type MotionDoc } from '../motion/index.ts';
@@ -20,6 +22,7 @@ import { REPLAY_PLAYER } from '../replay/player.ts';
 import { type RebuildStats, rebuildMd, rebuildPipeline } from '../replay/rebuild.ts';
 import { REBUILD_RUNNER } from '../replay/runner.ts';
 import { recoverScene, sceneGlb, sceneMd, sceneModule } from '../replay/scene.ts';
+import { buildPageMap, fitScrollTape, pageMapMd, type ScrollTapeFit, tapeMoved } from '../replay/scrolltape.ts';
 import { fitTape } from '../replay/tape.ts';
 import type { InspectOptions } from '../see/inspect.ts';
 import { currentTimings, overBudget, type StageTiming, Timings, type TimingsDoc, timed, withTimings } from '../timings.ts';
@@ -54,6 +57,7 @@ import {
   setDragStep,
 } from './interaction.ts';
 import { type KitManifest, libraryAdd } from './library.ts';
+import { domPageMap } from './pagemap.ts';
 import {
   compareImages,
   kitInteraction,
@@ -152,6 +156,12 @@ export interface ReplayInfo {
   inputs?: InputMap[];
   /** clock uniforms that advance with real time */
   clocks?: number;
+  /** the scroll tape: frames recorded at scroll stops and played from the live scroll (null: the scroll changed nothing) */
+  scrollTape?: ScrollTapeInfo | null;
+  /** the page map: sections and the scene at each scroll stop */
+  map?: PageMapInfo | null;
+  /** the boot timeline: when the canvas, the first draw and the last shader link happened */
+  boot?: BootInfo | null;
   /**
    * The editable rebuild: the recorded render graph as a three.js project (rebuild/rebuild.js + public/rebuild/), scored
    * on its own. Unlike the capture replay above (the recorded calls played back), this is code you can change.
@@ -429,6 +439,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   const cache = currentCache();
   const vp0 = { width: 1440, height: 900 };
   let browser: Browser | null = null;
+  let domMapInfo: PageMapInfo | null = null;
   if (!opts.noDiff || opts.ownAssets) browser = (await timed('browser launch', () => launchBrowser(opts.browser ?? 'auto', true))).browser;
   const refP = !opts.noDiff && browser ? timed('reference screenshot + capture', () => referenceFor(browser as Browser, url, vp0, opts, say)) : null;
   refP?.catch(() => {}); // awaited below; a failure is read there
@@ -711,6 +722,26 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       const recording = 'recording' in ref ? ref.recording : null;
       replayError = 'recordingError' in ref ? (ref.recordingError ?? null) : opts.reference ? 'a reference image was given, so nothing was recorded' : null;
       let recDoc: CaptureDoc | null = null;
+      let scrollFit: ScrollTapeFit | null = null;
+      let pageMap: ReturnType<typeof buildPageMap> | null = null;
+      // a page with nothing to record in WebGL still gets its map: the sections it has, found by scrolling a fresh load
+      if (!recording && !quick && !opts.reference) {
+        const m = await timed('page map (DOM only)', () => domPageMap(browser as Browser, url, vp).catch(() => null));
+        if (m) {
+          await put('page-map.json', `${JSON.stringify(m, null, 2)}\n`);
+          await put('page-map.md', pageMapMd(m));
+          domMapInfo = {
+            mechanism: m.mechanism,
+            extent: m.extent,
+            documentHeight: m.documentHeight,
+            sections: m.sections.length,
+            stops: m.stops.length,
+            sceneChanges: 0,
+            canvases: m.canvases.length,
+          };
+          say(`page map: ${m.stops.length} stops over ${m.extent} px of ${m.documentHeight} px, ${m.sections.length} sections`);
+        }
+      }
       let hasScene = false;
       let rebuildDoc: { pipeline: import('../replay/rebuild.ts').PipelineDoc; stats: RebuildStats } | null = null;
       if (recording) {
@@ -724,6 +755,27 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
         } else {
           recDoc = c.doc;
           const binU8 = new Uint8Array(c.bin.buffer, c.bin.byteOffset, c.bin.byteLength);
+          // the scroll tape: frames recorded at scroll stops are kept apart from the rest and pointer-tape frames
+          if (recDoc.scroll && recDoc.frames.length > recDoc.scroll.from) {
+            const allFrames = recDoc.frames;
+            recDoc.scrollFrames = allFrames.slice(recDoc.scroll.from);
+            recDoc.frames = allFrames.slice(0, recDoc.scroll.from);
+            scrollFit = fitScrollTape(recDoc, binU8, { stops: recDoc.scroll.stops });
+            if (scrollFit) {
+              pageMap = buildPageMap(url, scrollFit, { mechanism: recDoc.scroll.mechanism, stops: recDoc.scroll.stops as never });
+              if (tapeMoved(scrollFit)) recDoc.scroll.fit = scrollFit;
+              else {
+                // nothing the recorder could see changed with the scroll: the frames are not kept
+                delete recDoc.scrollFrames;
+                pageMap.mechanism = 'none';
+              }
+            } else delete recDoc.scrollFrames;
+            say(
+              scrollFit
+                ? `scroll tape (${recDoc.scroll.mechanism} scroll): ${recDoc.scroll.stops.length} stops, ${tapeMoved(scrollFit) ? `the picture's recorded state changed by up to ${Math.round(Math.max(...scrollFit.stops.map((x) => x.changed)) * 100)}% against the top; ${scrollFit.uploadBuffers} buffers re-uploaded (${scrollFit.uploadFull} in full at every stop)` : 'nothing the recorder saw changed with the scroll'}`
+                : 'scroll tape: too few stops to fit',
+            );
+          }
           // the pointer tape: frames recorded while the pointer moved and settled are kept apart from the rest frames
           if (recDoc.tape && recDoc.frames.length > recDoc.tape.from) {
             const all = recDoc.frames;
@@ -766,6 +818,14 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           );
           recDoc.inputs = [...measured, ...inferInputs(named, recDoc.canvas, measured)];
           if (recDoc.inputs.length) say(`live input: ${inputsSummary(recDoc.inputs)}`);
+          // the live scroll is eased the way the site eased it before it picks a stop
+          if (recDoc.scroll?.fit) {
+            const ks = recDoc.inputs
+              .filter((m) => m.kind === 'scroll' && m.source === 'measured' && m.k > 0 && m.k < 1)
+              .map((m) => m.k)
+              .sort((a, b) => a - b);
+            if (ks.length) recDoc.scroll.fit.k = ks[Math.floor(ks.length / 2)];
+          }
           const models = (manifest?.network ?? [])
             .filter((a) => a.kind === 'glb' || a.kind === 'gltf')
             .flatMap((m) => (m.details?.meshes ?? []).map((x) => ({ name: `${basename(m.url.split('?')[0])} › ${x.name}`, vertices: x.vertices })));
@@ -817,7 +877,38 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
               ? new Set(rb.pipeline.clocks.map((x) => `${x.program}|${x.uniform}`)).size || 1
               : 0,
             rebuild: { canvas: null, page: null, kept: false, stats: rb.stats, errors: [] },
+            boot: bootInfo(recDoc.boot),
+            ...(scrollFit && recDoc.scroll
+              ? {
+                  scrollTape: {
+                    stops: scrollFit.stops.length,
+                    at: scrollFit.stops.map((x) => x.sc),
+                    mechanism: recDoc.scroll.fit ? recDoc.scroll.mechanism : ('none' as const),
+                    changed: scrollFit.stops.map((x) => x.changed),
+                    mode: recDoc.scroll.fit ? ('frames' as const) : ('none' as const),
+                    frames: recDoc.scrollFrames?.length ?? 0,
+                    bytes: scrollFit.bytes,
+                    uploadBuffers: scrollFit.uploadBuffers,
+                    uploadFull: scrollFit.uploadFull,
+                  },
+                  map: pageMap
+                    ? {
+                        mechanism: pageMap.mechanism,
+                        extent: pageMap.extent,
+                        documentHeight: pageMap.documentHeight,
+                        sections: pageMap.sections.length,
+                        stops: pageMap.stops.length,
+                        sceneChanges: pageMap.sceneChanges,
+                        canvases: pageMap.canvases.length,
+                      }
+                    : null,
+                }
+              : {}),
           };
+          if (pageMap) {
+            await put('page-map.json', `${JSON.stringify(pageMap, null, 2)}\n`);
+            await put('page-map.md', pageMapMd(pageMap));
+          }
           say(
             `replay: ${replay.passes} passes, ${replay.draws} draws, ${replay.programs} programs, ${(c.bin.length / 1e6).toFixed(1)} MB${sc.meshes.length ? `; scene: ${sc.meshes.length} meshes` : ''}; editable rebuild: ${rb.stats.draws} draws, ${rb.stats.materials} materials, ${rb.stats.cameras} cameras`,
           );
@@ -1271,6 +1362,22 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     replayError,
   });
   const md = interaction ? `${mdBase.trimEnd()}\n\n${interactionMd(interaction)}\n` : mdBase;
+  // the evidence ledger: the same facts as data (label, measurement, coverage, limits, next probe), for agents and for the MCP
+  const ledger = await buildLedger({
+    url,
+    runId: w.id,
+    quick,
+    ownAssets: Boolean(opts.ownAssets),
+    machine: `${platform()} · ${cpus().length} CPUs · ${Math.round(totalmem() / 1e9)} GB`,
+    diff: diff ? { start: diff.start, final: diff.final, referenceLoader: diff.referenceLoader, referenceAtMs: diff.referenceAtMs } : null,
+    replay,
+    interaction,
+    build,
+    gaps,
+    map: replay?.map ?? domMapInfo,
+    boot: replay?.boot ?? null,
+    hashFiles: files.filter((f) => !/\.(woff2?|ttf|otf|jpe?g|png|webp)$/i.test(f)).map((rel) => ({ rel, abs: join(out, rel) })),
+  });
   const kit: KitManifest = {
     url,
     extractedAt,
@@ -1291,6 +1398,8 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   };
   await put('dea-kit.json', `${JSON.stringify(kit, null, 2)}\n`);
   await put('README.md', md);
+  await put('evidence.json', `${JSON.stringify(ledger, null, 2)}\n`);
+  await put('evidence.md', renderLedgerMd(ledger));
   await w.text('extract.md', md, 'extractMd');
   await w.json(
     'extract.json',

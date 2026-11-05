@@ -1,3 +1,4 @@
+import { SCROLL_RUNTIME } from './scrolltape.ts';
 import { TAPE_RUNTIME } from './tape.ts';
 
 // The replay player written into every kit that has a recording (replay/replay.js). Plain JavaScript with no
@@ -17,6 +18,7 @@ const CREATE = { createBuffer: 'buf', createTexture: 'tex', createProgram: 'prog
 const SKIP = new Set(['deleteTexture', 'deleteFramebuffer', 'deleteRenderbuffer', 'deleteBuffer', 'deleteVertexArray', 'deleteProgram', 'deleteSampler', 'deleteTransformFeedback', 'fenceSync', 'waitSync', 'deleteSync', 'beginQuery', 'endQuery', 'deleteQuery', 'createQuery', 'ext:EXT_disjoint_timer_query_webgl2.queryCounterEXT',
   'ext:WEBGL_lose_context.loseContext', 'ext:WEBGL_lose_context.restoreContext']);
 ${TAPE_RUNTIME}
+${SCROLL_RUNTIME}
 const DRAWS = new Set(['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements', 'ext:ANGLE_instanced_arrays.drawArraysInstancedANGLE', 'ext:ANGLE_instanced_arrays.drawElementsInstancedANGLE']);
 
 /**
@@ -32,8 +34,12 @@ export function createReplay(canvas, data, options = {}) {
   const animate = options.animate !== false;
   // the recorded rest frames, then the tape (frames recorded while the pointer moved and settled), indexed in one list
   const R = doc.frames.length;
-  const frames = doc.tapeFrames && doc.tapeFrames.length ? doc.frames.concat(doc.tapeFrames) : doc.frames;
-  const tape = options.tape !== false && doc.tape && frames.length > R ? createTape(Object.assign({}, doc.tape, { n: frames.length - R, w: doc.canvas.cssW || doc.canvas.w, h: doc.canvas.cssH || doc.canvas.h })) : null;
+  const TN = doc.tapeFrames ? doc.tapeFrames.length : 0;
+  // after them the scroll tape (frames recorded at scroll stops): the stop nearest to the live scroll is played
+  const frames = doc.frames.concat(doc.tapeFrames || [], doc.scrollFrames || []);
+  const SB = R + TN;
+  const tape = options.tape !== false && doc.tape && TN > 0 ? createTape(Object.assign({}, doc.tape, { n: TN, w: doc.canvas.cssW || doc.canvas.w, h: doc.canvas.cssH || doc.canvas.h })) : null;
+  const scrollTape = options.scroll !== false && doc.scroll && doc.scroll.fit && doc.scrollFrames && doc.scrollFrames.length ? createScrollTape(Object.assign({}, doc.scroll.fit, { aligned: doc.scroll.fit.aligned && options.blend !== false })) : null;
   const attrs = Object.assign({}, doc.attrs, { preserveDrawingBuffer: !!options.preserveDrawingBuffer });
   canvas.width = doc.canvas.w;
   canvas.height = doc.canvas.h;
@@ -295,7 +301,7 @@ export function createReplay(canvas, data, options = {}) {
   const inputs = (doc.inputs || []).filter((m) => m.kind !== 'clock');
   const inputBy = new Map(); // "progId|name" -> maps
   for (const m of inputs) { const k = m.program + '|' + m.uniform; if (!inputBy.has(k)) inputBy.set(k, []); inputBy.get(k).push(m); }
-  const live = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, vx: 0, vy: 0, scroll: 0, width: doc.viewport ? doc.viewport.w : doc.canvas.cssW || doc.canvas.w, height: doc.viewport ? doc.viewport.h : doc.canvas.cssH || doc.canvas.h };
+  const live = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, vx: 0, vy: 0, scroll: 0, wheel: 0, wheelSeen: false, width: doc.viewport ? doc.viewport.w : doc.canvas.cssW || doc.canvas.w, height: doc.viewport ? doc.viewport.h : doc.canvas.cssH || doc.canvas.h };
   const eased = new Map();
   let inputTouched = !!options.liveFromStart;
   const live0 = Object.assign({}, live);
@@ -332,7 +338,7 @@ export function createReplay(canvas, data, options = {}) {
       setUniformValue(loc(+p, n), P.type, withInputs(list, P.v));
     }
   };
-  const setInput = (o) => { inputTouched = true; for (const k of ['x', 'y', 'scroll', 'width', 'height']) if (o[k] != null && Number.isFinite(+o[k])) live[k] = +o[k]; };
+  const setInput = (o) => { inputTouched = true; if (o.wheel != null) live.wheelSeen = true; for (const k of ['x', 'y', 'scroll', 'wheel', 'width', 'height']) if (o[k] != null && Number.isFinite(+o[k])) live[k] = +o[k]; };
 
   // live mode holds the recorded moment still: values that differ between the two recorded frames (a camera mid-move, an
   // intro fading in) would flip back and forth every frame and the picture would shake, so every frame takes the float
@@ -344,17 +350,21 @@ export function createReplay(canvas, data, options = {}) {
     const occ = (f) => { const seen = new Map(); const out = new Map(); frames[f].cmds.forEach((c, i) => { const a = c[1]; if (!isFloat(c[0]) || !a || a.$ !== 'loc') return; const k = a.p + '|' + a.n; const n = seen.get(k) || 0; seen.set(k, n + 1); out.set(k + '#' + n, i); }); return out; };
     const L = R - 1;
     const lastOcc = occ(L);
-    for (let f = 0; f < frames.length; f++) if (f !== L) for (const [k, i] of occ(f)) { const j = lastOcc.get(k); if (j != null && frames[L].cmds[j][0] === frames[f].cmds[i][0]) steadyOf.set(f + ':' + i, { raw: frames[L].cmds[j].slice(1), at: L + ':' + j }); }
+    for (let f = 0; f < SB; f++) if (f !== L) for (const [k, i] of occ(f)) { const j = lastOcc.get(k); if (j != null && frames[L].cmds[j][0] === frames[f].cmds[i][0]) steadyOf.set(f + ':' + i, { raw: frames[L].cmds[j].slice(1), at: L + ':' + j }); }
   }
   let t0 = 0;
-  const exec = (f) => {
+  // uploadsOnly: the frame's uploads and state changes run, its draws and clears do not (a stop the live scroll skipped over)
+  const exec = (f, uploadsOnly, blend) => {
     const cmds = frames[f].cmds;
+    const bcmds = blend ? frames[blend.frame].cmds : null;
+    const scrollFrame = f >= SB;
     const occ = new Map();
     const now = performance.now();
     for (let i = 0; i < cmds.length; i++) {
       const c = cmds[i];
       const name = c[0];
       if (SKIP.has(name)) continue;
+      if (uploadsOnly && (DRAWS.has(name) || name === 'clear' || name === 'clearBufferfv' || name === 'clearBufferiv' || name === 'clearBufferuiv' || name === 'clearBufferfi' || name === 'blitFramebuffer')) continue;
       let raw = c.slice(1);
       let ret = 0;
       const last = raw[raw.length - 1];
@@ -367,14 +377,14 @@ export function createReplay(canvas, data, options = {}) {
       if (animate && A && t0) { raw = raw.slice(); for (const x of A) raw[x.arg] = x.base + x.rate * (now - t0); }
       if (inputTouched && animate && name.startsWith('uniform') && !name.startsWith('uniformMatrix') && raw[0] && raw[0].$ === 'loc') {
         const list = inputBy.get(raw[0].p + '|' + raw[0].n);
-        if (list) {
+        if (list && !(scrollFrame && scrollTape && list.some((m) => m.kind === 'scroll'))) {
           const l = loc(raw[0].p, raw[0].n);
           if (name.endsWith('v')) { const v = arg(raw[1]); gl[name](l, new Float32Array(withInputs(list, v))); }
           else gl[name](l, ...withInputs(list, raw.slice(1)));
           continue;
         }
       }
-      if (tape && f >= R && /^uniform[234]f(v)?$/.test(name) && raw[0] && raw[0].$ === 'loc') {
+      if (tape && f >= R && f < SB && /^uniform[234]f(v)?$/.test(name) && raw[0] && raw[0].$ === 'loc') {
         // a uniform the site sets only while the pointer moves (a splat's point and force): set from the live pointer
         const ok = raw[0].p + '|' + raw[0].n;
         const kk = occ.get(ok) || 0;
@@ -386,9 +396,19 @@ export function createReplay(canvas, data, options = {}) {
         const o = overrides.get(raw[0].p + '|' + raw[0].n);
         if (o) { const l = loc(raw[0].p, raw[0].n); if (name.startsWith('uniformMatrix')) gl[name](l, false, o); else if (name.endsWith('v')) gl[name](l, o); else gl[name](l, ...o); continue; }
       }
-      if (tape && f >= R && name === 'bufferSubData') {
+      if (tape && f >= R && f < SB && name === 'bufferSubData') {
         // an upload the site's CPU made while the pointer moved: its points go where the live pointer has been
         try { const d = arg(raw[2]); const pl = d && tape.place(f - R, i, new Float32Array(d.buffer, d.byteOffset, d.byteLength >> 2)); if (pl) { gl.bufferSubData(arg(raw[0]), arg(raw[1]), pl); continue; } } catch (e) { fail('tape ' + e.message); }
+      }
+      // between two recorded stops: float uniforms and float uploads are blended with the next stop's values (the same command at the same place)
+      if (blend && bcmds && bcmds.length === cmds.length && bcmds[i][0] === name && (name.startsWith('uniform') || name === 'bufferSubData')) {
+        try {
+          const a = raw.map(arg);
+          const b = bcmds[i].slice(1).map(arg);
+          const mix = (x, y) => (typeof x === 'number' && typeof y === 'number' ? x + (y - x) * blend.w : x instanceof Float32Array && y instanceof Float32Array && x.length === y.length ? Float32Array.from(x, (v, j) => v + (y[j] - v) * blend.w) : x);
+          const m = a.map((x, j) => (name === 'bufferSubData' ? (j === 2 ? mix(x, b[j]) : x) : j === 0 ? x : mix(x, b[j])));
+          if (m.some((x, j) => x !== a[j])) { gl[name](...m); continue; }
+        } catch (e) { fail('blend ' + e.message); }
       }
       let args;
       try { args = raw.map(arg); } catch (e) { fail(name + ': ' + e.message); continue; }
@@ -428,15 +448,21 @@ export function createReplay(canvas, data, options = {}) {
     if (!t0) t0 = performance.now();
     if (animate && inputs.length) { stepInputs(); applyInputs(); }
     let f = frame;
+    let blend = null;
     if (tape) {
       let c = tape.step(live.x, live.y);
       if (c >= 0 && !holdLast && R > 1 && lastAbs >= 0 && (R + c) % 2 === lastAbs % 2) c++; // keep the alternation
-      if (c >= 0 && c < frames.length - R) f = R + c;
+      if (c >= 0 && c < TN) f = R + c;
+    }
+    // the page was scrolled: the stop nearest to the live (eased) scroll, after the uploads of the stops skipped over
+    if (scrollTape && f < R) {
+      const sel = scrollTape.step(live.wheelSeen ? live.wheel : live.scroll, lastAbs, SB);
+      if (sel) { for (const cf of sel.catchUp) exec(SB + cf, true); f = SB + sel.frame; if (sel.blend) blend = { frame: SB + sel.blend.frame, w: sel.blend.w }; }
     }
     applyState(frames[f].state);
-    exec(f);
+    exec(f, false, blend);
     lastAbs = f;
-    frame = holdLast ? R - 1 : (f + 1) % R;
+    frame = holdLast ? R - 1 : f >= SB ? frame : (f + 1) % R;
   };
   return {
     gl,
@@ -445,15 +471,18 @@ export function createReplay(canvas, data, options = {}) {
     passes: (doc.graph && doc.graph.passes) || [],
     renderFrames(n = doc.frames.length) { for (let i = 0; i < n; i++) step(); gl.flush(); },
     tape,
+    scrollTape,
     start() {
       const tick = () => { step(); raf = requestAnimationFrame(tick); };
       raf = requestAnimationFrame(tick);
-      if (options.listen !== false && typeof window !== 'undefined' && (inputs.length || tape)) {
+      if (options.listen !== false && typeof window !== 'undefined' && (inputs.length || tape || scrollTape)) {
         // real pointer, touch and scroll drive the measured uniforms; the drawing buffer keeps the recorded size
         const onMove = (e) => { const t = e.touches ? e.touches[0] : e; if (t) setInput({ x: t.clientX / innerWidth, y: t.clientY / innerHeight }); };
         let wheel = 0;
-        const onWheel = (e) => { if (document.documentElement.scrollHeight <= innerHeight + 2) { wheel = Math.max(0, wheel + e.deltaY); setInput({ scroll: wheel }); } };
-        const onScroll = () => setInput({ scroll: scrollY });
+        let native = false;
+        const ratio = (scrollTape && scrollTape.info.ratio) || 1;
+        const onWheel = (e) => { wheel = Math.max(0, wheel + e.deltaY); if (!native) setInput({ scroll: wheel, wheel }); else setInput({ wheel }); };
+        const onScroll = () => { if (scrollY >= Math.max(40, innerHeight * 0.2)) native = true; if (native) setInput({ scroll: scrollY, wheel: scrollY * ratio }); };
         const onResize = () => setInput({ width: innerWidth, height: innerHeight });
         const L = [['pointermove', onMove], ['touchmove', onMove], ['wheel', onWheel], ['scroll', onScroll], ['resize', onResize]];
         for (const [n, f] of L) addEventListener(n, f, { passive: true });
