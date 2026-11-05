@@ -45,6 +45,7 @@ export async function search(query: string, o: SearchOptions = {}): Promise<Sear
   const now = o.now ?? Date.now;
   const env = o.env ?? process.env;
   const limit = Math.min(Math.max(o.limit ?? 8, 1), 20);
+  const ask = Math.max(limit, 10); // each source is asked for a few more than shown, so a later, larger question can reuse the cache
   const dir = webCacheHome(o.home);
   const ttl = o.ttlMs ?? 3_600_000;
   const names = o.sources?.length ? o.sources : route(query, env);
@@ -62,7 +63,7 @@ export async function search(query: string, o: SearchOptions = {}): Promise<Sear
         perSource[idx] = [];
         return;
       }
-      const key = `search|${name}|${limit}|${query.trim().toLowerCase()}`;
+      const key = `search|${name}|${query.trim().toLowerCase()}`; // not the limit: one cached answer serves any smaller limit
       const hit = await cacheGet<WebResult[]>(dir, key);
       const fresh = !o.fresh && hit && ageMs(hit, now()) < ttl;
       const fromCache = (e: NonNullable<typeof hit>, why: string): WebResult[] =>
@@ -77,7 +78,7 @@ export async function search(query: string, o: SearchOptions = {}): Promise<Sear
         return;
       }
       try {
-        const { raw } = await runSource(src, query, limit, o.fetch, o.sleep);
+        const { raw } = await runSource(src, query, ask, o.fetch, o.sleep);
         const at = new Date(now()).toISOString();
         const results: WebResult[] = raw.map((r) => ({ ...r, fetched_at: at, verified: true, evidence: `Fetched live ${at}; ${src.basis}.` }));
         await cachePut(dir, key, results, at);

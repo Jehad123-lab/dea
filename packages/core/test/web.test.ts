@@ -118,6 +118,10 @@ describe('search', () => {
     expect(again.results[0]).toMatchObject({ verified: false, fetched_at: '2026-11-05T10:00:00.000Z' });
     expect(again.results[0].evidence).toMatch(/^From DEA's cache/);
     expect(again.sources[0].status).toBe('cached');
+    const smaller = await search('three', { ...o, limit: 2 }); // a different limit still hits the same cached answer
+    expect(calls.length).toBe(n);
+    expect(smaller.results.length).toBe(2);
+    expect(smaller.label).toBe('cached');
     const fresh = await search('three', { ...o, fresh: true });
     expect(fresh.label).toBe('verified');
   });
