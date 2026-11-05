@@ -353,6 +353,7 @@ export function classifyInputs(
   probe: import('../replay/inputs.ts').ProbeReport | null,
   clocks: number,
   original: InteractionScore[] | null,
+  tape: { drag: boolean; n: number } | null = null,
 ): InputVerdict[] {
   const out: InputVerdict[] = [];
   const names = (ms: typeof inputs) => [...new Set(ms.map((m) => m.uniform))];
@@ -368,7 +369,16 @@ export function classifyInputs(
     const change = input === 'viewport' ? null : siteChange(input);
     const replayLive = input !== 'viewport' && ms.length > 0;
     const rebuildLive = ms.length > 0;
-    if (meas.length) {
+    if (input === 'pointer' && !meas.length && tape) {
+      out.push({
+        input,
+        status: 'verified',
+        replay: 'live',
+        rebuild: 'live',
+        uniforms: [],
+        evidence: `a recorded pointer tape${tape.drag ? ' (button held)' : ''}: ${tape.n} upload(s) or uniform(s) follow the live pointer, fitted to the recorded path; values the site picks at random (a dye colour) are replayed as recorded`,
+      });
+    } else if (meas.length) {
       const best = meas.reduce((a, b) => (Math.abs(b.r) > Math.abs(a.r) ? b : a));
       out.push({
         input,

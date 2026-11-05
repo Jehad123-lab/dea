@@ -404,6 +404,18 @@ What changed:
 - **`--quick`** (labelled QUICK MODE in the summary and the report): one recorded frame, a 20 s reference watch, no
   motion, trace, sweep, research or build check. Rough, for a first look; run without it for the real result.
 
+- **`--budget <minutes>`** (default 10, `DEA_BUDGET_MIN`, 0 = off): a per-site time budget. When it is spent the run skips
+  the interaction check, technique research and the build check and says so; five minutes later the command stops with
+  exit code 124. A heavy site on a machine without a GPU spends most of its time loading and settling in the browser
+  (the pure-JS scoring is under 4% of a run), so the budget cuts the optional browser stages, not the arithmetic.
+- **Pointer input in the kit.** A uniform a site sets only while the pointer moves is fitted to the recorded pointer
+  (as a position or as the pointer's step times a gain) and driven from the live pointer in the replay and the rebuild.
+  A page that listens for a press gets a second tape with the button held; the kit plays it only while the live button
+  is down. Dye colours the site picks at random are replayed as recorded, so a splat lands in the right place with its
+  recorded colour, not the colour the original happened to pick.
+- **Compressed textures and uniform blocks.** BPTC/S3TC/ETC/ASTC textures are allocated with `texStorage` before their
+  recorded uploads, and the rebuild binds uniform blocks and multi-draw ranges. Tested on igloo.inc only.
+
 `--section <selector>` scrolls that part of the page into view for the reference, reads only its text, and keeps only
 the motion that touches it. `--reference shot.png` compares against your own screenshot (for example one taken on a
 machine with a GPU). `--library <name> --tag hero` saves the kit; `--batch urls.txt` extracts a list of sites.
@@ -643,6 +655,11 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
 - A page that changes with time (a playing hero video, a colour that cycles, an intro) is read at one moment and the
   kit's copy runs on its own clock, so the page score of such a site moves from run to run; look at the side-by-side
   image, not only the number.
+- A hero that cycles between slides or colours (locomotive.ca/en) is not reproduced: the kit's copy can show another
+  slide than the screenshot, and the page score swings between about 24% and 45% from run to run. Holding the video at
+  its captured second made it worse (a black frame) and was removed.
+- Pointer-driven draws are replayed from the live pointer for the uniforms DEA can fit (a position, or a step times a
+  gain); a site that derives them another way (accumulated velocity, random colours) is replayed with the recorded values.
 - Extract reads the first screen. Content further down the page, other routes, and canvas drawing that starts empty (a
   whiteboard) are not rebuilt.
 - DEA Hub: apps that refuse automatic OAuth sign-up (GitHub, Slack, Figma, Asana, HubSpot, Box) need your own OAuth

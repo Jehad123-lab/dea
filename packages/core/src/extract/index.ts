@@ -318,6 +318,9 @@ async function referenceFor(
   return r;
 }
 
+/** set when a pointer tape fitted something that follows the pointer (read by the inputs line) */
+let tapeDriven: { drag: boolean; n: number } | null = null;
+
 const programsExist = (assetsDir: string) => existsSync(join(assetsDir, 'assets', 'programs.json'));
 
 /**
@@ -446,7 +449,14 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       say(`${name}: reusing the run from ${hit.made} (cache)`);
       return hit.dir;
     }
-    const dir = await timed(name, run);
+    // a heavy page can crash its renderer on a machine without a GPU: the stage gets one more go before the run gives up
+    const dir = await timed(name, () =>
+      run().catch((e) => {
+        if (!/crashed|Target closed|has been closed|disposed/i.test(String(e))) throw e;
+        say(`${name}: the page crashed (${String(e).slice(0, 80)}); trying once more`);
+        return run();
+      }),
+    );
     if (dir && cache) await cache.put('stage', key, { dir, made: new Date().toISOString() }).catch(() => {});
     return dir;
   };
@@ -464,6 +474,9 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           stage('motion', opts.from?.motion, async () => {
             say('decoding the motion (GSAP, ScrollTrigger, CSS, recordings)');
             return (await decodeMotion(url, child)).dir;
+          }).catch((e) => {
+            say(`motion: skipped (${String(e).slice(0, 100)})`);
+            return null;
           }),
         ),
     limit(async () => {
@@ -734,6 +747,8 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             delete recDoc.tapeDrag;
             recDoc.tape.anchors = tf.anchors;
             recDoc.tape.uniforms = tf.uniforms ?? [];
+            tapeDriven =
+              tf.uniforms?.length || tf.anchors.length ? { drag: Boolean(recDoc.tape.drag), n: (tf.uniforms?.length ?? 0) + tf.anchors.length } : null;
             recDoc.tape.fit = { report: tf.report, path: tf.path };
             say(
               `pointer tape (${how}): ${recDoc.tapeFrames.length} frames; ${tf.anchors.length} uploads anchored to the pointer path (${tf.report.map((r) => `buffer ${r.buf}: ${r.reason}`).join('; ') || 'no CPU uploads'}); ${tf.uniforms?.length ?? 0} uniforms follow the live pointer${tf.uniforms?.length ? ` (${tf.uniforms.map((u) => `${u.n} ${u.kind}`).join(', ')})` : ''}`,
@@ -1168,7 +1183,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
               rows.push({ label: prog === '__replay' ? '(a) replay' : '(b) rebuild', frames: k.frames });
             }
             const siteSteps = (res.rebuild ?? res.replay)?.steps ?? null;
-            res.inputs = classifyInputs(replay.inputs ?? [], probeReport, replay.clocks ?? 0, siteSteps);
+            res.inputs = classifyInputs(replay.inputs ?? [], probeReport, replay.clocks ?? 0, siteSteps, tapeDriven);
             await put('preview/interaction.jpg', await framesStrip(cmp, rows));
             if (siteState) res.siteState = siteState;
             await put('interaction.json', JSON.stringify(res, null, 2));

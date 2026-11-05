@@ -816,7 +816,7 @@ export function heroHtml(l: HeroLayout): string {
       const st = escHtml(cssText(it.style)).replace(/"/g, '&quot;');
       const key = it.k ? ` data-dea-k="${escHtml(it.k).replace(/"/g, '&quot;')}"` : '';
       if (it.tag === 'video')
-        return `  <video${key}${it.vt ? ` data-vt="${it.vt}"` : ''} src="${escHtml(it.html ?? '').replace(/"/g, '&quot;')}" autoplay muted loop playsinline style="${st}"></video>`;
+        return `  <video${key} src="${escHtml(it.html ?? '').replace(/"/g, '&quot;')}" autoplay muted loop playsinline style="${st}"></video>`;
       if (it.tag === 'img') return `  <img${key} src="${escHtml(it.html ?? '').replace(/"/g, '&quot;')}" alt="" style="${st}">`;
       return `  <${it.tag}${key}${it.html || !it.text ? '' : ' data-dea-h="0"'} style="${st}">${it.html ?? escHtml(it.text)}</${it.tag}>`;
     })

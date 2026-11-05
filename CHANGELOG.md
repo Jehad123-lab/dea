@@ -135,9 +135,11 @@ Found by running igloo.inc and the WebGL fluid simulation; each rule is general.
 - A run-time budget per site (`--budget <minutes>`, default 10, env `DEA_BUDGET_MIN`, 0 = off): once it is spent the
   interaction check, technique research and the build check are skipped and the run says so; 5 minutes later the command
   stops with exit code 124.
+- A stage whose page crashes gets one more go, and a crash in the optional motion stage no longer ends the run (added after a full activetheory.net run died with "Target crashed"; inferred, the retry has not fired since).
+- The `inputs:` line reports the pointer as verified when a recorded pointer tape follows it (it said "frozen" while the kit was following the pointer).
 - The canvas to record is ranked by the part of it that is on screen (a taller canvas further down the page no longer wins
   over the first screen's), with canvases wholly off screen as the fallback.
-- A hero video that was playing is held at the second it had reached in the static preview (playing from there when live).
+- A hero video that was playing starts at the second it had reached in the kit's React page (a hold in the static preview was tried and removed: it showed a black frame).
 
 ### Act and connect
 

@@ -71,18 +71,6 @@ if (h) {
   if (P.font) h.style.fontFamily = P.font;
   if (P.size) h.style.fontSize = P.size + 'px';
 }
-// a video that was playing on the site: held at the second it had reached (so a score compares the same moment), or playing from there when live
-await Promise.all([...document.querySelectorAll('video[data-vt]')].map((v) => new Promise((res) => {
-  const go = () => {
-    let done = false;
-    // held only once the seek has shown its frame; a video that cannot seek in time keeps playing (never a black box)
-    v.addEventListener('seeked', () => { if (done) return; done = true; if (!P.live) v.pause(); res(); }, { once: true });
-    setTimeout(() => { if (!done) { done = true; res(); } }, 7000);
-    try { v.currentTime = Number(v.dataset.vt); } catch (e) { done = true; res(); }
-  };
-  if (v.readyState >= 1) go(); else v.addEventListener('loadedmetadata', go, { once: true });
-  setTimeout(res, 9000);
-})));
 const mods = {
 ${mods.map((m) => `  ${JSON.stringify(m.name)}: () => import('../${m.file}'),`).join('\n')}
 };

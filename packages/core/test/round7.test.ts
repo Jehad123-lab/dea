@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { classifyInputs } from '../src/extract/interaction.ts';
 import type { CaptureDoc } from '../src/replay/graph.ts';
 import { REPLAY_PLAYER } from '../src/replay/player.ts';
 import { multiDrawParts } from '../src/replay/rebuild.ts';
@@ -99,5 +100,13 @@ describe('kit runtimes', () => {
     }
     expect(REBUILD_RUNNER).toContain('uniformBlockBinding');
     expect(REBUILD_RUNNER).toContain('bindBufferRange(UB');
+  });
+
+  it('a pointer tape that follows the pointer is reported as a verified pointer input, not frozen', () => {
+    const v = classifyInputs([], null, 0, null, { drag: true, n: 2 }).find((x) => x.input === 'pointer');
+    expect(v?.status).toBe('verified');
+    expect(v?.replay).toBe('live');
+    expect(v?.evidence).toContain('button held');
+    expect(classifyInputs([], null, 0, null).find((x) => x.input === 'pointer')?.status).not.toBe('verified');
   });
 });
