@@ -14,11 +14,11 @@ import { LAYOUT_READ } from './preview.ts';
 
 export interface FullPageOptions {
   section?: string | null;
-  /** most stops read (default 48) */
+  /** most stops read (default 120) */
   maxStops?: number;
-  /** most scroll covered (px, default 40 000) */
+  /** most scroll covered (px, default 100 000) */
   maxExtent?: number;
-  /** longest total time for the read (ms, default 240 000) */
+  /** the time allowed for the read (ms, default 240 000, extended to the page's length up to 900 000 while it is making progress) */
   timeMs?: number;
   /** wait for the first screen to settle (ms cap, default 30 000) */
   settleMs?: number;

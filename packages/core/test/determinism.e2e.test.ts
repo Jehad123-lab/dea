@@ -2,7 +2,10 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { launchBrowser } from '../src/browser/open.ts';
+import { readFullPage } from '../src/extract/fullpage.ts';
 import { extract } from '../src/extract/index.ts';
+import { domPageMap } from '../src/extract/pagemap.ts';
 import { serveDir } from '../src/extract/preview.ts';
 import { canonicalJson, ledgerAnswer, queryLedger, readLedger } from '../src/index.ts';
 
@@ -35,11 +38,12 @@ describe.skipIf(!process.env.DEA_E2E)('determinism of the engine (real browser)'
       const url = `${server.url}/page.html`;
       const answers: Array<{ result: Record<string, unknown>; meta: Record<string, unknown> }> = [];
       for (let i = 0; i < 2; i++) {
-        const r = await extract(url, { quick: true, noCache: true, noResearch: true, providers: [], noDiff: false, referenceMs: 8000 });
+        const r = await extract(url, { noCache: true, noResearch: true, noTrace: true, providers: [], referenceMs: 8000 });
         const ledger = (await readLedger(join(r.dir, 'extract'))) ?? (await readLedger(r.dir));
         expect(ledger).not.toBeNull();
         if (!ledger) return;
-        expect(ledger.findings.length).toBeGreaterThan(3);
+        expect(ledger.findings.length).toBeGreaterThan(0); // how many depends on what the machine could record (a runner without WebGL records fewer)
+        console.log(`ledger ${i}: ${ledger.findings.length} findings, ${ledger.findings.map((f) => f.id).join(', ')}`);
         answers.push(ledgerAnswer(queryLedger(ledger, { detail: 'full' })));
       }
       // the structured answer, scores rounded to 3 decimals, is the same text
@@ -53,5 +57,39 @@ describe.skipIf(!process.env.DEA_E2E)('determinism of the engine (real browser)'
       await rm(dir, { recursive: true, force: true });
       await rm(home, { recursive: true, force: true });
     }
-  }, 600_000);
+  }, 900_000);
+
+  it('the page map and the whole-page read of a scrolling page are the same on two visits', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dea-det-page-'));
+    const { browser } = await launchBrowser('chromium', true);
+    const server = await serveDir(dir);
+    try {
+      const sections = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon']
+        .map(
+          (n, i) => `<section style="height:520px;padding:60px 40px;background:hsl(${i * 60},40%,92%)"><h2>${n} heading</h2><p>Words under ${n}.</p></section>`,
+        )
+        .join('');
+      await writeFile(
+        join(dir, 'page.html'),
+        `<!doctype html><body style="margin:0;font:20px Arial"><header style="position:fixed;top:0;left:0;width:100%;height:40px;background:#222;color:#fff">Nav</header>${sections}</body>`,
+      );
+      const url = `${server.url}/page.html`;
+      const vp = { width: 800, height: 500 };
+      const maps = [];
+      const layers = [];
+      for (let i = 0; i < 2; i++) {
+        maps.push(await domPageMap(browser, url, vp, { waitMs: 300 }));
+        const r = await readFullPage(browser, url, vp, { shots: false, settleMs: 4000 });
+        layers.push(r?.layer ?? null);
+      }
+      expect(maps[0]).not.toBeNull();
+      expect(layers[0]?.boxes.length).toBeGreaterThan(5);
+      expect(canonicalJson(maps[1])).toBe(canonicalJson(maps[0]));
+      expect(canonicalJson(layers[1])).toBe(canonicalJson(layers[0]));
+    } finally {
+      await server.close();
+      await browser.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
