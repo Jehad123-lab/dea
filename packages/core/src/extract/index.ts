@@ -505,7 +505,33 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   }>(join(assetsDir, 'assets', 'manifest.json'));
   const fontFiles = (manifest?.network ?? []).filter((a) => a.kind === 'font' && a.file);
   const faces: string[] = [];
+  // the site's own @font-face rules, one by one: weight, style and unicode-range as the site declared them (a font split into
+  // latin / latin-ext / cyrillic files needs the ranges, or the last file declared wins for every glyph)
+  const ruled = new Set<string>();
+  const bare = (u: string) => u.split('?')[0].split('#')[0];
+  for (const r of (design?.typography?.fontFaceRules ?? []) as Array<{
+    family: string;
+    weight: string;
+    style: string;
+    unicodeRange?: string;
+    urls: string[];
+  }>) {
+    const f = fontFiles.find((ff) => r.urls.some((u) => bare(u) === bare(ff.url)));
+    if (!f || !r.family) continue;
+    const name = basename(bare(f.url));
+    const fmt = /\.woff2$/i.test(name) ? 'woff2' : /\.woff$/i.test(name) ? 'woff' : /\.otf$/i.test(name) ? 'opentype' : 'truetype';
+    for (const dir of ['public/fonts', 'fonts']) {
+      await mkdir(join(out, dir), { recursive: true });
+      await copyFile(join(assetsDir, f.file as string), join(out, dir, name)).catch(() => {});
+    }
+    if (!files.includes(`public/fonts/${name}`)) files.push(`public/fonts/${name}`);
+    ruled.add(r.family.toLowerCase());
+    faces.push(
+      `@font-face {\n  font-family: "${r.family}";\n  src: url("/fonts/${name}") format("${fmt}");\n  font-weight: ${r.weight || '400'};\n  font-style: ${r.style || 'normal'};\n${r.unicodeRange ? `  unicode-range: ${r.unicodeRange};\n` : ''}  font-display: swap;\n}`,
+    );
+  }
   for (const fam of (design?.typography?.families ?? []) as Array<{ family: string; files?: string[] }>) {
+    if (ruled.has(fam.family.toLowerCase())) continue;
     const words = fam.family.toLowerCase().split(/\s+/)[0];
     const mine = fontFiles.filter((f) => (fam.files ?? []).includes(f.url) || f.url.toLowerCase().replace(/[-_ ]/g, '').includes(words.replace(/[-_ ]/g, '')));
     for (const f of mine) {
@@ -766,8 +792,15 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
         .filter((l): l is HeroLayout => Boolean(l?.boxes.length || l?.canvas || l?.background))
         // --own-assets: the site's logos and images on the first screen become placeholders of the same size
         .map((l) =>
-          opts.ownAssets && l.graphics?.length
-            ? { ...l, graphics: l.graphics.map((g) => ({ kind: 'placeholder' as const, x: g.x, y: g.y, w: g.w, h: g.h, opacity: g.opacity })) }
+          opts.ownAssets
+            ? {
+                ...l,
+                graphics: (l.graphics ?? []).map((g) => ({ k: g.k, kind: 'placeholder' as const, x: g.x, y: g.y, w: g.w, h: g.h, opacity: g.opacity })),
+                // a picture painted as a background is the site's own file too: a flat grey stands in
+                shapes: (l.shapes ?? []).map((s) =>
+                  /url\(/.test(s.gradient ?? '') ? { ...s, gradient: null, background: 'rgb(128, 128, 128)', bgSize: undefined } : s,
+                ),
+              }
             : l,
         );
       say('rendering the rebuild and comparing it with the original first screen');

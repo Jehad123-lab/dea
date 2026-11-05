@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type HeroLayout, heroHtml, scrollScript, scrollSpacer, withScroll } from '../src/extract/generate.ts';
+import { type HeroLayout, heroHtml, heroStyles, scrollScript, scrollSpacer, withScroll } from '../src/extract/generate.ts';
 import { diffStates, type StepState } from '../src/extract/interaction.ts';
 import { holdsOutOfSample } from '../src/replay/inputs.ts';
 
@@ -97,6 +97,27 @@ const layout = (): HeroLayout => ({
     },
   ],
   canvas: { x: 0, y: 0, w: 1000, h: 500, radius: '0px' },
+});
+
+describe('paint order of the first screen', () => {
+  it('orders by stacking context, then document order, then shapes under graphics under text', () => {
+    const l = layout();
+    l.shapes = [
+      { k: 'a', zp: [0.5], o: 5, x: 0, y: 0, w: 100, h: 50, background: 'red', gradient: null, border: null, radius: '0px', filter: null, opacity: 1 },
+      { k: 'b', zp: [10], o: 2, x: 0, y: 0, w: 100, h: 50, background: 'blue', gradient: null, border: null, radius: '0px', filter: null, opacity: 1 },
+    ];
+    l.boxes = [{ ...l.boxes[0], k: 't', zp: [0.5], o: 5 }];
+    l.graphics = [{ k: 'v', zp: [0], o: 9, kind: 'video', x: 0, y: 0, w: 500, h: 300, src: 'https://x.test/a.webm', opacity: 1 }];
+    const order = heroStyles(l).map((i) => i.k);
+    // the video (z 0) first, then the red shape and the text (z 0.5, document order 5, shape before text), the blue one on top (z 10)
+    expect(order).toEqual(['v', 'a', 't', 'b']);
+    expect(heroHtml(l)).toContain('<video');
+  });
+  it('keeps shapes, graphics, text when a layout has no paint order', () => {
+    const l = layout();
+    l.shapes = [{ k: 'a', x: 0, y: 0, w: 100, h: 50, background: 'red', gradient: null, border: null, radius: '0px', filter: null, opacity: 1 }];
+    expect(heroStyles(l).map((i) => i.k)).toEqual(['a', 'a>b:1']);
+  });
 });
 
 describe('scroll keyframes of the first screen', () => {

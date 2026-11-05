@@ -10,6 +10,8 @@ export interface FontFaceRule {
   weight: string;
   style: string;
   display: string;
+  /** the rule's unicode-range (a font split into latin, latin-ext, cyrillic... files) */
+  unicodeRange?: string;
   urls: string[];
   sheet: string;
 }
@@ -68,6 +70,7 @@ export function readCss(sheets: SheetText[]): CssFacts {
         weight: get('font-weight') || '400',
         style: get('font-style') || 'normal',
         display: get('font-display'),
+        unicodeRange: get('unicode-range') || undefined,
         urls,
         sheet: sh.url,
       });

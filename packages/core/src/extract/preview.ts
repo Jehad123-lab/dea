@@ -297,11 +297,53 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
   const W = innerWidth, H = innerHeight;
   // a key that names the same element at another scroll position: its path through the DOM
   const keyOf = (el, pe) => { const p = []; for (let n = el; n && n.nodeType === 1 && n !== document.documentElement; n = n.parentElement) { let i = 1; for (let s = n.previousElementSibling; s; s = s.previousElementSibling) i++; p.push(n.tagName.toLowerCase() + ':' + i); } return p.reverse().join('>') + (pe || ''); };
+  // where an element paints: the z-index of each stacking context on the way down (position + z-index, fixed or sticky, opacity,
+  // transforms, filters), then its own level (positioned above in-flow); equal paths paint in document order
+  const zpath = (el) => {
+    const up = [];
+    for (let n = el; n && n !== document.documentElement; n = n.parentElement) up.push(n);
+    const path = [];
+    for (const n of up.reverse()) {
+      const c = getComputedStyle(n);
+      const pos = c.position !== 'static';
+      const zi = c.zIndex !== 'auto' ? parseInt(c.zIndex, 10) : null;
+      const ctx = (pos && zi !== null) || c.position === 'fixed' || c.position === 'sticky' || +c.opacity < 1 || c.transform !== 'none' || c.filter !== 'none' || c.isolation === 'isolate' || c.mixBlendMode !== 'normal';
+      if (n === el) path.push(zi !== null && pos ? zi : pos ? 0.5 : 0);
+      else if (ctx) path.push(zi !== null && pos ? zi : 0);
+    }
+    return path;
+  };
+  const docOrder = new Map();
+  { let i = 0; for (const n of root.querySelectorAll('*')) docOrder.set(n, i++); }
   const LOADER = /(^|[\\s_-])(pre)?loader([\\s_-]|$)|preload/i;
   let skip = true;
+  // text with runs that differ from the block (a bold word, a coloured or underlined link) as inline spans
+  const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const runs = (el, depth) => {
+    let h = '';
+    const p = getComputedStyle(el);
+    for (const n of el.childNodes) {
+      if (n.nodeType === 3) h += esc(n.textContent.replace(/\\s+/g, ' '));
+      else if (n.nodeType === 1 && depth < 4) {
+        if (n.tagName === 'BR') { h += '<br>'; continue; }
+        if (/^(SCRIPT|STYLE|NOSCRIPT|SVG|CANVAS|IMG|VIDEO|PICTURE)$/i.test(n.tagName)) continue;
+        const c = getComputedStyle(n);
+        if (c.display === 'none' || c.visibility === 'hidden') continue;
+        const d = [];
+        if (c.fontWeight !== p.fontWeight) d.push('font-weight:' + c.fontWeight);
+        if (c.color !== p.color) d.push('color:' + c.color);
+        if (c.fontStyle !== p.fontStyle) d.push('font-style:' + c.fontStyle);
+        if (c.textDecorationLine !== p.textDecorationLine) d.push('text-decoration:' + c.textDecorationLine);
+        if (c.fontFamily !== p.fontFamily) d.push('font-family:' + c.fontFamily.replace(/"/g, "'"));
+        const inner = runs(n, depth + 1);
+        h += d.length ? '<span style="' + d.join(';') + '">' + inner + '</span>' : inner;
+      }
+    }
+    return h;
+  };
   const seen = new Set();
   const walk = (el) => {
-    if (out.length >= 40) return;
+    if (out.length >= 150) return;
     if (skip && el !== root && (el.getAttribute('role') === 'progressbar' || LOADER.test(String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className) + ' ' + el.id))) return;
     let cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return;
@@ -323,7 +365,7 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
         let op = 1;
         for (let p = el; p && p !== document.documentElement; p = p.parentElement) op *= +getComputedStyle(p).opacity;
         if (op >= 0.05)
-          out.push({ __el: el, k: keyOf(el), tag: el.tagName.toLowerCase(), text: (el.innerText || own).trim().slice(0, 200), x: r.left, y: r.top, w: r.width, h: r.height,
+          out.push({ __el: el, k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, tag: el.tagName.toLowerCase(), text: (el.innerText || own).trim().slice(0, 200), rich: el.children.length ? runs(el, 0).trim().slice(0, 1200) : '', deco: cs.textDecorationLine !== 'none' ? cs.textDecorationLine : '', fstyle: cs.fontStyle, x: r.left, y: r.top, w: r.width, h: r.height,
             fontFamily: cs.fontFamily, fontSize: parseFloat(cs.fontSize), fontWeight: cs.fontWeight, letterSpacing: cs.letterSpacing,
             lineHeight: cs.lineHeight, color: cs.color, textTransform: cs.textTransform, textAlign: cs.textAlign, opacity: Math.round(op * 100) / 100 });
         return;
@@ -357,12 +399,13 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
   // the first screen's flat shapes (pills, buttons, badges): a background colour or gradient, a border, rounded corners
   const shapes = [];
   const all = root.querySelectorAll('*');
-  for (let i = 0; i < all.length && i < 4000 && shapes.length < 30; i++) {
+  for (let i = 0; i < all.length && i < 4000 && shapes.length < 100; i++) {
     const el = all[i];
     if (el.closest('svg') || el.tagName === 'CANVAS') continue;
     const cs = getComputedStyle(el);
     const bg = cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent' ? cs.backgroundColor : null;
-    const grad = /gradient\\(/.test(cs.backgroundImage) ? cs.backgroundImage : null;
+    const hasUrl = /url\\(["']?https?:/.test(cs.backgroundImage);
+    const grad = /gradient\\(/.test(cs.backgroundImage) || hasUrl ? cs.backgroundImage : null;
     const bw = parseFloat(cs.borderTopWidth) || 0;
     const border = bw > 0 && cs.borderTopStyle !== 'none' && !/rgba\\(\\d+, \\d+, \\d+, 0\\)/.test(cs.borderTopColor) ? bw + 'px ' + cs.borderTopStyle + ' ' + cs.borderTopColor : null;
     if (!bg && !grad && !border) continue;
@@ -371,15 +414,16 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     // a big shape counts only as an overlay over the picture: a gradient or a see-through colour on a positioned layer
     // that does not hold the canvas (a vignette, a fade to black at the bottom)
     const big = r.width * r.height > W * H * 0.25;
-    if (big && !((grad || (bg && /rgba\\(.*, 0?\\.\\d+\\)$/.test(bg))) && cs.position !== 'static' && !el.querySelector('canvas'))) continue;
+    if (big && hasUrl) { if (el.querySelector('canvas')) continue; }
+    else if (big && !((grad || (bg && /rgba\\(.*, 0?\\.\\d+\\)$/.test(bg))) && cs.position !== 'static' && !el.querySelector('canvas'))) continue;
     if (hiddenUp(el) || shown(el, r) < 0.5) continue;
     const op = opacityOf(el);
     if (op < 0.05) continue;
-    shapes.push({ k: keyOf(el), x: r.left, y: r.top, w: r.width, h: r.height, background: bg, gradient: grad, border, radius: cs.borderRadius, filter: null, opacity: op });
+    shapes.push({ k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, x: r.left, y: r.top, w: r.width, h: r.height, background: bg, gradient: grad, border, radius: cs.borderRadius, filter: null, shadow: cs.boxShadow !== 'none' ? cs.boxShadow : null, ...(hasUrl ? { bgSize: cs.backgroundSize, bgPos: cs.backgroundPosition, bgRepeat: cs.backgroundRepeat, media: big } : {}), opacity: op });
   }
   // a gradient painted by a ::before or ::after: a fade laid over the picture (a dark band at the bottom of a section, a
   // blurred spot) is an overlay too, and the picture under it is the same canvas. Its box comes from its own offsets and size.
-  for (let i = 0; i < all.length && i < 4000 && shapes.length < 40; i++) {
+  for (let i = 0; i < all.length && i < 4000 && shapes.length < 110; i++) {
     const el = all[i];
     if (el.closest('svg') || el.tagName === 'CANVAS') continue;
     for (const pe of ['::before', '::after']) {
@@ -408,18 +452,27 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
   // the first screen's graphics: inline SVG (a logo, an icon) with its computed paint inlined, and small images
   const graphics = [];
   const PAINT = ['fill', 'stroke', 'stroke-width', 'opacity', 'fill-opacity', 'stroke-opacity', 'fill-rule'];
-  for (const el of root.querySelectorAll('svg, img')) {
-    if (graphics.length >= 12) break;
+  for (const el of root.querySelectorAll('svg, img, video')) {
+    if (graphics.length >= 40) break;
     if (el.tagName.toLowerCase() === 'svg' && el.parentElement && el.parentElement.closest('svg')) continue;
     const r = el.getBoundingClientRect();
     if (!(r.width >= 8 && r.height >= 8 && r.bottom > 0 && r.right > 0 && r.top < H && r.left < W)) continue;
-    if (r.width * r.height > W * H * 0.25) continue;
+    const bigG = r.width * r.height > W * H * 0.25;
+    if (bigG && el.tagName.toLowerCase() === 'svg') continue;
     if (hiddenUp(el) || shown(el, r) < 0.5) continue;
     const op = opacityOf(el);
     if (op < 0.05) continue;
+    if (el.tagName.toLowerCase() === 'video') {
+      // a background or hero video: the kit plays the same file (by URL, for study); a blob: stream falls back to its poster
+      const vs = el.currentSrc || el.src;
+      const kind = /^https?:/.test(vs) ? 'video' : /^https?:/.test(el.poster || '') ? 'img' : null;
+      if (!kind) continue;
+      graphics.push({ k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, kind, x: r.left, y: r.top, w: r.width, h: r.height, src: kind === 'video' ? vs : el.poster, poster: el.poster || undefined, fit: getComputedStyle(el).objectFit, media: bigG, opacity: op });
+      continue;
+    }
     if (el.tagName.toLowerCase() === 'img') {
       if (!el.complete || !el.naturalWidth || !/^https?:/.test(el.currentSrc || el.src)) continue;
-      graphics.push({ k: keyOf(el), kind: 'img', x: r.left, y: r.top, w: r.width, h: r.height, src: el.currentSrc || el.src, fit: getComputedStyle(el).objectFit, opacity: op });
+      graphics.push({ k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, kind: 'img', x: r.left, y: r.top, w: r.width, h: r.height, src: el.currentSrc || el.src, fit: getComputedStyle(el).objectFit, media: bigG, opacity: op });
       continue;
     }
     const clone = el.cloneNode(true);
@@ -435,7 +488,7 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     clone.style.display = 'block';
     const svg = clone.outerHTML;
     if (svg.length > 40000) continue;
-    graphics.push({ k: keyOf(el), kind: 'svg', x: r.left, y: r.top, w: r.width, h: r.height, svg, opacity: op });
+    graphics.push({ k: keyOf(el), zp: zpath(el), o: docOrder.get(el) ?? 0, kind: 'svg', x: r.left, y: r.top, w: r.width, h: r.height, svg, opacity: op });
   }
   let canvas = null;
   for (const c of root.querySelectorAll('canvas')) {
@@ -454,9 +507,24 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     }
     if (!canvas || canvas.vis !== vis) canvas = { x: r.left, y: r.top, w: r.width, h: r.height, radius: radius || '0px', vis };
   }
+  // a picture that fills the window under a WebGL canvas that fills it too is the canvas's fallback, not a second layer
+  const canvasBig = canvas && canvas.vis > W * H * 0.5;
+  if (canvasBig) {
+    for (let i = graphics.length - 1; i >= 0; i--) if (graphics[i].media) graphics.splice(i, 1);
+    for (let i = shapes.length - 1; i >= 0; i--) if (shapes[i].media) shapes.splice(i, 1);
+  }
   if (canvas) delete canvas.vis;
   const bgOf = (el) => { const b = el && getComputedStyle(el).backgroundColor; return b && b !== 'rgba(0, 0, 0, 0)' && b !== 'transparent' ? b : null; };
-  const background = bgOf(document.body) || bgOf(document.documentElement);
+  // the page colour the first screen sits on: what shows at nine points of the window (the nearest opaque background up the
+  // tree), the most common; else the body's
+  const seenBg = new Map();
+  for (const fx of [0.04, 0.5, 0.96]) for (const fy of [0.04, 0.5, 0.96]) {
+    let c = null;
+    for (let e = document.elementFromPoint(W * fx, H * fy); e && !c; e = e.parentElement) c = bgOf(e);
+    if (c) seenBg.set(c, (seenBg.get(c) || 0) + 1);
+  }
+  const common = [...seenBg.entries()].sort((a, b) => b[1] - a[1])[0];
+  const background = (common && common[1] >= 4 ? common[0] : null) || bgOf(document.body) || bgOf(document.documentElement);
   return { viewport: { width: W, height: H }, boxes, canvas, background, shapes, graphics };
 })()`;
 

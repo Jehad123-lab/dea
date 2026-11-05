@@ -421,8 +421,14 @@ export interface HeroLayout {
   viewport: { width: number; height: number };
   boxes: Array<{
     k?: string;
+    zp?: number[];
+    o?: number;
     tag: string;
     text: string;
+    /** the same text with runs that differ from the block (bold, colour, underline) as inline spans */
+    rich?: string;
+    deco?: string;
+    fstyle?: string;
     x: number;
     y: number;
     w: number;
@@ -444,6 +450,13 @@ export interface HeroLayout {
   /** ✔ flat shapes on the first screen (pills, buttons, badges): background, gradient, border, corners */
   shapes?: Array<{
     k?: string;
+    zp?: number[];
+    o?: number;
+    shadow?: string | null;
+    bgSize?: string;
+    bgPos?: string;
+    bgRepeat?: string;
+    media?: boolean;
     x: number;
     y: number;
     w: number;
@@ -466,7 +479,11 @@ export interface HeroLayout {
   /** ✔ graphics on the first screen: inline SVG with its computed paint, or an image by URL (the site's own, for study) */
   graphics?: Array<{
     k?: string;
-    kind: 'svg' | 'img' | 'placeholder';
+    zp?: number[];
+    o?: number;
+    kind: 'svg' | 'img' | 'video' | 'placeholder';
+    poster?: string;
+    media?: boolean;
     x: number;
     y: number;
     w: number;
@@ -501,31 +518,50 @@ export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text
   // shapes first (under), then graphics, then the text on top, as on the page
   const shapes = (l.shapes ?? []).map((s) => ({
     k: s.k,
+    _z: s.zp,
+    _o: s.o,
+    _r: 0,
     tag: 'div',
     text: '',
     style: {
       ...place(s),
       ...(s.background ? { background: s.background } : {}),
       ...(s.gradient ? { backgroundImage: s.gradient } : {}),
+      ...(s.bgSize ? { backgroundSize: s.bgSize, backgroundPosition: s.bgPos ?? '0% 0%', backgroundRepeat: s.bgRepeat ?? 'repeat' } : {}),
       ...(s.border ? { border: s.border, boxSizing: 'border-box' } : {}),
       ...(s.radius && s.radius !== '0px' ? { borderRadius: s.radius } : {}),
       ...(s.filter ? { filter: s.filter } : {}),
+      ...(s.shadow ? { boxShadow: s.shadow } : {}),
     },
   }));
   const graphics = (l.graphics ?? []).map((gr) =>
     gr.kind === 'svg'
-      ? { k: gr.k, tag: 'div', text: '', html: gr.svg ?? '', style: place(gr) }
+      ? { k: gr.k, _z: gr.zp, _o: gr.o, _r: 1, tag: 'div', text: '', html: gr.svg ?? '', style: place(gr) }
       : gr.kind === 'img'
-        ? { k: gr.k, tag: 'img', text: '', html: gr.src ?? '', style: { ...place(gr), objectFit: gr.fit || 'fill' } }
-        : { k: gr.k, tag: 'div', text: '', style: { ...place(gr), background: 'repeating-conic-gradient(#8a8a8a 0 25%, #6e6e6e 0 50%) 0 0 / 8px 8px' } },
+        ? { k: gr.k, _z: gr.zp, _o: gr.o, _r: 1, tag: 'img', text: '', html: gr.src ?? '', style: { ...place(gr), objectFit: gr.fit || 'fill' } }
+        : gr.kind === 'video'
+          ? { k: gr.k, _z: gr.zp, _o: gr.o, _r: 1, tag: 'video', text: '', html: gr.src ?? '', style: { ...place(gr), objectFit: gr.fit || 'fill' } }
+          : {
+              k: gr.k,
+              _z: gr.zp,
+              _o: gr.o,
+              _r: 1,
+              tag: 'div',
+              text: '',
+              style: { ...place(gr), background: 'repeating-conic-gradient(#8a8a8a 0 25%, #6e6e6e 0 50%) 0 0 / 8px 8px' },
+            },
   );
-  return [
+  const items = [
     ...shapes,
     ...graphics,
     ...l.boxes.map((b) => ({
       k: b.k,
+      _z: b.zp,
+      _o: b.o,
+      _r: 2,
       tag: tags.has(b.tag) ? (b.tag === 'a' || b.tag === 'button' ? 'span' : b.tag) : 'div',
       text: b.text,
+      ...(b.rich && /<span style=|<br>/.test(b.rich) ? { html: b.rich } : {}),
       style: {
         position: 'absolute',
         left: vw(b.x),
@@ -540,11 +576,26 @@ export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text
         color: b.color,
         textTransform: b.textTransform,
         textAlign: b.textAlign === 'start' ? 'left' : b.textAlign,
+        ...(b.deco ? { textDecoration: b.deco } : {}),
+        ...(b.fstyle && b.fstyle !== 'normal' ? { fontStyle: b.fstyle } : {}),
         ...(b.opacity < 1 ? { opacity: String(b.opacity) } : {}),
         whiteSpace: 'pre-wrap',
       },
     })),
   ];
+  // paint order: stacking contexts and document order as the page had them (a layout from before this read keeps shapes, graphics, text)
+  const ordered = items.every((it) => it._o !== undefined)
+    ? [...items].sort((a, b) => {
+        const za = a._z ?? [];
+        const zb = b._z ?? [];
+        for (let n = 0; n < Math.max(za.length, zb.length); n++) {
+          const d = (za[n] ?? 0) - (zb[n] ?? 0);
+          if (d) return d;
+        }
+        return (a._o ?? 0) - (b._o ?? 0) || a._r - b._r;
+      })
+    : items;
+  return ordered.map(({ _z, _o, _r, ...it }) => it);
 }
 
 const cssText = (st: Record<string, string>) =>
@@ -684,7 +735,8 @@ ${scrollScript(l) ? "  useEffect(() => { const s = document.createElement('scrip
         const Tag = it.tag;
         // an image by URL, an inline SVG read from the page, or a text block
         if (Tag === 'img') return <img key={i} data-dea-k={it.k} src={it.html} alt="" style={it.style} />;
-        if (it.html) return <div key={i} data-dea-k={it.k} style={it.style} dangerouslySetInnerHTML={{ __html: it.html }} />;
+        if (Tag === 'video') return <video key={i} data-dea-k={it.k} src={it.html} autoPlay muted loop playsInline style={it.style} />;
+        if (it.html) return <Tag key={i} data-dea-k={it.k} style={it.style} dangerouslySetInnerHTML={{ __html: it.html }} />;
         return (
           <Tag key={i} data-dea-k={it.k} data-dea-h="0" style={it.style}>
             {it.text}
@@ -724,6 +776,8 @@ export function heroHtml(l: HeroLayout): string {
     .map((it) => {
       const st = escHtml(cssText(it.style)).replace(/"/g, '&quot;');
       const key = it.k ? ` data-dea-k="${escHtml(it.k).replace(/"/g, '&quot;')}"` : '';
+      if (it.tag === 'video')
+        return `  <video${key} src="${escHtml(it.html ?? '').replace(/"/g, '&quot;')}" autoplay muted loop playsinline style="${st}"></video>`;
       if (it.tag === 'img') return `  <img${key} src="${escHtml(it.html ?? '').replace(/"/g, '&quot;')}" alt="" style="${st}">`;
       return `  <${it.tag}${key}${it.html || !it.text ? '' : ' data-dea-h="0"'} style="${st}">${it.html ?? escHtml(it.text)}</${it.tag}>`;
     })
