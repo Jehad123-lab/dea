@@ -458,6 +458,7 @@ export interface HeroLayout {
   }>;
   /** ✔ how the first screen's elements move with scroll: keyframes of each element's box at a few scroll positions (px), when the page scrolls */
   scroll?: {
+    mode?: 'scroll' | 'wheel';
     positions: number[];
     items: Record<string, Array<[number, number, number, number, number, number] | null>>;
     texts?: Record<string, string>;
@@ -560,7 +561,7 @@ const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').re
 export function scrollScript(l: HeroLayout): string {
   const s = l.scroll;
   if (!s || !Object.keys(s.items).length) return '';
-  const data = JSON.stringify({ positions: s.positions, items: s.items, vw: l.viewport.width, vh: l.viewport.height });
+  const data = JSON.stringify({ positions: s.positions, items: s.items, vw: l.viewport.width, vh: l.viewport.height, wheel: s.mode === 'wheel' });
   return `(function () {
   var D = ${data};
   var sc = document.getElementById('scene') || document.querySelector('.dea-scene');
@@ -577,8 +578,11 @@ export function scrollScript(l: HeroLayout): string {
     }
     return pts[pts.length - 1][1];
   }
+  // a page that scrolls by itself (virtual scrolling) answers the wheel: the position is the wheel's total, eased
+  var wheel = 0, shown = 0, raf = 0;
+  function pos() { return D.wheel ? shown : window.scrollY || 0; }
   function apply() {
-    var s = window.scrollY || 0;
+    var s = pos();
     els.forEach(function (el) {
       var b = at(D.items[el.getAttribute('data-dea-k')], s);
       if (!b) return;
@@ -589,7 +593,17 @@ export function scrollScript(l: HeroLayout): string {
       if (b[5]) p('font-size', 'max(10px, ' + (b[5] / D.vw * 100) + 'vw)');
     });
   }
-  addEventListener('scroll', apply, { passive: true });
+  function ease() {
+    shown += (wheel - shown) * 0.12;
+    if (Math.abs(wheel - shown) < 0.5) shown = wheel;
+    apply();
+    raf = shown === wheel ? 0 : requestAnimationFrame(ease);
+  }
+  if (D.wheel) addEventListener('wheel', function (e) {
+    wheel = Math.max(0, Math.min(D.positions[D.positions.length - 1] * 1.5, wheel + e.deltaY));
+    if (!raf) raf = requestAnimationFrame(ease);
+  }, { passive: true });
+  else addEventListener('scroll', apply, { passive: true });
   apply();
 })();`;
 }
@@ -601,27 +615,47 @@ export function scrollScript(l: HeroLayout): string {
  */
 export function withScroll(
   l: HeroLayout,
-  s: { positions: number[]; items: Record<string, Array<[number, number, number, number, number, number] | null>>; texts?: Record<string, string> },
+  s: {
+    mode?: 'scroll' | 'wheel';
+    positions: number[];
+    items: Record<string, Array<[number, number, number, number, number, number] | null>>;
+    texts?: Record<string, string>;
+    boxesFinal?: unknown[];
+  },
 ): HeroLayout {
   const keys = new Set(
     [...l.boxes.map((b) => b.k), ...(l.shapes ?? []).map((b) => b.k), ...(l.graphics ?? []).map((b) => b.k), l.canvas ? 'canvas' : undefined].filter(
       Boolean,
     ) as string[],
   );
-  const items = Object.fromEntries(Object.entries(s.items).filter(([k]) => keys.has(k)));
-  const boxes = l.boxes.map((b) => {
+  // the first read caught a heading half typed or half revealed: when the later, complete read holds every early block
+  // (same element, text that starts with the early text) and says more, the later blocks are the layout
+  const fin = (s.boxesFinal ?? []) as HeroLayout['boxes'];
+  const lateByKey = new Map(fin.filter((b) => b.k).map((b) => [b.k as string, b]));
+  const grew =
+    fin.length > 0 &&
+    l.boxes.length > 0 &&
+    l.boxes.every((b) => {
+      const late = b.k ? lateByKey.get(b.k) : undefined;
+      return late?.text.toLowerCase().startsWith(b.text.toLowerCase().slice(0, Math.max(2, b.text.length - 1)));
+    }) &&
+    fin.map((b) => b.text).join(' ').length > l.boxes.map((b) => b.text).join(' ').length;
+  const base = grew ? fin : l.boxes;
+  const boxes = base.map((b) => {
     const late = b.k ? s.texts?.[b.k] : undefined;
     return late && late.length > b.text.length && late.toLowerCase().startsWith(b.text.toLowerCase().slice(0, Math.max(2, b.text.length - 1)))
       ? { ...b, text: late }
       : b;
   });
-  return { ...l, boxes, scroll: Object.keys(items).length ? { positions: s.positions, items } : null };
+  const all = new Set([...keys, ...boxes.map((b) => b.k)]);
+  const items = Object.fromEntries(Object.entries(s.items).filter(([k]) => all.has(k)));
+  return { ...l, boxes, scroll: Object.keys(items).length ? { mode: s.mode, positions: s.positions, items } : null };
 }
 
 /** the room the page needs to scroll through the keyframes (the kit's first screen is fixed to the window while it does) */
 export const scrollSpacer = (l: HeroLayout): number => {
   const s = l.scroll;
-  return s && Object.keys(s.items).length ? Math.round(Math.max(...s.positions) + l.viewport.height) : 0;
+  return s && s.mode !== 'wheel' && Object.keys(s.items).length ? Math.round(Math.max(...s.positions) + l.viewport.height) : 0;
 };
 
 /** Hero.jsx for React: the first screen's text, placed as on the site. */

@@ -142,6 +142,23 @@ describe('scroll keyframes of the first screen', () => {
     expect(set.left).toBe('2.5vw');
     expect(set.width).toBe('95vw');
   });
+  it('takes the later, complete read of a heading that was being revealed word by word', () => {
+    const early = layout();
+    early.boxes = [{ ...early.boxes[0], text: 'We' }];
+    const late = { ...early.boxes[0], text: 'We' };
+    const word = { ...early.boxes[0], k: 'a>b:2', text: 'create 3D visual' };
+    const l = withScroll(early, { ...scroll, texts: {}, boxesFinal: [late, word] });
+    expect(l.boxes.map((b) => b.text)).toEqual(['We', 'create 3D visual']);
+    // a later read that lost an early block is not taken
+    const l2 = withScroll(early, { ...scroll, texts: {}, boxesFinal: [word] });
+    expect(l2.boxes.map((b) => b.text)).toEqual(['We']);
+  });
+  it('on a page that scrolls by itself the position is the wheel total and no room is added', () => {
+    const l = withScroll(layout(), { ...scroll, mode: 'wheel' });
+    expect(scrollSpacer(l)).toBe(0);
+    expect(heroHtml(l)).not.toContain('position: fixed');
+    expect(scrollScript(l)).toContain('"wheel":true');
+  });
   it('is empty when nothing moved with scroll', () => {
     expect(scrollScript(layout())).toBe('');
     expect(scrollSpacer(layout())).toBe(0);

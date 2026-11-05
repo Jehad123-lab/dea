@@ -462,6 +462,10 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
 
 /** Where each first-screen element sits at a few scroll positions: a box that moves, scales or fades with scroll gets keyframes. */
 export interface ScrollLayout {
+  /** what moves the keyframes: the page's own scrolling, or the wheel on a page that scrolls by itself (virtual scrolling) */
+  mode: 'scroll' | 'wheel';
+  /** the text boxes read last (long after the intro), complete: used when the first read caught a heading half typed */
+  boxesFinal?: unknown[];
   /** the scroll positions read (px); the first is 0 */
   positions: number[];
   /** per element key: box [x, y, w, h, opacity, fontSize] at each position, null where the element was not on screen */
@@ -477,7 +481,7 @@ export interface ScrollLayout {
  */
 export async function readScrollLayouts(page: Page, section: string | null): Promise<ScrollLayout | null> {
   const can = (await page.evaluate('document.documentElement.scrollHeight > innerHeight + 2').catch(() => false)) as boolean;
-  if (!can) return null;
+  const mode: 'scroll' | 'wheel' = can ? 'scroll' : 'wheel';
   const vh = (await page.evaluate('innerHeight').catch(() => 900)) as number;
   const vw = (await page.evaluate('innerWidth').catch(() => 1440)) as number;
   const positions = [0, Math.round(vh * 0.4), Math.round(vh * 0.9)];
@@ -487,21 +491,36 @@ export async function readScrollLayouts(page: Page, section: string | null): Pro
     graphics?: Array<{ k?: string; x: number; y: number; w: number; h: number; opacity: number }>;
     canvas?: { x: number; y: number; w: number; h: number } | null;
   };
+  const settle = async (ms: number) => {
+    // two drawn frames, then a moment for a scrubbed or smoothed animation to catch up
+    await page
+      .evaluate('new Promise((r) => { const t = setTimeout(r, 6000); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); r(); })); })')
+      .catch(() => {});
+    await page.waitForTimeout(ms);
+  };
   const reads: R[] = [];
+  let at = 0;
   try {
+    if (mode === 'wheel') {
+      // a page that scrolls by its own (virtual) scrolling answers the wheel: bring it back to the top first
+      await page.mouse.move(vw / 2, vh / 2).catch(() => {});
+      await page.mouse.wheel(0, -8000).catch(() => {});
+      await settle(2500);
+    }
     for (const y of positions) {
-      await page.evaluate(`window.scrollTo(0, ${y})`);
-      // two drawn frames, then a moment for a scrubbed animation to catch up
-      await page
-        .evaluate('new Promise((r) => { const t = setTimeout(r, 6000); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); r(); })); })')
-        .catch(() => {});
-      await page.waitForTimeout(900);
+      if (mode === 'scroll') await page.evaluate(`window.scrollTo(0, ${y})`);
+      else {
+        if (y !== at) await page.mouse.wheel(0, y - at);
+      }
+      at = y;
+      await settle(mode === 'wheel' ? 2500 : 900);
       reads.push((await page.evaluate(LAYOUT_READ(section))) as R);
     }
   } catch {
     return null;
   } finally {
-    await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
+    if (mode === 'scroll') await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
+    else await page.mouse.wheel(0, -8000).catch(() => {});
   }
   const items: ScrollLayout['items'] = {};
   const add = (i: number, k: string | undefined, b: [number, number, number, number, number, number]) => {
@@ -536,8 +555,10 @@ export async function readScrollLayouts(page: Page, section: string | null): Pro
   for (const b of reads[0]?.boxes ?? []) if (b.k && b.text) texts[b.k] = b.text;
   if (!changed.length && !Object.keys(texts).length) return null;
   return {
+    mode,
     positions,
     texts,
+    boxesFinal: reads[0]?.boxes ?? [],
     items: Object.fromEntries(
       changed.map(([k, f]) => [k, f.map((b) => (b ? (b.map((v) => Math.round(v * 100) / 100) as [number, number, number, number, number, number]) : null))]),
     ),
