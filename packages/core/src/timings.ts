@@ -210,6 +210,23 @@ export function timed<T>(name: string, fn: () => Promise<T>, note?: string): Pro
   return t ? t.stage(name, fn, note) : fn();
 }
 
+let budgetEnd: number | null = null;
+
+/** Start the run-time budget of one extract: `minutes` from now (0 or less = no budget). */
+export function startBudget(minutes: number): void {
+  budgetEnd = minutes > 0 ? performance.now() + minutes * 60_000 : null;
+}
+
+/** Milliseconds left in the run-time budget (Infinity when there is none). */
+export function budgetLeftMs(): number {
+  return budgetEnd == null ? Number.POSITIVE_INFINITY : budgetEnd - performance.now();
+}
+
+/** Is the soft budget spent? Optional stages (the interaction check, research, the build check) are skipped from then on. */
+export function overBudget(): boolean {
+  return budgetLeftMs() <= 0;
+}
+
 function secs(ms: number): string {
   return ms >= 10_000 ? `${(ms / 1000).toFixed(0)} s` : `${(ms / 1000).toFixed(1)} s`;
 }

@@ -195,9 +195,12 @@ export { collect, type InspectOptions, type InspectResult, inspectSite, type Run
 export { classify, fmtBytes, type NetworkSummary, summarize as summarizeHar } from './see/network.ts';
 export { detectStack, KNOWN_TECH, type StackHit, type StackSignals } from './see/stack.ts';
 export {
+  budgetLeftMs,
   currentTimings,
+  overBudget,
   renderTimings,
   type StageTiming,
+  startBudget,
   Timings,
   type TimingsDoc,
   timed,

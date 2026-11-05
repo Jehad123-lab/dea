@@ -11,7 +11,7 @@
 // Verified when the uploaded vertices lie on the recorded path in one of the coordinate spaces below; otherwise the tape's
 // frames still play (what the site drew), but their points stay where they were recorded.
 
-import type { CaptureDoc, Cmd } from './graph.ts';
+import { type CaptureDoc, type Cmd, numbers } from './graph.ts';
 
 export type TapeSpace = 'ndc' | 'ndc-flip' | 'uv' | 'uv-flip' | 'px' | 'px-flip';
 const SPACES: TapeSpace[] = ['ndc', 'ndc-flip', 'uv', 'uv-flip', 'px', 'px-flip'];
@@ -30,8 +30,33 @@ export interface TapeAnchor {
   no: number[];
 }
 
+/**
+ * A uniform the site sets only while the pointer moves (a splat's point and force, a ripple's centre): its recorded values
+ * follow the recorded pointer, either as a position in one of the coordinate spaces or as the pointer's step since the last
+ * frame times a gain. Live, the same uniform is set from the live pointer.
+ */
+export interface TapeUniform {
+  /** program id and uniform name */
+  p: number;
+  n: string;
+  /** which of the frame's sets of this uniform (a splat sets `color` once for the force and once for the dye) */
+  k: number;
+  kind: 'pos' | 'delta';
+  space: TapeSpace;
+  /** delta: value = gain x pointer step (fractions of the canvas, y down) */
+  gx: number;
+  gy: number;
+  /** components the call carries; the ones after the first two keep their recorded values */
+  rest: number[];
+  /** how well the recorded values follow the recorded pointer (0..1) */
+  fit: number;
+  /** tape frames in which it was set */
+  frames: number;
+}
+
 export interface TapeFit {
   anchors: TapeAnchor[];
+  uniforms?: TapeUniform[];
   /** the recorded pointer path, normalised to the canvas (0..1), per tape frame */
   path: Array<[number, number]>;
   /** buffers examined: id, and how they scored */
@@ -124,6 +149,12 @@ function uploads(bin: Uint8Array, frames: CaptureDoc['frames']): Upload[] {
  * `frames` are the tape frames only; `move` is how many of them had the pointer moving.
  */
 export function fitTape(doc: CaptureDoc, bin: Uint8Array, frames: CaptureDoc['frames'], move: number): TapeFit {
+  const fit = fitTapeBuffers(doc, bin, frames, move);
+  fit.uniforms = fitTapeUniforms(doc, bin, frames, move);
+  return fit;
+}
+
+function fitTapeBuffers(doc: CaptureDoc, bin: Uint8Array, frames: CaptureDoc['frames'], move: number): TapeFit {
   const path = tapePath(doc, frames);
   const w = doc.canvas.cssW || doc.canvas.w;
   const h = doc.canvas.cssH || doc.canvas.h;
@@ -217,6 +248,126 @@ export function fitTape(doc: CaptureDoc, bin: Uint8Array, frames: CaptureDoc['fr
   return { anchors, path, report };
 }
 
+const UNIFORM_CALL = /^uniform[234]f(v)?$/;
+
+/** where the pointer (fractions of the canvas, y down) sits in a coordinate space */
+function inSpace(space: TapeSpace, u: number, v: number, w: number, h: number): [number, number] {
+  switch (space) {
+    case 'ndc':
+      return [2 * u - 1, 1 - 2 * v];
+    case 'ndc-flip':
+      return [2 * u - 1, 2 * v - 1];
+    case 'uv':
+      return [u, 1 - v];
+    case 'uv-flip':
+      return [u, v];
+    case 'px':
+      return [u * w, v * h];
+    case 'px-flip':
+      return [u * w, (1 - v) * h];
+  }
+}
+
+/**
+ * Find the uniforms the site sets only while the pointer moves, and what in the pointer they follow: a position (the
+ * value is where the pointer was, in one of six spaces) or a step (the value is the pointer's movement since the last frame
+ * times a gain). Every tape frame is read (under load a frame can see several moves or none). Only uniforms that take at least three different values on the tape are tried;
+ * a uniform is kept when its values follow the recorded pointer (position within 3% of the canvas, or step correlation
+ * above 0.95 on both components).
+ */
+export function fitTapeUniforms(doc: CaptureDoc, bin: Uint8Array, frames: CaptureDoc['frames'], _move: number): TapeUniform[] {
+  const path = tapePath(doc, frames);
+  const w = doc.canvas.cssW || doc.canvas.w;
+  const h = doc.canvas.cssH || doc.canvas.h;
+  const sets = new Map<string, Array<{ f: number; v: number[] }>>();
+  const loc = new Map<string, { p: number; n: string; k: number }>();
+  frames.forEach((fr, f) => {
+    const occ = new Map<string, number>();
+    for (const cmd of fr.cmds as Cmd[]) {
+      const name = cmd[0];
+      const l = cmd[1] as { $?: string; p?: number; n?: string } | null;
+      if (!UNIFORM_CALL.test(name) || l?.$ !== 'loc' || l.p == null || l.n == null) continue;
+      const v = name.endsWith('v') ? numbers(cmd[2], bin) : cmd.slice(2).flatMap((x) => numbers(x as never, bin));
+      if (v.length < 2 || v.some((x) => !Number.isFinite(x))) continue;
+      const base = `${l.p}|${l.n}`;
+      const o = occ.get(base) ?? 0;
+      occ.set(base, o + 1);
+      const k = `${base}#${o}`;
+      loc.set(k, { p: l.p, n: l.n, k: o });
+      sets.set(k, [...(sets.get(k) ?? []), { f, v }]);
+    }
+  });
+  const out: TapeUniform[] = [];
+  for (const [k, list] of sets) {
+    const distinct = new Set(
+      list.map((e) =>
+        e.v
+          .slice(0, 2)
+          .map((x) => x.toFixed(4))
+          .join(','),
+      ),
+    );
+    if (list.length < 3 || distinct.size < 3) continue;
+    const { p, n, k: occurrence } = loc.get(k) as { p: number; n: string; k: number };
+    const rest = list[0].v.slice(2);
+    // position: one of the six spaces, the pointer as of this frame or the one before
+    let best: { space: TapeSpace; frac: number } | null = null;
+    for (const space of SPACES) {
+      for (const lag of [0, 1]) {
+        const tol = space.startsWith('px') ? 0.03 * Math.max(w, h) : space.startsWith('ndc') ? 0.06 : 0.03;
+        let ok = 0;
+        for (const e of list) {
+          const q = path[Math.max(0, e.f - lag)];
+          const [X, Y] = inSpace(space, q[0], q[1], w, h);
+          if (Math.hypot(e.v[0] - X, e.v[1] - Y) <= tol) ok++;
+        }
+        if (!best || ok / list.length > best.frac) best = { space, frac: ok / list.length };
+      }
+    }
+    if (best && best.frac >= 0.8) {
+      out.push({ p, n, k: occurrence, kind: 'pos', space: best.space, gx: 0, gy: 0, rest, fit: Math.round(best.frac * 100) / 100, frames: list.length });
+      continue;
+    }
+    // step: value = gain x (pointer now - pointer one frame ago), per component
+    const dx: number[] = [];
+    const dy: number[] = [];
+    for (const e of list) {
+      const a = path[Math.max(0, e.f)];
+      const b = path[Math.max(0, e.f - 1)];
+      dx.push(a[0] - b[0]);
+      dy.push(a[1] - b[1]);
+    }
+    const gain = (d: number[], y: number[]) => {
+      const sxx = d.reduce((s, x) => s + x * x, 0);
+      const sxy = d.reduce((s, x, i) => s + x * y[i], 0);
+      const syy = y.reduce((s, x) => s + x * x, 0);
+      return { g: sxx > 1e-12 ? sxy / sxx : 0, r: sxx > 1e-12 && syy > 1e-12 ? Math.abs(sxy) / Math.sqrt(sxx * syy) : 0 };
+    };
+    const X = gain(
+      dx,
+      list.map((e) => e.v[0]),
+    );
+    const Y = gain(
+      dy,
+      list.map((e) => e.v[1]),
+    );
+    if (X.r >= 0.95 && Y.r >= 0.95)
+      out.push({
+        p,
+        n,
+        k: occurrence,
+        kind: 'delta',
+        space: 'uv-flip',
+        gx: X.g,
+        gy: Y.g,
+        rest,
+        fit: Math.round(Math.min(X.r, Y.r) * 100) / 100,
+        frames: list.length,
+      });
+  }
+  return out;
+}
+
 /**
  * The runtime, as source: pasted into the replay player and the rebuild runner (plain functions, no imports).
  * createTape(info) returns null when the recording has no tape, else { step(x, y), place(f, c, floats) }:
@@ -232,7 +383,18 @@ function createTape(info) {
   const hist = []; // live pointer positions, one per displayed frame, in CSS px of the recording's canvas box
   const by = new Map();
   for (const a of info.anchors || []) by.set(a.f + ':' + a.c, a);
+  const UN = new Map();
+  for (const a of info.uniforms || []) UN.set(a.p + '|' + a.n + '#' + a.k, a);
   let active = false, c = 0, sinceStill = 0, last = null, shown = -1;
+  // a tape recorded with the button held plays only while the live button is held
+  let down = false;
+  if (info.drag && typeof addEventListener === 'function') {
+    try {
+      addEventListener('pointerdown', () => { down = true; }, true);
+      addEventListener('pointerup', () => { down = false; }, true);
+      addEventListener('pointercancel', () => { down = false; }, true);
+    } catch (e) {}
+  }
   const toMap = (space, px, py, w, h) => {
     switch (space) {
       case 'ndc': return [(px / w) * 2 - 1, 1 - (py / h) * 2];
@@ -253,16 +415,26 @@ function createTape(info) {
   };
   return {
     info,
+    setDown(v) { down = !!v; },
     step(x, y) {
       const w = info.w, h = info.h; // the canvas box the anchors were measured in
       const px = x * w, py = y * h;
-      const moved = last && Math.hypot(px - last[0], py - last[1]) > 0.0008 * Math.max(w, h);
+      const moved = last && Math.hypot(px - last[0], py - last[1]) > 0.0008 * Math.max(w, h) && (!info.drag || down);
       last = [px, py];
       hist.push([px, py]); if (hist.length > 400) hist.shift();
       if (moved) { c = active ? (c < move ? Math.min(c + 1, move - 1) : move - 1) : 0; active = true; sinceStill = 0; }
       else if (active) { sinceStill++; c = Math.max(c, move - 1) + 1; if (c >= n) { active = false; c = 0; } }
       shown = active ? c : -1;
       return shown;
+    },
+    // a uniform the site sets only while the pointer moves, from the live pointer: its position, or its step since the last frame
+    uniform(p, n, k) {
+      const a = UN.get(p + '|' + n + '#' + (k || 0));
+      if (!a || !hist.length) return null;
+      const w = info.w, h = info.h;
+      const now = hist[hist.length - 1], prev = hist.length > 1 ? hist[hist.length - 2] : now;
+      if (a.kind === 'pos') { const m = toMap(a.space, now[0], now[1], w, h); return [m[0], m[1]].concat(a.rest); }
+      return [a.gx * (now[0] - prev[0]) / w, a.gy * (now[1] - prev[1]) / h].concat(a.rest);
     },
     place(f, ci, data) {
       const a = by.get(f + ':' + ci);

@@ -22,7 +22,7 @@ import { REBUILD_RUNNER } from '../replay/runner.ts';
 import { recoverScene, sceneGlb, sceneMd, sceneModule } from '../replay/scene.ts';
 import { fitTape } from '../replay/tape.ts';
 import type { InspectOptions } from '../see/inspect.ts';
-import { currentTimings, type StageTiming, Timings, type TimingsDoc, timed, withTimings } from '../timings.ts';
+import { currentTimings, overBudget, type StageTiming, Timings, type TimingsDoc, timed, withTimings } from '../timings.ts';
 import {
   type HeroLayout,
   heroHtml,
@@ -51,6 +51,7 @@ import {
   interactionMd,
   meanResponse,
   scoreInteraction,
+  setDragStep,
 } from './interaction.ts';
 import { type KitManifest, libraryAdd } from './library.ts';
 import {
@@ -411,6 +412,13 @@ function mark(name: string, under?: Mark): Mark {
 async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractResult> {
   const target = opts.to ?? 'react';
   const say = (s: string) => opts.onProgress?.(s);
+  setDragStep(false);
+  // the run-time budget (--budget): once it is spent, the optional stages are skipped and the run says so
+  const budgetSkip = (what: string): boolean => {
+    if (!overBudget()) return false;
+    say(`${what} skipped: the run-time budget is spent (--budget)`);
+    return true;
+  };
   const child = { browser: opts.browser, headless: opts.headless, runsRoot: opts.runsRoot, onProgress: opts.onProgress };
 
   // 0. the reference watch (the longest wait) starts at once, beside the decoders
@@ -705,13 +713,30 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           const binU8 = new Uint8Array(c.bin.buffer, c.bin.byteOffset, c.bin.byteLength);
           // the pointer tape: frames recorded while the pointer moved and settled are kept apart from the rest frames
           if (recDoc.tape && recDoc.frames.length > recDoc.tape.from) {
-            recDoc.tapeFrames = recDoc.frames.slice(recDoc.tape.from);
-            recDoc.frames = recDoc.frames.slice(0, recDoc.tape.from);
-            const tf = fitTape(recDoc, binU8, recDoc.tapeFrames, recDoc.tape.move);
+            const all = recDoc.frames;
+            const drag = recDoc.tapeDrag && all.length > recDoc.tapeDrag.from ? recDoc.tapeDrag : null;
+            recDoc.frames = all.slice(0, recDoc.tape.from);
+            recDoc.tapeFrames = all.slice(recDoc.tape.from, drag ? drag.from : undefined);
+            let tf = fitTape(recDoc, binU8, recDoc.tapeFrames, recDoc.tape.move);
+            const follows = (t: typeof tf) => t.anchors.length + (t.uniforms?.length ?? 0) > 0;
+            let how = 'hover';
+            if (drag && !follows(tf)) {
+              // nothing followed the hovering pointer: the site may draw only while the button is held (paint, fluid, drag to orbit)
+              const dragFrames = all.slice(drag.from);
+              const td = fitTape(recDoc, binU8, dragFrames, drag.move);
+              if (follows(td)) {
+                recDoc.tapeFrames = dragFrames;
+                recDoc.tape = { from: recDoc.tape.from, move: drag.move, still: drag.still, drag: true };
+                tf = td;
+                how = 'drag (button held)';
+              }
+            }
+            delete recDoc.tapeDrag;
             recDoc.tape.anchors = tf.anchors;
+            recDoc.tape.uniforms = tf.uniforms ?? [];
             recDoc.tape.fit = { report: tf.report, path: tf.path };
             say(
-              `pointer tape: ${recDoc.tapeFrames.length} frames; ${tf.anchors.length} uploads anchored to the pointer path (${tf.report.map((r) => `buffer ${r.buf}: ${r.reason}`).join('; ') || 'no CPU uploads'})`,
+              `pointer tape (${how}): ${recDoc.tapeFrames.length} frames; ${tf.anchors.length} uploads anchored to the pointer path (${tf.report.map((r) => `buffer ${r.buf}: ${r.reason}`).join('; ') || 'no CPU uploads'}); ${tf.uniforms?.length ?? 0} uniforms follow the live pointer${tf.uniforms?.length ? ` (${tf.uniforms.map((u) => `${u.n} ${u.kind}`).join(', ')})` : ''}`,
             );
           } else delete recDoc.tape;
           recDoc.animate = animateEntries(recDoc);
@@ -1091,11 +1116,13 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           canvas: { start: canvasStart, final: canvasFinal },
         };
         // live interaction: the same scripted pointer and scroll on the kit (replay and rebuild, running live) as on the site
-        if (!quick && replay && 'interaction' in ref && ref.interaction?.length) {
+        if (!quick && replay && 'interaction' in ref && ref.interaction?.length && !budgetSkip('interaction check')) {
           const doneI = mark('interaction check (scripted pointer + scroll, site vs kit)', doneScore);
           try {
             say('interaction check: the same pointer and scroll script on the kit, running live');
             const siteFrames = ref.interaction;
+            // the site's script had a drag step when its page listens for a press (one more frame than the base script)
+            setDragStep(siteFrames.length > 4);
             const siteState = 'interactionState' in ref ? (ref.interactionState ?? null) : null;
             const rows: Array<{ label: string; frames: Buffer[] }> = [{ label: 'original', frames: siteFrames }];
             const { program: _p, ...rest } = params;
@@ -1174,14 +1201,14 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
 
   // 5. techniques behind it, researched in free sources (cited; values and pointers only, no code copied)
   const providersT = opts.providers ?? providersFromEnv();
-  if (techniques.length && providersT.length && !opts.noResearch && !quick) {
+  if (techniques.length && providersT.length && !opts.noResearch && !quick && !budgetSkip('technique research')) {
     say(`researching ${techniques.length} technique(s) seen in the pipeline`);
     techniques = await timed('technique research', () => researchTechniques(techniques, providersT, { onStep: say }));
   }
 
   // 6. does the project build?
   let build: BuildCheck | null = null;
-  if (opts.verifyBuild && !quick) {
+  if (opts.verifyBuild && !quick && !budgetSkip('build check')) {
     if (target === 'framer') build = { ok: true, skipped: 'Framer components build inside Framer', ms: 0, log: '' };
     else {
       say('checking the project builds (npm install, npm run build)');

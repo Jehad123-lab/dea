@@ -111,6 +111,34 @@ Found by running other sites; each rule is general, none is written for one site
   weight, style and `unicode-range`; text runs keep bold, colour and underline; box shadows and the page background
   (sampled at nine points) are kept.
 
+### General engine (round 7)
+
+Found by running igloo.inc and the WebGL fluid simulation; each rule is general.
+
+- Compressed textures (BPTC, S3TC, ETC, ASTC, RGTC, PVRTC) are allocated with `texStorage2D/3D` over their whole mip chain
+  before the recorded `compressedTexSubImage*` uploads, in the replay and in the rebuild. Before, they were allocated with
+  `texImage2D`, which WebGL refuses for compressed formats, so every one of them was empty (igloo.inc: the dome and every
+  other BC7 texture; the replay's dome was dark where the site's glows).
+- The editable rebuild binds uniform blocks: each program's block bindings, each draw's buffers (`bindBufferBase/Range`)
+  and the `bufferSubData` that rewrites a block while frames run. Before, a draw that read a uniform block was discarded by
+  WebGL with no error shown, and the igloo.inc rebuild was black.
+- A program given the model matrix and the model-view matrix but no view matrix gets a camera of `modelView x model^-1`, so
+  three.js reproduces the site's model-view (before, 238 of igloo.inc's draws were off).
+- `WEBGL_multi_draw` calls become one draw per range in the rebuild (they were skipped).
+- Pointer-driven uniforms on the tape: a uniform the site sets only while the pointer moves (a splat's point and force) is
+  fitted to the recorded pointer, as a position in one of six spaces or as the pointer's step times a gain, per set within
+  a frame, and set from the live pointer in the replay and in the rebuild.
+- Drag as an input: a page that listens for a press (`mousedown`, `pointerdown`, `touchstart`) gets a second tape with the
+  button held; it is kept only when the hovering tape found nothing that follows the pointer. A kit with a drag tape plays
+  it only while the live button is held, and the interaction check adds a drag step for such pages. On the WebGL fluid
+  simulation (splats exist only while dragging) the kit now draws the splat where the drag goes.
+- A run-time budget per site (`--budget <minutes>`, default 10, env `DEA_BUDGET_MIN`, 0 = off): once it is spent the
+  interaction check, technique research and the build check are skipped and the run says so; 5 minutes later the command
+  stops with exit code 124.
+- The canvas to record is ranked by the part of it that is on screen (a taller canvas further down the page no longer wins
+  over the first screen's), with canvases wholly off screen as the fallback.
+- A hero video that was playing is held at the second it had reached in the static preview (playing from there when live).
+
 ### Act and connect
 
 - Hands (`dea session`, MCP `browse` / `interact` / `submit`): a browser that stays open, with a policy file; submits

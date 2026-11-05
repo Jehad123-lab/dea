@@ -58,6 +58,8 @@ export interface CaptureDoc {
       id: number;
       shaders: Array<{ type: number; src: string }>;
       attribs: Array<{ name: string; type: number; size: number; loc: number }>;
+      /** uniform blocks and the binding point of each (WebGL 2) */
+      blocks?: Array<{ name: string; binding: number }>;
       uniforms: Array<{ name: string; type: number; v: number | number[] }>;
     }>;
     renderbuffers: Array<{ id: number; internalformat?: number; w?: number; h?: number; samples?: number }>;
@@ -67,9 +69,19 @@ export interface CaptureDoc {
   };
   frames: Array<{ state: FrameState | null; cmds: Cmd[]; ms: number; ts?: number; ptr?: [number, number] | null }>;
   /** the recording continued while the pointer moved along a known path: frames from `from` on are the tape ('move' frames with the pointer moving, then 'still' frames as it settles) */
-  tape?: { from: number; move: number; still: number; anchors?: import('./tape.ts').TapeAnchor[]; fit?: unknown };
+  tape?: {
+    from: number;
+    move: number;
+    still: number;
+    drag?: boolean;
+    anchors?: import('./tape.ts').TapeAnchor[];
+    uniforms?: import('./tape.ts').TapeUniform[];
+    fit?: unknown;
+  };
   /** the tape's frames (split off `frames` after the recording is compacted): rebuild and replay play them while the pointer moves */
   tapeFrames?: CaptureDoc['frames'];
+  /** a second tape recorded with the button held (pages that listen for a press): `from` is its first frame */
+  tapeDrag?: { from: number; move: number; still: number };
   errors: string[];
   overflow: boolean;
   binBytes: number;

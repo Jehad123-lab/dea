@@ -52,6 +52,10 @@ export interface DrawStep {
   scissor: number[] | null;
   camera: number | null;
   model: number[] | null;
+  /** uniform buffers bound to binding points for this draw (the buffer's bytes are carried in the recording) */
+  ubos?: Array<{ i: number; buf: number; start: number; size: number }>;
+  /** tape frames: for each uniform that follows the pointer, which of the frame's sets of it this draw saw (see tape.ts) */
+  tk?: Record<string, number>;
   /** uniforms whose value differs from the material's defaults for this draw */
   uniforms: Record<string, UniformValue>;
   /** with --own-assets: a box of this size stands in for the mesh */
@@ -112,6 +116,8 @@ export interface RebuildMaterial {
   uniforms: Record<string, UniformValue>;
   /** uniforms three.js sets from the camera and the object (not in `uniforms`) */
   builtins: string[];
+  /** uniform blocks the program declares and the binding point each one reads */
+  blocks?: Array<{ name: string; binding: number }>;
 }
 
 export interface RebuildCamera {
@@ -140,7 +146,7 @@ export interface PipelineDoc {
   passes: Array<{ index: number; frame: number; role: string; why: string; target: string; programs: string[] }>;
   frames: Array<{ steps: Step[] }>;
   /** the last `n` frames are the pointer tape (see tape.ts): played while the pointer moves, uploads re-anchored to the live pointer's path */
-  tape?: { n: number; move: number; still: number; w: number; h: number; anchors: unknown[] };
+  tape?: { n: number; move: number; still: number; drag?: boolean; w: number; h: number; anchors: unknown[]; uniforms?: unknown[] };
   clocks: Array<{ program: number; uniform: string; base: number; rate: number }>;
   /** uniforms that follow the pointer, scroll or window size: value = scale × eased input + offset */
   inputs: import('./inputs.ts').InputMap[];
@@ -267,6 +273,39 @@ const ref = (a: Arg, kind: string): number => (a && typeof a === 'object' && !Ar
 const locOf = (a: Arg): { p: number; n: string } | null =>
   a && typeof a === 'object' && !Array.isArray(a) && a.$ === 'loc' ? { p: Number(a.p), n: String(a.n) } : null;
 const texKind = (t: number) => (t === 0x8513 || (t >= 0x8515 && t <= 0x851a) ? 'cube' : t === 0x806f ? '3d' : t === 0x8c1a ? 'array' : '2d');
+
+/**
+ * WEBGL_multi_draw: one call that draws several ranges. Each range is the plain draw it stands for, so the rebuild gets
+ * one three.js draw per range (the same state, geometry slice and uniforms).
+ */
+export function multiDrawParts(name: string, a: Arg[], bin: Uint8Array): Cmd[] | null {
+  const m = /multiDraw(Elements|Arrays)(Instanced)?WEBGL$/.exec(name);
+  if (!m) return null;
+  const nums = (x: Arg, off: Arg) => numbers(x, bin).slice(Number(off) || 0);
+  const out: Cmd[] = [];
+  if (m[1] === 'Elements') {
+    const counts = nums(a[1], a[2]);
+    const offsets = nums(a[4], a[5]);
+    const inst = m[2] ? nums(a[6], a[7]) : null;
+    const n = Number(a[m[2] ? 8 : 6]) || counts.length;
+    for (let i = 0; i < n && i < counts.length; i++) {
+      if (!counts[i]) continue;
+      out.push(
+        inst ? ['drawElementsInstanced', a[0], counts[i], a[3], offsets[i] ?? 0, inst[i] ?? 1] : ['drawElements', a[0], counts[i], a[3], offsets[i] ?? 0],
+      );
+    }
+  } else {
+    const firsts = nums(a[1], a[2]);
+    const counts = nums(a[3], a[4]);
+    const inst = m[2] ? nums(a[5], a[6]) : null;
+    const n = Number(a[m[2] ? 7 : 5]) || counts.length;
+    for (let i = 0; i < n && i < counts.length; i++) {
+      if (!counts[i]) continue;
+      out.push(inst ? ['drawArraysInstanced', a[0], firsts[i] ?? 0, counts[i], inst[i] ?? 1] : ['drawArrays', a[0], firsts[i] ?? 0, counts[i]]);
+    }
+  }
+  return out;
+}
 
 /** The 3×3 normal matrix three.js derives from a model-view matrix (inverse transpose of its upper 3×3). */
 export function normalMatrixOf(mv: number[]): number[] | null {
@@ -399,6 +438,10 @@ export function rebuildPipeline(
       units: new Map(st.units.map((u) => [u.u, { ...u } as unknown as Record<string, number>])),
       vao: st.vao,
       arrayBuffer: st.arrayBuffer,
+      uboBuffer: ((st as unknown as { ubo?: number }).ubo ?? 0) as number,
+      ubos: new Map<number, { i: number; buf: number; start: number; size: number }>(
+        ((st as unknown as { ubos?: Array<{ i: number; buf: number; start: number; size: number }> }).ubos ?? []).map((u) => [u.i, { ...u }]),
+      ),
       rb: st.rb,
       en: { ...st.en } as Record<string, boolean>,
       store: {} as Record<string, number>,
@@ -423,8 +466,24 @@ export function rebuildPipeline(
       return Number(u[texKind(target)] ?? 0);
     };
 
-    f.cmds.forEach((c: Cmd, ci: number) => {
+    const occ = new Map<string, number>();
+    const lastOcc = new Map<string, number>();
+    const tapeTk = (pid: number): Record<string, number> | undefined => {
+      if (fi < doc.frames.length || !doc.tape?.uniforms?.length) return undefined;
+      const tk: Record<string, number> = {};
+      for (const u of doc.tape.uniforms) {
+        const o = lastOcc.get(`${u.p}|${u.n}`);
+        if (u.p === pid && o != null) tk[u.n] = o;
+      }
+      return Object.keys(tk).length ? tk : undefined;
+    };
+    const onCmd = (c: Cmd, ci: number): void => {
       const [name, ...a] = c;
+      const sub = multiDrawParts(name, a, bin);
+      if (sub) {
+        for (const x of sub) onCmd(x, ci);
+        return;
+      }
       if (DRAWS.has(name)) {
         const pid = s.program;
         const prog = progs.get(pid);
@@ -489,10 +548,21 @@ export function rebuildPipeline(
           } else own[key] = !isArray && val.length === 1 && (COMPONENTS[t.type] ?? 1) === 1 ? val[0] : val;
         }
         // camera and model matrix, in three.js terms
-        const V = builtin.viewMatrix?.length === 16 ? builtin.viewMatrix : null;
+        let V = builtin.viewMatrix?.length === 16 ? builtin.viewMatrix : null;
         const P = builtin.projectionMatrix?.length === 16 ? builtin.projectionMatrix : null;
         const MV = builtin.modelViewMatrix?.length === 16 ? builtin.modelViewMatrix : null;
         let M = builtin.modelMatrix?.length === 16 ? builtin.modelMatrix : null;
+        // a program that is handed the model matrix AND the model-view matrix but no view matrix: the camera is what turns one
+        // into the other (view = modelView x model^-1), so three.js gets a camera that reproduces the site's model-view
+        let derivedView = false;
+        if (!V && M && MV) {
+          const mi = invert(M);
+          const v = mi ? mul(MV, mi) : null;
+          if (v?.every(Number.isFinite)) {
+            V = v;
+            derivedView = true;
+          }
+        }
         const usesMatrices = Boolean(V || P || MV || M || builtin.normalMatrix || builtin.cameraPosition);
         let camera: number | null = null;
         let model: number[] | null = null;
@@ -501,7 +571,7 @@ export function rebuildPipeline(
           if (!M && MV) M = mul(invert(view) ?? IDENT, MV);
           model = M ?? IDENT;
           const ortho = Boolean(builtin.isOrthographic?.[0]);
-          const ck = JSON.stringify([view.map((x) => +x.toFixed(6)), (P ?? IDENT).map((x) => +x.toFixed(6)), ortho]);
+          const ck = JSON.stringify([view.map((x) => +x.toFixed(derivedView ? 3 : 6)), (P ?? IDENT).map((x) => +x.toFixed(6)), ortho]);
           if (!camKey.has(ck)) {
             camKey.set(ck, cameras.length);
             cameras.push({ id: cameras.length, view, projection: P ?? IDENT, orthographic: ortho, draws: 0 });
@@ -565,6 +635,7 @@ export function rebuildPipeline(
             state,
             uniforms: structuredClone(own),
             builtins: Object.keys(builtin),
+            blocks: prog.blocks?.length ? prog.blocks.map((b) => ({ name: b.name, binding: b.binding })) : undefined,
           });
         }
         const defaults = materials[mi].uniforms;
@@ -577,7 +648,9 @@ export function rebuildPipeline(
           frame: fi,
           cmd: ci,
           material: mi,
+          tk: tapeTk(pid),
           mode,
+          ubos: s.ubos.size ? [...s.ubos.values()].map((u) => ({ ...u })) : undefined,
           first,
           count,
           instances,
@@ -644,6 +717,23 @@ export function rebuildPipeline(
         case 'bindBuffer':
           if (a[0] === 0x8892) s.arrayBuffer = ref(a[1], 'buf');
           else if (a[0] === 0x8893) vao().el = ref(a[1], 'buf');
+          else if (a[0] === 0x8a11) s.uboBuffer = ref(a[1], 'buf');
+          return;
+        case 'bindBufferBase':
+        case 'bindBufferRange':
+          // uniform blocks: which buffer (and slice) feeds each binding point, as each draw sees it
+          if (Number(a[0]) === 0x8a11) {
+            const bufId = ref(a[2], 'buf');
+            if (bufId)
+              s.ubos.set(Number(a[1]), {
+                i: Number(a[1]),
+                buf: bufId,
+                start: name === 'bindBufferRange' ? Number(a[3]) : 0,
+                size: name === 'bindBufferRange' ? Number(a[4]) : 0,
+              });
+            else s.ubos.delete(Number(a[1]));
+            s.uboBuffer = bufId;
+          }
           return;
         case 'vertexAttribPointer':
         case 'vertexAttribIPointer': {
@@ -812,9 +902,9 @@ export function rebuildPipeline(
         case 'bufferData':
         case 'bufferSubData': {
           const target = Number(a[0]);
-          const buf = target === 0x8892 ? s.arrayBuffer : target === 0x8893 ? vao().el : 0;
+          const buf = target === 0x8892 ? s.arrayBuffer : target === 0x8893 ? vao().el : target === 0x8a11 ? s.uboBuffer : 0;
           if (!buf) {
-            skip(`${name} on a buffer that is not vertex or index data`);
+            skip(`${name} on a buffer that is not vertex, index or uniform-block data`);
             return;
           }
           steps.push({
@@ -825,7 +915,7 @@ export function rebuildPipeline(
             fn: name,
             args: a,
             bind: { buf, bufTarget: target },
-            why: 'updates vertex data during the frame',
+            why: target === 0x8a11 ? 'updates uniform-block data during the frame' : 'updates vertex data during the frame',
           });
           stats.glSteps++;
           return;
@@ -867,6 +957,12 @@ export function rebuildPipeline(
         if (!n) return;
         const vals = /Matrix/.test(name) ? numbers(a[2], bin) : /v$/.test(name) ? numbers(a[1], bin) : a.slice(1).flatMap((x) => numbers(x, bin));
         uni.get(l.p)?.set(n, vals);
+        if (/^uniform[234]f(v)?$/.test(name)) {
+          const ok = `${l.p}|${l.n}`;
+          const o = occ.get(ok) ?? 0;
+          occ.set(ok, o + 1);
+          lastOcc.set(ok, o);
+        }
         const ck = clockAt.get(`${fi}|${ci}`);
         if (ck && !clocks.some((x) => x.program === l.p && x.uniform === n))
           clocks.push({ program: l.p, uniform: n.replace(/\[0\]$/, ''), base: ck.base, rate: ck.rate });
@@ -899,7 +995,8 @@ export function rebuildPipeline(
         return;
       if (IGNORE.has(name)) return;
       skip(name);
-    });
+    };
+    f.cmds.forEach(onCmd);
   });
 
   // with --own-assets: meshes become boxes and their buffers are not shipped
@@ -997,9 +1094,11 @@ export function rebuildPipeline(
             n: doc.tapeFrames.length,
             move: doc.tape.move,
             still: doc.tape.still,
+            ...(doc.tape.drag ? { drag: true } : {}),
             w: doc.canvas.cssW || doc.canvas.w,
             h: doc.canvas.cssH || doc.canvas.h,
             anchors: doc.tape.anchors ?? [],
+            uniforms: doc.tape.uniforms ?? [],
           },
         }
       : {}),

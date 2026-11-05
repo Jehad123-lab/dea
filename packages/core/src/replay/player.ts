@@ -115,14 +115,29 @@ export function createReplay(canvas, data, options = {}) {
   resetUnpack();
   gl.activeTexture(gl.TEXTURE0);
   const FLOATP = new Set([0x813a, 0x813b, 0x84fe]);
+  const IS_COMPRESSED = (f) => (f >= 0x83f0 && f <= 0x83f3) || (f >= 0x8c48 && f <= 0x8c4f) || (f >= 0x8c00 && f <= 0x8c03) || f === 0x8d64 || (f >= 0x8dbb && f <= 0x8dbe) || (f >= 0x8e8c && f <= 0x8e8f) || (f >= 0x9270 && f <= 0x9279) || (f >= 0x93b0 && f <= 0x93dd);
   for (const T of S.textures) {
     if (T.missing) continue;
     const t = gl.createTexture();
     gl.bindTexture(T.target, t);
+    // compressed formats cannot be allocated with texImage*: a texture the site filled with compressedTexSubImage* was
+    // allocated with texStorage* (immutable, the whole mip chain at once), so it is allocated that way here, before the uploads
+    const cLv = T.levels.filter((L) => (L.skipped || L.alloc) && IS_COMPRESSED(L.ifmt));
+    let stored = false;
+    if (cLv.length && !(T.comp || []).some((c) => /^compressedTexImage/.test(c.fn))) {
+      const L0 = cLv.reduce((a, b) => (b.level < a.level ? b : a));
+      const nl = T.levels.reduce((m, L) => Math.max(m, L.level + 1), 1);
+      try {
+        if (T.target === 0x806f || T.target === 0x8c1a) gl.texStorage3D(T.target, nl, L0.ifmt, L0.w, L0.h, L0.d);
+        else gl.texStorage2D(T.target, nl, L0.ifmt, L0.w, L0.h);
+        stored = true;
+      } catch (e) { fail('compressed texture ' + T.id + ': ' + e.message); }
+    }
     for (const c of T.comp || []) { try { gl[c.fn](...c.args.map(arg)); } catch (e) { fail('compressed upload: ' + e.message); } }
     let hasMips = false;
     for (const L of T.levels) {
       const target0 = T.target === 0x8513 ? 0x8515 + L.face : T.target;
+      if ((L.skipped || L.alloc) && IS_COMPRESSED(L.ifmt)) { if (L.level > 0) hasMips = true; continue; }
       if (L.skipped || L.alloc) {
         // no pixels: allocate the level so render targets stay complete (depth, or contents the frames overwrite)
         const [af, at] = L.alloc || [L.upFmt, L.upType];
@@ -334,6 +349,7 @@ export function createReplay(canvas, data, options = {}) {
   let t0 = 0;
   const exec = (f) => {
     const cmds = frames[f].cmds;
+    const occ = new Map();
     const now = performance.now();
     for (let i = 0; i < cmds.length; i++) {
       const c = cmds[i];
@@ -357,6 +373,14 @@ export function createReplay(canvas, data, options = {}) {
           else gl[name](l, ...withInputs(list, raw.slice(1)));
           continue;
         }
+      }
+      if (tape && f >= R && /^uniform[234]f(v)?$/.test(name) && raw[0] && raw[0].$ === 'loc') {
+        // a uniform the site sets only while the pointer moves (a splat's point and force): set from the live pointer
+        const ok = raw[0].p + '|' + raw[0].n;
+        const kk = occ.get(ok) || 0;
+        occ.set(ok, kk + 1);
+        const lv = tape.uniform(raw[0].p, raw[0].n, kk);
+        if (lv) { const l = loc(raw[0].p, raw[0].n); if (name.endsWith('v')) gl[name](l, new Float32Array(lv.slice(0, +name[7]))); else gl[name](l, ...lv.slice(0, +name[7])); continue; }
       }
       if (name.startsWith('uniform') && raw[0] && raw[0].$ === 'loc') {
         const o = overrides.get(raw[0].p + '|' + raw[0].n);

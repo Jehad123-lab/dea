@@ -6,11 +6,11 @@ import { NAME_SHIM } from '../browser/init.ts';
 import { installObservers, LOADER_VISIBLE } from '../browser/open.ts';
 import { assertNotBotWall } from '../browser/wall.ts';
 import { currentCache } from '../cache.ts';
-import { pullRecording, REPLAY_CAPTURE_SCRIPT, type Recording, recordFrames, recordTape, releaseFrames } from '../replay/capture.ts';
+import { pressListeners, pullRecording, REPLAY_CAPTURE_SCRIPT, type Recording, recordFrames, recordTape, releaseFrames } from '../replay/capture.ts';
 import { type ProbeData, probeInputs } from '../replay/inputs.ts';
 import { currentTimings, timed } from '../timings.ts';
 import { type ShaderModule, threeRevision } from './generate.ts';
-import { runInteractionWithState, type StepState } from './interaction.ts';
+import { runInteractionWithState, type StepState, setDragStep } from './interaction.ts';
 import type { Params } from './research.ts';
 
 const MIME: Record<string, string> = {
@@ -71,6 +71,18 @@ if (h) {
   if (P.font) h.style.fontFamily = P.font;
   if (P.size) h.style.fontSize = P.size + 'px';
 }
+// a video that was playing on the site: held at the second it had reached (so a score compares the same moment), or playing from there when live
+await Promise.all([...document.querySelectorAll('video[data-vt]')].map((v) => new Promise((res) => {
+  const go = () => {
+    let done = false;
+    // held only once the seek has shown its frame; a video that cannot seek in time keeps playing (never a black box)
+    v.addEventListener('seeked', () => { if (done) return; done = true; if (!P.live) v.pause(); res(); }, { once: true });
+    setTimeout(() => { if (!done) { done = true; res(); } }, 7000);
+    try { v.currentTime = Number(v.dataset.vt); } catch (e) { done = true; res(); }
+  };
+  if (v.readyState >= 1) go(); else v.addEventListener('loadedmetadata', go, { once: true });
+  setTimeout(res, 9000);
+})));
 const mods = {
 ${mods.map((m) => `  ${JSON.stringify(m.name)}: () => import('../${m.file}'),`).join('\n')}
 };
@@ -872,8 +884,20 @@ export async function referenceShot(
         });
         // the tape: more frames of the same recording while the pointer moves and settles (what the site draws and uploads then)
         const tape = interact ? await timed('record the pointer tape', () => recordTape(page).catch((e) => ({ ok: false as const, error: String(e) }))) : null;
+        // a page that listens for a press may draw only while the button is held (paint, fluid, drag-to-orbit): a second tape with
+        // the button down, kept only when the hover tape found nothing that follows the pointer
+        const presses = interact && tape?.ok ? await pressListeners(page) : 0;
+        const dragTape =
+          presses > 0 && tape?.ok
+            ? await timed('record the pointer tape with the button held', () =>
+                recordTape(page, { drag: true }).catch((e) => ({ ok: false as const, error: String(e) })),
+              )
+            : null;
+        setDragStep(presses > 0);
         const recording = await timed('read the recording out of the page', () => pullRecording(page).catch(() => null));
         if (recording && tape?.ok) recording.doc.tape = { from: frames, move: tape.move, still: tape.still };
+        if (recording && tape?.ok && dragTape?.ok)
+          recording.doc.tapeDrag = { from: frames + tape.move + tape.still, move: dragTape.move, still: dragTape.still };
         await releaseFrames(page);
         if (buf && recording) {
           const atMs = Date.now() - t0;

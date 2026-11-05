@@ -33,6 +33,7 @@ import {
   type StepKind,
   scoreFiles,
   stackSite,
+  startBudget,
   Timings,
   traceWebGL,
   withCache,
@@ -272,6 +273,11 @@ common(
     .option('--cache-dir <dir>', 'where the content cache lives (default <home>/cache)')
     .option('--cache-max-mb <mb>', 'size cap of the content cache; the least recently used entries go first', '1024')
     .option('--concurrency <n>', 'decoders run side by side (1 = one after another)', '3')
+    .option(
+      '--budget <minutes>',
+      'run-time budget per site: after it the optional stages are skipped, and 5 minutes later the command stops with exit code 124 (0 = no budget; env DEA_BUDGET_MIN)',
+      process.env.DEA_BUDGET_MIN ?? '10',
+    )
     .option('--overlap', 'run the decoders while the reference is captured (faster with a GPU; on a CPU-only machine a heavy intro may not finish)'),
 ).action(
   (
@@ -299,6 +305,7 @@ common(
       cacheMaxMb: string;
       concurrency: string;
       overlap?: boolean;
+      budget?: string;
     },
   ) =>
     run(async () => {
@@ -323,12 +330,27 @@ common(
       // one browser and one cache for every URL of the batch
       const cache = flags.cache ? new ContentCache({ dir: flags.cacheDir, maxMb: Number(flags.cacheMaxMb) || 1024 }) : null;
       const t0 = Date.now();
+      let hardStop: NodeJS.Timeout | null = null;
       await withCache(cache, () =>
         withSharedBrowser(
           base.browser ?? 'auto',
           base.headless ?? true,
           async () => {
             for (const [i, u] of urls.entries()) {
+              // the run-time budget: soft (optional stages are skipped), then hard (the command stops, browsers close with it)
+              const budgetMin = Number(flags.budget ?? 10) || 0;
+              startBudget(budgetMin);
+              if (hardStop) clearTimeout(hardStop);
+              if (budgetMin > 0) {
+                hardStop = setTimeout(
+                  () => {
+                    process.stderr.write(`\nStopped: ${u} used its run-time budget of ${budgetMin} min plus 5 min (set --budget 0 to remove the limit).\n`);
+                    process.exit(124);
+                  },
+                  (budgetMin + 5) * 60_000,
+                );
+                hardStop.unref();
+              }
               const r = await extract(u, {
                 ...options(flags),
                 to: flags.to as 'react' | 'vanilla' | 'framer',

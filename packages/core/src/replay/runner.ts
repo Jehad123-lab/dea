@@ -122,16 +122,31 @@ export function createRebuild(canvas, data, options = {}) {
   resetUnpack();
   gl.activeTexture(gl.TEXTURE0);
   const FLOATP = new Set([0x813a, 0x813b, 0x84fe]);
+  const IS_COMPRESSED = (f) => (f >= 0x83f0 && f <= 0x83f3) || (f >= 0x8c48 && f <= 0x8c4f) || (f >= 0x8c00 && f <= 0x8c03) || f === 0x8d64 || (f >= 0x8dbb && f <= 0x8dbe) || (f >= 0x8e8c && f <= 0x8e8f) || (f >= 0x9270 && f <= 0x9279) || (f >= 0x93b0 && f <= 0x93dd);
   for (const T of R.textures) {
     if (T.missing) continue;
     const t = gl.createTexture();
     gl.bindTexture(T.target, t);
+    // compressed formats cannot be allocated with texImage*: a texture the site filled with compressedTexSubImage* was
+    // allocated with texStorage* (immutable, the whole mip chain at once), so it is allocated that way here, before the uploads
+    const cLv = T.levels.filter((L) => (L.skipped || L.alloc) && IS_COMPRESSED(L.ifmt));
+    let stored = false;
+    if (cLv.length && !(T.comp || []).some((c) => /^compressedTexImage/.test(c.fn))) {
+      const L0 = cLv.reduce((a, b) => (b.level < a.level ? b : a));
+      const nl = T.levels.reduce((m, L) => Math.max(m, L.level + 1), 1);
+      try {
+        if (T.target === 0x806f || T.target === 0x8c1a) gl.texStorage3D(T.target, nl, L0.ifmt, L0.w, L0.h, L0.d);
+        else gl.texStorage2D(T.target, nl, L0.ifmt, L0.w, L0.h);
+        stored = true;
+      } catch (e) { fail('compressed texture ' + T.id + ': ' + e.message); }
+    }
     for (const c of T.comp || []) { try { gl[c.fn](...c.args.map(arg)); } catch (e) { fail('compressed upload: ' + e.message); } }
     let hasMips = false;
     for (const L of T.levels) {
       const target = T.target === 0x8513 ? 0x8515 + L.face : T.target;
       const three3 = T.target === 0x806f || T.target === 0x8c1a;
       if (L.level > 0) hasMips = true;
+      if ((L.skipped || L.alloc) && IS_COMPRESSED(L.ifmt)) continue;
       if (L.skipped || L.alloc) {
         const al = L.alloc || [L.upFmt, L.upType];
         if (al[0]) {
@@ -312,6 +327,39 @@ export function createRebuild(canvas, data, options = {}) {
   const raw = new Map();
   for (const B of R.buffers) raw.set(B.id, B.l ? new Uint8Array(bin, B.o, B.l).slice() : new Uint8Array(0));
   const attrCache = new Map();
+  // uniform blocks (std140): the site's buffers feed its blocks. three.js links each program on its own, so the block
+  // bindings are set the first time three.js uses a program for a draw, and each draw binds the buffers it saw.
+  const UB = 0x8a11;
+  let curBlocks = null;
+  const blocksDone = new WeakSet();
+  const useProgram0 = gl.useProgram.bind(gl);
+  gl.useProgram = (pr) => {
+    if (pr && curBlocks && curBlocks.length && !blocksDone.has(pr)) {
+      blocksDone.add(pr);
+      try { for (const b of curBlocks) { const i = gl.getUniformBlockIndex(pr, b.name); if (i !== gl.INVALID_INDEX) gl.uniformBlockBinding(pr, i, b.binding); } } catch (e) { fail('uniform blocks: ' + e.message); }
+    }
+    return useProgram0(pr);
+  };
+  const uboGl = new Map();
+  const uboDirty = new Set();
+  const uboOf = (id) => {
+    let g = uboGl.get(id);
+    if (!g) { g = gl.createBuffer(); uboGl.set(id, g); uboDirty.add(id); }
+    if (uboDirty.has(id)) {
+      uboDirty.delete(id);
+      const cur = raw.get(id) || new Uint8Array(0);
+      gl.bindBuffer(UB, g);
+      gl.bufferData(UB, cur, gl.DYNAMIC_DRAW);
+      gl.bindBuffer(UB, null);
+    }
+    return g;
+  };
+  const bindUbos = (step) => {
+    for (const u of step.ubos || []) {
+      const g = uboOf(u.buf);
+      if (u.size) gl.bindBufferRange(UB, u.i, g, u.start, u.size); else gl.bindBufferBase(UB, u.i, g);
+    }
+  };
   const unpack = (a) => {
     const src = raw.get(a.buf) || new Uint8Array(0);
     const C = TYPED[a.type] || Float32Array;
@@ -699,6 +747,8 @@ export function createRebuild(canvas, data, options = {}) {
     for (const k of dirty[mi]) if (!(k in step.uniforms)) setUniform(U, k, m.uniforms[k]);
     dirty[mi].clear();
     for (const [k, v] of Object.entries(step.uniforms)) { setUniform(U, k, v); dirty[mi].add(k); }
+    // a uniform the site sets only while the pointer moves (a splat's point and force): set from the live pointer
+    if (tape && step.frame >= RF && step.tk) for (const a of tape.info.uniforms || []) if (a.p === m.program && U[a.n] && step.tk[a.n] === a.k) { const lv = tape.uniform(a.p, a.n, a.k); if (lv) { setUniform(U, a.n, lv); dirty[mi].add(a.n); } }
     if (animate) for (const c of clocks) if (c.program === m.program && U[c.uniform]) { U[c.uniform].value = c.base + c.rate * (performance.now() - t0); dirty[mi].add(c.uniform); }
     if (animate) applyInputs(m.program, U, dirty[mi]);
     const obj = objectOf(step);
@@ -707,6 +757,8 @@ export function createRebuild(canvas, data, options = {}) {
     const cm = m.state.colorMask;
     maskOverride = cm.some(Boolean) && !cm.every(Boolean) ? cm : null;
     setTarget(step.target, scaleVp(step.target, step.viewport), scaleVp(step.target, step.scissor));
+    curBlocks = m.blocks || null;
+    bindUbos(step);
     renderer.render(obj, step.camera == null ? plainCamera : cameras[step.camera]);
     maskOverride = null;
   };
@@ -745,6 +797,7 @@ export function createRebuild(canvas, data, options = {}) {
         next.set(bytes, dst);
         raw.set(b.buf, next);
       }
+      uboDirty.add(b.buf);
       bufferChanged(b.buf);
       return;
     }

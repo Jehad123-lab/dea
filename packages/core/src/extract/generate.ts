@@ -527,7 +527,7 @@ const boxLines = (b: { h: number; fontSize: number; lineHeight: string }): numbe
  * hero. Verified: text, font, size, weight, colour and position at the reference size. Inferred: the units (the site's
  * own layout system, flex or grid, is not rebuilt).
  */
-export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text: string; html?: string; style: Record<string, string> }> {
+export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text: string; html?: string; vt?: number; style: Record<string, string> }> {
   const vw = (px: number) => `${r2((px / l.viewport.width) * 100)}vw`;
   const vh = (px: number) => `${r2((px / l.viewport.height) * 100)}vh`;
   const tags = new Set(['h1', 'h2', 'h3', 'h4', 'p', 'span', 'a', 'li', 'small', 'strong', 'em', 'button', 'label']);
@@ -816,7 +816,7 @@ export function heroHtml(l: HeroLayout): string {
       const st = escHtml(cssText(it.style)).replace(/"/g, '&quot;');
       const key = it.k ? ` data-dea-k="${escHtml(it.k).replace(/"/g, '&quot;')}"` : '';
       if (it.tag === 'video')
-        return `  <video${key} src="${escHtml(it.html ?? '').replace(/"/g, '&quot;')}" autoplay muted loop playsinline style="${st}"></video>`;
+        return `  <video${key}${it.vt ? ` data-vt="${it.vt}"` : ''} src="${escHtml(it.html ?? '').replace(/"/g, '&quot;')}" autoplay muted loop playsinline style="${st}"></video>`;
       if (it.tag === 'img') return `  <img${key} src="${escHtml(it.html ?? '').replace(/"/g, '&quot;')}" alt="" style="${st}">`;
       return `  <${it.tag}${key}${it.html || !it.text ? '' : ' data-dea-h="0"'} style="${st}">${it.html ?? escHtml(it.text)}</${it.tag}>`;
     })

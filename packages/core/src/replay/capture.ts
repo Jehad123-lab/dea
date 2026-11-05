@@ -482,7 +482,11 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
       const gl = r.deref(); if (!gl) continue;
       const I = infos.get(gl); const c = gl.canvas;
       if (!c || !c.isConnected || !I.drawsLast) continue;
-      const b = c.getBoundingClientRect(); const a = b.width * b.height;
+      // rank by the part of the canvas that is on screen (a taller canvas further down the page is not the first screen's);
+      // a canvas wholly off screen stays a fallback, behind every canvas that shows
+      const b = c.getBoundingClientRect(); const full = b.width * b.height;
+      const vw = Math.max(0, Math.min(b.right, innerWidth) - Math.max(b.left, 0)); const vh = Math.max(0, Math.min(b.bottom, innerHeight) - Math.max(b.top, 0));
+      const a = vw * vh > 0 ? 1e9 + vw * vh : full;
       if (a > bestA) { bestA = a; best = I; }
     }
     return best;
@@ -493,6 +497,12 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
   CAP.probe = null;
   CAP.ptr = null;
   const onPointer = (e) => { CAP.ptr = [e.clientX, e.clientY]; if (CAP.probe) { CAP.probe.mx = e.clientX; CAP.probe.my = e.clientY; } };
+  // does the page listen for a press (mousedown, pointerdown, touchstart)? Then some of what it draws may need the button held
+  CAP.down = 0;
+  try {
+    const ael = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function (t, ...r) { if (t === 'mousedown' || t === 'pointerdown' || t === 'touchstart') CAP.down++; return ael.call(this, t, ...r); };
+  } catch (e) {}
   try { addEventListener('pointermove', onPointer, { capture: true, passive: true }); addEventListener('mousemove', onPointer, { capture: true, passive: true }); } catch (e) {}
   // the scroll signal: the page's own scroll when it can scroll, else the sum of the wheel it was given (a fixed-stage site that
   // moves its scene by wheel events scrolls nothing, and scrollY would stay 0)
@@ -829,7 +839,7 @@ export function tapePointer(i: number, move: number): [number, number] {
  */
 export async function recordTape(
   page: Page,
-  opts: { move?: number; still?: number; timeoutMs?: number } = {},
+  opts: { move?: number; still?: number; timeoutMs?: number; drag?: boolean } = {},
 ): Promise<{ ok: true; move: number; still: number } | { ok: false; error: string }> {
   const move = opts.move ?? 8;
   const still = opts.still ?? 4;
@@ -849,10 +859,18 @@ export async function recordTape(
     if (i < move) {
       const [x, y] = tapePointer(i, move);
       await page.mouse.move(vp.width * x, vp.height * y, { steps: 1 }).catch(() => {});
-    }
+      // a drag: the button goes down where the path starts and stays down while the pointer moves
+      if (opts.drag && i === 0) await page.mouse.down().catch(() => {});
+    } else if (opts.drag && i === move) await page.mouse.up().catch(() => {});
   }
+  if (opts.drag) await page.mouse.up().catch(() => {});
   while (Date.now() - t0 < limit && (await stateOf()) !== 'done') await page.waitForTimeout(150);
   return { ok: true, move, still };
+}
+
+/** How many press listeners (mousedown, pointerdown, touchstart) the page has registered. */
+export async function pressListeners(page: Page): Promise<number> {
+  return ((await page.evaluate(() => (window as unknown as { __DEA_CAP__?: { down?: number } }).__DEA_CAP__?.down ?? 0).catch(() => 0)) as number) || 0;
 }
 
 /** Let the page's animation frames run again after a recording. */

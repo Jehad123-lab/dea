@@ -62,6 +62,27 @@ export const INTERACTION_SCRIPT: InteractionStep[] = [
   },
 ];
 
+/** A drag: press at the centre, move to 70% across and 40% down, release. Added only for pages that listen for a press. */
+const DRAG_STEP: InteractionStep = {
+  name: 'pointer drag',
+  does: 'press at the centre, drag to 70% across and 40% down, release',
+  input: 'pointer',
+  run: async (page, vp) => {
+    await page.mouse.move(vp.width * 0.5, vp.height * 0.5);
+    await page.mouse.down();
+    await glide(page, [vp.width * 0.5, vp.height * 0.5], [vp.width * 0.7, vp.height * 0.4], 10, 50);
+    await page.mouse.up();
+    await page.waitForTimeout(600);
+  },
+};
+
+/** Put the drag step at the end of the script (a page that listens for a press) or take it out. One extract runs at a time. */
+export function setDragStep(on: boolean): void {
+  const at = INTERACTION_SCRIPT.indexOf(DRAG_STEP);
+  if (on && at < 0) INTERACTION_SCRIPT.push(DRAG_STEP);
+  if (!on && at >= 0) INTERACTION_SCRIPT.splice(at, 1);
+}
+
 /** Run the script on a page that is already showing the thing to test; a PNG after each step. */
 export async function runInteraction(page: Page): Promise<Buffer[]> {
   return (await runInteractionWithState(page)).frames;
