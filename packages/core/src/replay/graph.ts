@@ -65,7 +65,11 @@ export interface CaptureDoc {
     framebuffers: Array<{ id: number; atts: Array<{ a: number; type: number; tex?: number; rb?: number; level?: number }>; draw: number[]; read: number }>;
     vaos: Array<VaoSnap & { id: number }>;
   };
-  frames: Array<{ state: FrameState | null; cmds: Cmd[]; ms: number; ts?: number }>;
+  frames: Array<{ state: FrameState | null; cmds: Cmd[]; ms: number; ts?: number; ptr?: [number, number] | null }>;
+  /** the recording continued while the pointer moved along a known path: frames from `from` on are the tape ('move' frames with the pointer moving, then 'still' frames as it settles) */
+  tape?: { from: number; move: number; still: number; anchors?: import('./tape.ts').TapeAnchor[]; fit?: unknown };
+  /** the tape's frames (split off `frames` after the recording is compacted): rebuild and replay play them while the pointer moves */
+  tapeFrames?: CaptureDoc['frames'];
   errors: string[];
   overflow: boolean;
   binBytes: number;

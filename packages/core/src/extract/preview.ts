@@ -5,11 +5,11 @@ import type { Browser, Page } from 'playwright';
 import { NAME_SHIM } from '../browser/init.ts';
 import { installObservers, LOADER_VISIBLE } from '../browser/open.ts';
 import { currentCache } from '../cache.ts';
-import { pullRecording, REPLAY_CAPTURE_SCRIPT, type Recording, recordFrames, releaseFrames } from '../replay/capture.ts';
+import { pullRecording, REPLAY_CAPTURE_SCRIPT, type Recording, recordFrames, recordTape, releaseFrames } from '../replay/capture.ts';
 import { type ProbeData, probeInputs } from '../replay/inputs.ts';
 import { currentTimings, timed } from '../timings.ts';
 import type { ShaderModule } from './generate.ts';
-import { runInteraction } from './interaction.ts';
+import { runInteractionWithState, type StepState } from './interaction.ts';
 import type { Params } from './research.ts';
 
 const MIME: Record<string, string> = {
@@ -295,21 +295,35 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
   const root = ${section ? `document.querySelector(${JSON.stringify(section)})` : 'document.body'} || document.body;
   const out = [];
   const W = innerWidth, H = innerHeight;
+  // a key that names the same element at another scroll position: its path through the DOM
+  const keyOf = (el, pe) => { const p = []; for (let n = el; n && n.nodeType === 1 && n !== document.documentElement; n = n.parentElement) { let i = 1; for (let s = n.previousElementSibling; s; s = s.previousElementSibling) i++; p.push(n.tagName.toLowerCase() + ':' + i); } return p.reverse().join('>') + (pe || ''); };
   const LOADER = /(^|[\\s_-])(pre)?loader([\\s_-]|$)|preload/i;
   let skip = true;
+  const seen = new Set();
   const walk = (el) => {
     if (out.length >= 40) return;
     if (skip && el !== root && (el.getAttribute('role') === 'progressbar' || LOADER.test(String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className) + ' ' + el.id))) return;
-    const cs = getComputedStyle(el);
+    let cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return;
     const own = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' ').replace(/\\s+/g, ' ').trim();
     if (own && !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(el.tagName)) {
+      // split text (one span per character or word) is one block: climb through inline parents to the word or line
+      let top = el;
+      for (let p = el.parentElement; p && p !== root && p !== document.body; p = p.parentElement) {
+        const pd = getComputedStyle(p).display;
+        if (!/^(inline|inline-block|inline-flex|contents)$/.test(pd) || (p.innerText || '').length > 120) break;
+        top = p;
+      }
+      if (seen.has(top)) return;
+      seen.add(top);
+      el = top;
+      cs = getComputedStyle(el);
       const r = el.getBoundingClientRect();
       if (r.width > 2 && r.height > 2 && r.bottom > 0 && r.right > 0 && r.top < H && r.left < W) {
         let op = 1;
         for (let p = el; p && p !== document.documentElement; p = p.parentElement) op *= +getComputedStyle(p).opacity;
         if (op >= 0.05)
-          out.push({ __el: el, tag: el.tagName.toLowerCase(), text: (el.innerText || own).trim().slice(0, 200), x: r.left, y: r.top, w: r.width, h: r.height,
+          out.push({ __el: el, k: keyOf(el), tag: el.tagName.toLowerCase(), text: (el.innerText || own).trim().slice(0, 200), x: r.left, y: r.top, w: r.width, h: r.height,
             fontFamily: cs.fontFamily, fontSize: parseFloat(cs.fontSize), fontWeight: cs.fontWeight, letterSpacing: cs.letterSpacing,
             lineHeight: cs.lineHeight, color: cs.color, textTransform: cs.textTransform, textAlign: cs.textAlign, opacity: Math.round(op * 100) / 100 });
         return;
@@ -361,7 +375,7 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     if (hiddenUp(el) || shown(el, r) < 0.5) continue;
     const op = opacityOf(el);
     if (op < 0.05) continue;
-    shapes.push({ x: r.left, y: r.top, w: r.width, h: r.height, background: bg, gradient: grad, border, radius: cs.borderRadius, filter: null, opacity: op });
+    shapes.push({ k: keyOf(el), x: r.left, y: r.top, w: r.width, h: r.height, background: bg, gradient: grad, border, radius: cs.borderRadius, filter: null, opacity: op });
   }
   // a gradient painted by a ::before or ::after: a fade laid over the picture (a dark band at the bottom of a section, a
   // blurred spot) is an overlay too, and the picture under it is the same canvas. Its box comes from its own offsets and size.
@@ -388,7 +402,7 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
       if (hiddenUp(el) || shown(el, { left: x, top: y, right: x + w, bottom: y + h, width: w, height: h }) < 0.5) continue;
       const op = Math.round(opacityOf(el) * (+ps.opacity) * 100) / 100;
       if (op < 0.05) continue;
-      shapes.push({ x, y, w, h, background: null, gradient: ps.backgroundImage, border: null, radius: ps.borderRadius, filter: ps.filter !== 'none' ? ps.filter : null, opacity: op });
+      shapes.push({ k: keyOf(el, pe), x, y, w, h, background: null, gradient: ps.backgroundImage, border: null, radius: ps.borderRadius, filter: ps.filter !== 'none' ? ps.filter : null, opacity: op });
     }
   }
   // the first screen's graphics: inline SVG (a logo, an icon) with its computed paint inlined, and small images
@@ -405,7 +419,7 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     if (op < 0.05) continue;
     if (el.tagName.toLowerCase() === 'img') {
       if (!el.complete || !el.naturalWidth || !/^https?:/.test(el.currentSrc || el.src)) continue;
-      graphics.push({ kind: 'img', x: r.left, y: r.top, w: r.width, h: r.height, src: el.currentSrc || el.src, fit: getComputedStyle(el).objectFit, opacity: op });
+      graphics.push({ k: keyOf(el), kind: 'img', x: r.left, y: r.top, w: r.width, h: r.height, src: el.currentSrc || el.src, fit: getComputedStyle(el).objectFit, opacity: op });
       continue;
     }
     const clone = el.cloneNode(true);
@@ -421,7 +435,7 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
     clone.style.display = 'block';
     const svg = clone.outerHTML;
     if (svg.length > 40000) continue;
-    graphics.push({ kind: 'svg', x: r.left, y: r.top, w: r.width, h: r.height, svg, opacity: op });
+    graphics.push({ k: keyOf(el), kind: 'svg', x: r.left, y: r.top, w: r.width, h: r.height, svg, opacity: op });
   }
   let canvas = null;
   for (const c of root.querySelectorAll('canvas')) {
@@ -445,6 +459,90 @@ export const LAYOUT_READ = (section: string | null) => `(() => {
   const background = bgOf(document.body) || bgOf(document.documentElement);
   return { viewport: { width: W, height: H }, boxes, canvas, background, shapes, graphics };
 })()`;
+
+/** Where each first-screen element sits at a few scroll positions: a box that moves, scales or fades with scroll gets keyframes. */
+export interface ScrollLayout {
+  /** the scroll positions read (px); the first is 0 */
+  positions: number[];
+  /** per element key: box [x, y, w, h, opacity, fontSize] at each position, null where the element was not on screen */
+  items: Record<string, Array<[number, number, number, number, number, number] | null>>;
+  /** the text of each text box when the page was read last (long after the intro): the final text of a heading that was being typed */
+  texts: Record<string, string>;
+}
+
+/**
+ * Scroll the page to a few positions and read the first screen's layout at each, then keep the elements whose box
+ * changes between them (a hero card that shrinks, a heading that fades or slides): the kit applies those keyframes by
+ * scroll. Only a page that really scrolls is read this way. Elements are matched by their path through the DOM.
+ */
+export async function readScrollLayouts(page: Page, section: string | null): Promise<ScrollLayout | null> {
+  const can = (await page.evaluate('document.documentElement.scrollHeight > innerHeight + 2').catch(() => false)) as boolean;
+  if (!can) return null;
+  const vh = (await page.evaluate('innerHeight').catch(() => 900)) as number;
+  const vw = (await page.evaluate('innerWidth').catch(() => 1440)) as number;
+  const positions = [0, Math.round(vh * 0.4), Math.round(vh * 0.9)];
+  type R = {
+    boxes: Array<{ k?: string; text?: string; x: number; y: number; w: number; h: number; opacity: number; fontSize: number }>;
+    shapes?: Array<{ k?: string; x: number; y: number; w: number; h: number; opacity: number }>;
+    graphics?: Array<{ k?: string; x: number; y: number; w: number; h: number; opacity: number }>;
+    canvas?: { x: number; y: number; w: number; h: number } | null;
+  };
+  const reads: R[] = [];
+  try {
+    for (const y of positions) {
+      await page.evaluate(`window.scrollTo(0, ${y})`);
+      // two drawn frames, then a moment for a scrubbed animation to catch up
+      await page
+        .evaluate('new Promise((r) => { const t = setTimeout(r, 6000); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); r(); })); })')
+        .catch(() => {});
+      await page.waitForTimeout(900);
+      reads.push((await page.evaluate(LAYOUT_READ(section))) as R);
+    }
+  } catch {
+    return null;
+  } finally {
+    await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
+  }
+  const items: ScrollLayout['items'] = {};
+  const add = (i: number, k: string | undefined, b: [number, number, number, number, number, number]) => {
+    if (!k) return;
+    if (!items[k]) items[k] = positions.map(() => null);
+    items[k][i] = b;
+  };
+  reads.forEach((r, i) => {
+    for (const b of r.boxes) add(i, b.k, [b.x, b.y, b.w, b.h, b.opacity, b.fontSize]);
+    for (const b of r.shapes ?? []) add(i, b.k, [b.x, b.y, b.w, b.h, b.opacity, 0]);
+    for (const b of r.graphics ?? []) add(i, b.k, [b.x, b.y, b.w, b.h, b.opacity, 0]);
+    if (r.canvas) add(i, 'canvas', [r.canvas.x, r.canvas.y, r.canvas.w, r.canvas.h, 1, 0]);
+  });
+  // keep what is on screen at 0 and changes: position, size, opacity or type size by more than 2% of the window / 0.05
+  const changed = Object.entries(items).filter(([, f]) => {
+    const a = f[0];
+    if (!a) return false;
+    return f
+      .slice(1)
+      .some(
+        (b) =>
+          b &&
+          (Math.abs(b[0] - a[0]) > 0.02 * vw ||
+            Math.abs(b[1] - a[1]) > 0.02 * vh ||
+            Math.abs(b[2] - a[2]) > 0.02 * vw ||
+            Math.abs(b[3] - a[3]) > 0.02 * vh ||
+            Math.abs(b[4] - a[4]) > 0.05 ||
+            Math.abs(b[5] - a[5]) > 0.5),
+      );
+  });
+  const texts: Record<string, string> = {};
+  for (const b of reads[0]?.boxes ?? []) if (b.k && b.text) texts[b.k] = b.text;
+  if (!changed.length && !Object.keys(texts).length) return null;
+  return {
+    positions,
+    texts,
+    items: Object.fromEntries(
+      changed.map(([k, f]) => [k, f.map((b) => (b ? (b.map((v) => Math.round(v * 100) / 100) as [number, number, number, number, number, number]) : null))]),
+    ),
+  };
+}
 
 /** Open the page just to read the first screen's text layout (used when you bring your own reference screenshot). */
 export async function readLayout(
@@ -513,6 +611,10 @@ export async function referenceShot(
 ): Promise<{
   /** a frame after each step of the interaction script, on the live site */
   interaction?: Buffer[];
+  /** how first-screen elements move with scroll (keyframes at a few scroll positions), when the page scrolls */
+  layoutScroll?: ScrollLayout | null;
+  /** what the page changed during each step of the interaction script (uniforms, CPU uploads, draw sizes) */
+  interactionState?: Array<StepState | null>;
   /** every float uniform per frame beside the pointer, scroll and window size, while the probe moved them */
   probe?: ProbeData | null;
   png: string;
@@ -596,17 +698,26 @@ export async function referenceShot(
         await page.waitForTimeout(400);
         const buf = await page.screenshot({ type: 'png' }).catch(() => null);
         const nowLoader = (await page.evaluate(LOADER_VISIBLE).catch(() => false)) as boolean;
+        // the first screen's layout is read now, while the page is still held on the recorded moment (the tape runs it on)
+        const l = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
+        // the tape: more frames of the same recording while the pointer moves and settles (what the site draws and uploads then)
+        const tape = interact ? await timed('record the pointer tape', () => recordTape(page).catch((e) => ({ ok: false as const, error: String(e) }))) : null;
         const recording = await timed('read the recording out of the page', () => pullRecording(page).catch(() => null));
+        if (recording && tape?.ok) recording.doc.tape = { from: frames, move: tape.move, still: tape.still };
         await releaseFrames(page);
         if (buf && recording) {
-          const l = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
           const atMs = Date.now() - t0;
           let interaction: Buffer[] | undefined;
+          let interactionState: Array<StepState | null> | undefined;
+          let layoutScroll: ScrollLayout | null | undefined;
           let probe: ProbeData | null | undefined;
           if (interact) {
-            interaction = await timed('scripted pointer and scroll on the site', () => runInteraction(page).catch(() => undefined));
+            const ran = await timed('scripted pointer and scroll on the site', () => runInteractionWithState(page).catch(() => undefined));
+            interaction = ran?.frames;
+            interactionState = ran?.states;
             await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
             probe = await timed('input probe (pointer, scroll, resize)', () => probeInputs(page).catch(() => null));
+            layoutScroll = await timed('first-screen boxes at a few scroll positions', () => readScrollLayouts(page, section).catch(() => null));
           }
           return {
             png: `data:image/png;base64,${buf.toString('base64')}`,
@@ -615,6 +726,8 @@ export async function referenceShot(
             layout: (l ?? layout) as never,
             recording,
             interaction,
+            interactionState,
+            layoutScroll,
             probe,
           };
         }
@@ -695,17 +808,19 @@ export async function kitInteraction(
   program: '__replay' | '__rebuild',
   viewport: { width: number; height: number },
   extra: Params = {},
-): Promise<{ frames: Buffer[]; error?: string }> {
+): Promise<{ frames: Buffer[]; states: Array<StepState | null>; error?: string }> {
   const page = await browser.newPage({ viewport });
   try {
+    // the recorder only watches here: it reads which uniforms and uploads change during each step
+    await page.addInitScript(REPLAY_CAPTURE_SCRIPT);
     await page.goto(`${base}/preview/index.html#${encodeURIComponent(JSON.stringify({ ...extra, program, live: true }))}`, {
       waitUntil: 'load',
       timeout: 30_000,
     });
     await page.waitForFunction('window.__deaReady === true', undefined, { timeout: 120_000 }).catch(() => {});
     const error = (await page.evaluate('window.__deaError || null')) as string | null;
-    const frames = await runInteraction(page);
-    return { frames, error: error ?? undefined };
+    const { frames, states } = await runInteractionWithState(page);
+    return { frames, states, error: error ?? undefined };
   } finally {
     await page.close();
   }

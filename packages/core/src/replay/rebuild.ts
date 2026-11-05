@@ -80,10 +80,22 @@ export interface GlStep {
   op: 'gl';
   pass: number;
   frame: number;
+  /** the command's index in its recorded frame (the pointer tape finds its uploads by it) */
+  cmd?: number;
   fn: string;
   args: Arg[];
   /** objects to bind first */
-  bind: { tex?: number; texTarget?: number; fb?: number; readFb?: number; drawFb?: number; rb?: number; buf?: number; bufTarget?: number };
+  bind: {
+    tex?: number;
+    texTarget?: number;
+    fb?: number;
+    readFb?: number;
+    drawFb?: number;
+    rb?: number;
+    buf?: number;
+    bufTarget?: number;
+    make?: { kind: 'tex' | 'fb' | 'rb'; id: number };
+  };
   store?: Record<string, number>;
   why: string;
 }
@@ -127,6 +139,8 @@ export interface PipelineDoc {
   cameras: RebuildCamera[];
   passes: Array<{ index: number; frame: number; role: string; why: string; target: string; programs: string[] }>;
   frames: Array<{ steps: Step[] }>;
+  /** the last `n` frames are the pointer tape (see tape.ts): played while the pointer moves, uploads re-anchored to the live pointer's path */
+  tape?: { n: number; move: number; still: number; w: number; h: number; anchors: unknown[] };
   clocks: Array<{ program: number; uniform: string; base: number; rate: number }>;
   /** uniforms that follow the pointer, scroll or window size: value = scale × eased input + offset */
   inputs: import('./inputs.ts').InputMap[];
@@ -367,7 +381,7 @@ export function rebuildPipeline(
   const vaosInit = new Map<number, { attrs: Map<number, VaoAttr>; el: number }>();
   for (const v of doc.snap.vaos) vaosInit.set(v.id, { attrs: new Map(v.attrs.map((a) => [a.i, { ...a }])), el: v.el });
 
-  doc.frames.forEach((f, fi) => {
+  [...doc.frames, ...(doc.tapeFrames ?? [])].forEach((f, fi) => {
     const steps: Step[] = [];
     frames.push({ steps });
     const st = f.state;
@@ -807,6 +821,7 @@ export function rebuildPipeline(
             op: 'gl',
             pass: passNow(fi, ci),
             frame: fi,
+            cmd: ci,
             fn: name,
             args: a,
             bind: { buf, bufTarget: target },
@@ -855,6 +870,25 @@ export function rebuildPipeline(
         const ck = clockAt.get(`${fi}|${ci}`);
         if (ck && !clocks.some((x) => x.program === l.p && x.uniform === n))
           clocks.push({ program: l.p, uniform: n.replace(/\[0\]$/, ''), base: ck.base, rate: ck.rate });
+        return;
+      }
+      // a texture or render target the site made while the pointer moved: made when the step runs (the others exist from the start)
+      if (/^create(Texture|Framebuffer|Renderbuffer)$/.test(name)) {
+        const last = a[a.length - 1] as unknown;
+        const id = last && typeof last === 'object' && '$ret' in (last as object) ? Number((last as { $ret: number }).$ret) : 0;
+        if (id) {
+          const kind = name === 'createTexture' ? 'tex' : name === 'createFramebuffer' ? 'fb' : 'rb';
+          steps.push({
+            op: 'gl',
+            pass: passNow(fi, ci),
+            frame: fi,
+            fn: name,
+            args: [],
+            bind: { make: { kind, id } },
+            why: 'an object the site made while the pointer moved',
+          });
+          stats.glSteps++;
+        }
         return;
       }
       if (
@@ -957,6 +991,18 @@ export function rebuildPipeline(
       programs: ps.programs,
     })),
     frames,
+    ...(doc.tape && doc.tapeFrames?.length
+      ? {
+          tape: {
+            n: doc.tapeFrames.length,
+            move: doc.tape.move,
+            still: doc.tape.still,
+            w: doc.canvas.cssW || doc.canvas.w,
+            h: doc.canvas.cssH || doc.canvas.h,
+            anchors: doc.tape.anchors ?? [],
+          },
+        }
+      : {}),
     clocks,
     inputs: (doc.inputs ?? []).filter((m) => m.kind !== 'clock'),
     viewport: doc.viewport ?? null,

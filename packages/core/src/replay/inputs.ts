@@ -14,6 +14,8 @@ import type { Page } from 'playwright';
 export interface ProbeData {
   series: Record<string, number[][]>;
   env: Array<[number, number, number, number, number, number]>;
+  /** where each phase of the probe started, as an index into `env` (frames): rest, sweep1, control, sweep2, scroll, resize */
+  phases?: Array<[string, number]>;
 }
 
 export type InputKind = 'pointer' | 'pointer-velocity' | 'scroll' | 'viewport' | 'clock';
@@ -59,45 +61,75 @@ export interface ProbeReport {
 
 const sleep = (page: Page, ms: number) => page.waitForTimeout(ms);
 
-/** Exercise the page (pointer, scroll, resize) while the recorder notes every float uniform per frame. */
+/**
+ * Exercise the page (pointer, scroll, resize) while the recorder notes every float uniform per frame. The pointer part is
+ * counted in animation frames, not milliseconds (a machine with no GPU draws 0.3–0.8 frames a second, so a timed sweep has
+ * too few frames in it): the pointer rests; sweeps x then y (the training sweep); stays still for a control window; then
+ * sweeps again in a different order and range (y then x, narrower), which a pointer fit must predict without having seen it.
+ */
 export async function probeInputs(page: Page): Promise<ProbeData | null> {
   const vp = page.viewportSize() ?? { width: 1440, height: 900 };
   const started = await page.evaluate('window.__DEA_CAP__ && window.__DEA_CAP__.probeStart ? window.__DEA_CAP__.probeStart() : false').catch(() => false);
   if (!started) return null;
   const { width: w, height: h } = vp;
+  const mark = (name: string) => page.evaluate(`window.__DEA_CAP__.probeMark(${JSON.stringify(name)})`).catch(() => {});
+  const frames = () => page.evaluate('window.__DEA_CAP__.probeFrames()').catch(() => -1) as Promise<number>;
+  /** wait until `n` more animation frames were drawn (or `capMs` passed) */
+  const wait = async (n: number, capMs = 4000) => {
+    const f0 = await frames();
+    if (f0 < 0) return sleep(page, 160);
+    const t0 = Date.now();
+    while (Date.now() - t0 < capMs && (await frames()) < f0 + n) await sleep(page, 40);
+  };
   try {
+    await mark('rest');
     await page.mouse.move(w * 0.5, h * 0.5);
-    await sleep(page, 900);
+    await wait(5, 8000);
     const tri = (i: number, n: number) => 1 - Math.abs(1 - (2 * i) / n); // 0 → 1 → 0
-    const N = 16;
+    await mark('sweep1');
+    const N = 12;
     for (let i = 0; i <= N; i++) {
       await page.mouse.move(w * (0.2 + 0.6 * tri(i, N)), h * 0.5);
-      await sleep(page, 160);
+      await wait(1, 2500);
     }
-    await sleep(page, 500);
+    await wait(2, 4000);
     for (let i = 0; i <= N; i++) {
       await page.mouse.move(w * 0.5, h * (0.2 + 0.6 * tri(i, N)));
-      await sleep(page, 160);
+      await wait(1, 2500);
     }
-    await sleep(page, 600);
+    await mark('control');
+    await wait(8, 14_000);
+    await mark('sweep2');
+    const M = 8;
+    for (let i = 0; i <= M; i++) {
+      await page.mouse.move(w * 0.5, h * (0.7 - 0.4 * tri(i, M)));
+      await wait(1, 2500);
+    }
+    for (let i = 0; i <= M; i++) {
+      await page.mouse.move(w * (0.65 - 0.3 * tri(i, M)), h * 0.7);
+      await wait(1, 2500);
+    }
+    await wait(2, 4000);
+    await mark('scroll');
     // a wheel that moves a fixed stage (a scroll-driven scene) is followed as far as it goes: 8 steps down, then back up
     for (let i = 0; i < 8; i++) {
       await page.mouse.wheel(0, 250);
-      await sleep(page, 350);
+      await wait(1, 2500);
     }
-    await sleep(page, 900);
+    await wait(2, 4000);
     for (let i = 0; i < 8; i++) {
       await page.mouse.wheel(0, -250);
-      await sleep(page, 350);
+      await wait(1, 2500);
     }
     await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
-    await sleep(page, 700);
+    await wait(2, 4000);
+    await mark('resize');
     await page.setViewportSize({ width: Math.round(w * 0.75), height: h });
-    await sleep(page, 1000);
+    await wait(3, 6000);
     await page.setViewportSize({ width: Math.round(w * 0.75), height: Math.round(h * 0.7) });
-    await sleep(page, 1000);
+    await wait(3, 6000);
     await page.setViewportSize(vp);
-    await sleep(page, 1000);
+    await wait(3, 6000);
   } catch {
     /* whatever the probe saw so far is still read */
   }
@@ -233,6 +265,46 @@ export function holdsOnTheWayBack(labels: Array<'a' | 'b' | null>, X: number[], 
   return r >= minR;
 }
 
+/**
+ * Out-of-sample check with the control window: a fit made on the training sweep has to predict the second sweep (a different
+ * order and range) and the control window (pointer still), which it never saw. A value that only drifts with time fits any
+ * smooth pointer path inside one sweep and fails here. `phase[i]` is the probe phase of sample i.
+ */
+export function holdsOutOfSample(phase: Array<string | null>, X: number[], Y: number[], y: number[], minR = 0.7): boolean {
+  const idx = (names: string[]) => phase.map((p, i) => (p && names.includes(p) ? i : -1)).filter((i) => i >= 0);
+  const train = idx(['sweep1']);
+  const valid = idx(['sweep2']);
+  const control = idx(['control']);
+  if (train.length < 8 || valid.length < 6) return true; // too few frames to tell: the older guards decide
+  const f = lsq3(
+    train.map((i) => X[i]),
+    train.map((i) => Y[i]),
+    train.map((i) => y[i]),
+  );
+  if (!f) return false;
+  const span = Math.max(...y) - Math.min(...y);
+  const pred = (i: number) => f.a + f.b * X[i] + f.c * Y[i];
+  const v = corr(
+    valid.map(pred),
+    valid.map((i) => y[i]),
+  );
+  const rms = (list: number[]) => Math.sqrt(list.reduce((s, i) => s + (pred(i) - y[i]) ** 2, 0) / Math.max(1, list.length));
+  const moved = Math.max(...valid.map((i) => y[i])) - Math.min(...valid.map((i) => y[i]));
+  // the second sweep moved the pointer, so the value has to have moved with it, and the fit has to land close to it
+  if (
+    moved < 0.15 * span &&
+    Math.abs(f.b) * (Math.max(...valid.map((i) => X[i])) - Math.min(...valid.map((i) => X[i]))) +
+      Math.abs(f.c) * (Math.max(...valid.map((i) => Y[i])) - Math.min(...valid.map((i) => Y[i]))) >
+      0.3 * span
+  )
+    return false;
+  if (moved >= 0.15 * span && v.r < minR) return false;
+  if (rms(valid) > 0.5 * span) return false;
+  // the control window: the fit must not be far off while the pointer is still (a value that keeps moving on its own)
+  if (control.length >= 4 && rms(control) > 0.5 * span) return false;
+  return true;
+}
+
 const round = (x: number, d = 5) => Math.round(x * 10 ** d) / 10 ** d;
 
 /**
@@ -240,7 +312,15 @@ const round = (x: number, d = 5) => Math.round(x * 10 ** d) / 10 ** d;
  * components is fitted to the eased pointer, x and y together (value = a + b × x + c × y), the way a camera that orbits
  * with the pointer moves them. Only fits with |r| ≥ minR count.
  */
-function fitMatrix(program: number, uniform: string, rows: number[][], idx: number[], sig: { px: number[]; py: number[] }, minR: number): InputMap[] {
+function fitMatrix(
+  program: number,
+  uniform: string,
+  rows: number[][],
+  idx: number[],
+  sig: { px: number[]; py: number[] },
+  minR: number,
+  phase: Array<string | null> | null,
+): InputMap[] {
   const out: InputMap[] = [];
   const legs = pointerLegs(sig);
   const comps = Math.max(...rows.map((r) => r.length - 1));
@@ -347,12 +427,19 @@ function fitMatrix(program: number, uniform: string, rows: number[][], idx: numb
       easedSpanX = easedHiX - easedLoX;
       easedSpanY = easedHiY - easedLoY;
       if (
-        !holdsOnTheWayBack(
-          pick.map((i) => legs[idx[i]] ?? null),
-          X,
-          Y,
-          y,
-        )
+        phase
+          ? !holdsOutOfSample(
+              pick.map((i) => phase[idx[i]] ?? null),
+              X,
+              Y,
+              y,
+            )
+          : !holdsOnTheWayBack(
+              pick.map((i) => legs[idx[i]] ?? null),
+              X,
+              Y,
+              y,
+            )
       )
         continue;
     }
@@ -470,6 +557,14 @@ export function fitInputs(probe: ProbeData, opts: { minR?: number } = {}): Probe
   const inputs: InputMap[] = [];
   const unexplained: string[] = [];
   const legs = pointerLegs(sig);
+  // the phase of every frame (rest, sweep1, control, sweep2, scroll, resize), when the probe was counted in frames
+  const phase: Array<string | null> | null = probe.phases?.length
+    ? probe.env.map((_, i) => {
+        let name: string | null = null;
+        for (const [n, from] of probe.phases ?? []) if (from <= i) name = n;
+        return name;
+      })
+    : null;
   for (const [key, rows] of Object.entries(probe.series)) {
     const bar = key.lastIndexOf('|');
     const program = Number(key.slice(0, bar));
@@ -477,7 +572,7 @@ export function fitInputs(probe: ProbeData, opts: { minR?: number } = {}): Probe
     if (!Number.isFinite(program) || rows.length < 8) continue;
     const idx = rows.map((r) => at.get(r[0]) ?? -1);
     if (uniform.includes('#')) {
-      const byPointer = exercised.pointer ? fitMatrix(program, uniform, rows, idx, sig, minR) : [];
+      const byPointer = exercised.pointer ? fitMatrix(program, uniform, rows, idx, sig, minR, phase) : [];
       const byScroll = exercised.scroll ? fitMatrixScroll(program, uniform, rows, idx, sig.scroll, minR) : [];
       // a component that both follow goes to the closer fit
       for (const m of byPointer) {
@@ -553,15 +648,23 @@ export function fitInputs(probe: ProbeData, opts: { minR?: number } = {}): Probe
         const se = ease(best.m.kind === 'pointer-velocity' ? vel(best.m.axis === 'y' ? sig.py : sig.px) : best.m.axis === 'y' ? sig.py : sig.px, best.m.k ?? 1);
         const ok = idx.filter((_, i) => keep[i]);
         const xs = ok.map((j) => se[j]);
-        if (
-          !holdsOnTheWayBack(
-            ok.map((j) => legs[j] ?? null),
-            xs,
-            xs.map(() => 0),
-            u,
-          )
-        ) {
-          unexplained.push(`${uniform}[${c}] (program ${program}; it matched the pointer's way out but not the way back, so it is time, not pointer)`);
+        const holds = phase
+          ? holdsOutOfSample(
+              ok.map((j) => phase[j] ?? null),
+              xs,
+              xs.map(() => 0),
+              u,
+            )
+          : holdsOnTheWayBack(
+              ok.map((j) => legs[j] ?? null),
+              xs,
+              xs.map(() => 0),
+              u,
+            );
+        if (!holds) {
+          unexplained.push(
+            `${uniform}[${c}] (program ${program}; it matched the first sweep but not the second sweep or the still window, so it is time, not pointer)`,
+          );
           best = null;
         }
       }

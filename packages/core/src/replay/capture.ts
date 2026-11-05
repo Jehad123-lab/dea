@@ -59,7 +59,8 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
   const call = (gl, n, ...a) => orig(gl, n).apply(gl, a);
 
   const DRAW = new Set(['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements']);
-  const SKIP = new Set(['getError', 'getParameter', 'getExtension', 'getSupportedExtensions', 'getContextAttributes', 'isContextLost',
+  // deletes are not recorded: the replay loops a few frames, so what the site freed in one pass would be gone for the next
+  const SKIP = new Set(['deleteTexture', 'deleteFramebuffer', 'deleteRenderbuffer', 'deleteBuffer', 'deleteVertexArray', 'deleteProgram', 'deleteSampler', 'deleteTransformFeedback', 'getError', 'getParameter', 'getExtension', 'getSupportedExtensions', 'getContextAttributes', 'isContextLost',
     'getUniformLocation', 'getAttribLocation', 'getActiveAttrib', 'getActiveUniform', 'getAttachedShaders', 'getBufferParameter',
     'getFramebufferAttachmentParameter', 'getProgramParameter', 'getProgramInfoLog', 'getRenderbufferParameter', 'getShaderParameter',
     'getShaderPrecisionFormat', 'getShaderInfoLog', 'getShaderSource', 'getTexParameter', 'getUniform', 'getVertexAttrib',
@@ -490,15 +491,71 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
   let lastTs = -1;
   // ---- input probe: the float uniforms' values at every animation frame, beside the pointer, scroll and window size --------
   CAP.probe = null;
-  const onPointer = (e) => { if (CAP.probe) { CAP.probe.mx = e.clientX; CAP.probe.my = e.clientY; } };
+  CAP.ptr = null;
+  const onPointer = (e) => { CAP.ptr = [e.clientX, e.clientY]; if (CAP.probe) { CAP.probe.mx = e.clientX; CAP.probe.my = e.clientY; } };
   try { addEventListener('pointermove', onPointer, { capture: true, passive: true }); addEventListener('mousemove', onPointer, { capture: true, passive: true }); } catch (e) {}
   // the scroll signal: the page's own scroll when it can scroll, else the sum of the wheel it was given (a fixed-stage site that
   // moves its scene by wheel events scrolls nothing, and scrollY would stay 0)
   CAP.wheel = 0;
   try { addEventListener('wheel', (e) => { CAP.wheel = Math.max(0, CAP.wheel + e.deltaY); }, { capture: true, passive: true }); } catch (e) {}
   const scrollSignal = () => (document.documentElement.scrollHeight > innerHeight + 2 ? Math.round(scrollY) : Math.round(CAP.wheel));
-  CAP.probeStart = () => { CAP.probe = { t0: performance.now(), cur: {}, series: {}, env: [], mx: -1, my: -1, mats: new Map(), nkeys: 0 }; CAP.wheel = 0; return true; };
-  CAP.probeStop = () => { const P = CAP.probe; CAP.probe = null; return P ? { series: P.series, env: P.env } : null; };
+
+  // ---- state diff: what the page changed during a window (uniforms, CPU uploads, texture uploads, draw sizes) -------------
+  // Used by the interaction check, on the site and on the kit with the same script, so what moved on one and not on the other
+  // is a named list. Only counts and ranges are kept, no data.
+  CAP.diff = null;
+  CAP.diffStart = () => { CAP.diff = { frames: 0, draws: 0, verts: 0, uni: new Map(), buf: new Map(), tex: new Map(), sig: new Map(), t0: performance.now() }; return true; };
+  const sumOf = (v) => { let s = 0; const n = v.length; const st = Math.max(1, (n / 64) | 0); for (let i = 0; i < n; i += st) s += (+v[i] || 0) * ((i % 7) + 1); return Math.round(s * 1e4) / 1e4; };
+  const diffNote = (I, name, a, ret) => {
+    const D = CAP.diff;
+    if (name.startsWith('uniform')) {
+      const L = a[0] && I.locs.get(a[0]); if (!L) return;
+      const kind = name.slice(7); const isMat = kind.startsWith('Matrix');
+      if (!isMat && kind.indexOf('f') < 0) return;
+      const arr = isMat ? a[2] : kind.endsWith('v') ? a[1] : null;
+      const v = [];
+      if (arr) { for (let i = 0; i < Math.min(arr.length, 16); i++) v.push(+arr[i]); } else for (let i = 1; i < a.length && i <= 4; i++) v.push(+a[i]);
+      const key = L.n.replace(/\[0\]$/, '');
+      let u = D.uni.get(key);
+      if (!u) { if (D.uni.size >= 600) return; u = { first: v, dev: 0, sets: 0, comps: v.length }; D.uni.set(key, u); }
+      u.sets++;
+      for (let i = 0; i < Math.min(v.length, u.first.length); i++) { const d = Math.abs(v[i] - u.first[i]) / (1 + Math.abs(u.first[i])); if (d > u.dev) u.dev = d; }
+      return;
+    }
+    if (name === 'bufferSubData' || name === 'bufferData') {
+      const d = name === 'bufferSubData' ? a[2] : a[1];
+      if (!d || typeof d === 'number') return;
+      const size = d.byteLength; const f = d instanceof ArrayBuffer ? new Float32Array(d, 0, size >> 2) : new Float32Array(d.buffer, d.byteOffset, size >> 2);
+      let e = D.buf.get(name + ':' + size); if (!e) { e = { n: 0, sums: new Set() }; D.buf.set(name + ':' + size, e); }
+      e.n++; if (e.sums.size < 50) e.sums.add(sumOf(f));
+      return;
+    }
+    if (name === 'texSubImage2D' || name === 'texImage2D' || name === 'texSubImage3D' || name === 'texImage3D') {
+      const src = a[a.length - 1]; const k = name + ':' + (src && src.constructor ? src.constructor.name : typeof src);
+      D.tex.set(k, (D.tex.get(k) || 0) + 1);
+      return;
+    }
+    if (DRAW.has(name)) {
+      const n = name === 'drawArrays' || name === 'drawArraysInstanced' ? a[2] : name === 'drawRangeElements' ? a[3] : a[1];
+      const inst = /Instanced/.test(name) ? a[a.length - 1] : 1;
+      D.draws++; D.verts += (n | 0) * (inst | 0 || 1);
+      const k = I.curProg + '|' + a[0] + '|' + (inst > 1 ? 'i' : '1');
+      let s = D.sig.get(k); if (!s) { s = new Set(); D.sig.set(k, s); }
+      if (s.size < 40) s.add(n + 'x' + inst);
+    }
+  };
+  CAP.diffTake = () => {
+    const D = CAP.diff; CAP.diff = null; if (!D) return null;
+    const uniforms = []; for (const [n, u] of D.uni) if (u.dev > 1e-4) uniforms.push({ name: n, dev: Math.round(u.dev * 1e4) / 1e4, sets: u.sets, comps: u.comps });
+    const uploads = []; for (const [k, e] of D.buf) { const [fn, size] = k.split(':'); uploads.push({ fn, size: +size, n: e.n, distinct: e.sums.size }); }
+    const tex = []; for (const [k, n] of D.tex) tex.push({ call: k, n });
+    const varying = []; for (const [k, s] of D.sig) if (s.size > 1) varying.push({ draw: k, sizes: [...s].slice(0, 6) });
+    return { frames: D.frames, draws: D.draws, verts: D.verts, uniforms, uploads, tex, varying, ms: Math.round(performance.now() - D.t0) };
+  };
+  CAP.probeStart = () => { CAP.probe = { t0: performance.now(), cur: {}, series: {}, env: [], phases: [], mx: -1, my: -1, mats: new Map(), nkeys: 0 }; CAP.wheel = 0; return true; };
+  CAP.probeStop = () => { const P = CAP.probe; CAP.probe = null; return P ? { series: P.series, env: P.env, phases: P.phases } : null; };
+  CAP.probeMark = (name) => { if (CAP.probe) CAP.probe.phases.push([name, CAP.probe.env.length]); return true; };
+  CAP.probeFrames = () => (CAP.probe ? CAP.probe.env.length : -1);
   const probeNote = (I, name, a) => {
     const kind = name.slice(7);
     const isMat = kind.startsWith('Matrix');
@@ -542,6 +599,7 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
   };
 
   const boundary = () => {
+    if (CAP.diff) CAP.diff.frames++;
     if (CAP.probe) { try { probeSample(); } catch (e) {} }
     for (const r of CAP.contexts) { const gl = r.deref(); if (!gl) continue; const I = infos.get(gl); I.drawsLast = I.draws; I.draws = 0; I.frames++; }
     if (CAP.state === 'armed') {
@@ -552,6 +610,11 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
       I.rec = { on: true, frame: -1, frames: [], cmds: null, born: new Set(), snapped: {}, pendFb: new Set(), pendVao: new Set(), draws: 0,
         maxCmds: CAP.opts.maxCmds || 400000,
         snap: { buffers: [], textures: [], programs: [], renderbuffers: [], samplers: [], framebuffers: [], vaos: [] } };
+    }
+    if (CAP.state === 'done' && CAP.contPending && CAP.target && CAP.target.rec) {
+      // continue the same recording: the objects it already met keep their snapshots, new ones are read when first met
+      const R = CAP.target.rec;
+      R.on = true; R.frame = R.frames.length - 1; CAP.opts.frames = R.frames.length + CAP.contPending; CAP.contPending = 0; CAP.state = 'recording';
     }
     if (CAP.state === 'recording') {
       const I = CAP.target; const R = I.rec;
@@ -570,7 +633,7 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
         if (state && state.readFb && R.pendFb.has(state.readFb)) { R.pendFb.delete(state.readFb); snapFbBound(I, I.v2 ? 0x8ca8 : 0x8d40, state.readFb); }
         if (state && state.vao && R.pendVao.has(state.vao)) { R.pendVao.delete(state.vao); snapVaoBound(I, state.vao); }
       } catch (e) { err('bound state: ' + e); }
-      R.frames.push({ state, cmds: R.cmds, t0: performance.now(), ts: lastTs });
+      R.frames.push({ state, cmds: R.cmds, t0: performance.now(), ts: lastTs, ptr: CAP.ptr ? [CAP.ptr[0], CAP.ptr[1]] : null });
     }
   };
 
@@ -583,6 +646,8 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
       return cb.apply(this, arguments);
     });
   };
+  CAP.nframes = () => (CAP.target && CAP.target.rec ? CAP.target.rec.frames.length : 0);
+  CAP.cont = (n, hold) => { if (CAP.state !== 'done') return false; CAP.opts.hold = hold !== false; CAP.contPending = n; CAP.hold = false; const h = held.splice(0); for (const cb of h) raf0.call(window, cb); return true; };
   CAP.release = () => { CAP.hold = false; const h = held.splice(0); for (const cb of h) raf0.call(window, cb); };
   CAP.arm = (opts) => {
     for (const r of CAP.contexts) { const gl = r.deref(); if (!gl) continue; for (const n of ['EXT_color_buffer_float', 'EXT_color_buffer_half_float', 'WEBGL_color_buffer_float']) { try { call(gl, 'getExtension', n); } catch (e) {} } }
@@ -611,6 +676,7 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
   };
   // bookkeeping that runs whether or not a recording is on
   const track = (I, gl, name, a, ret) => {
+    if (CAP.diff) { try { diffNote(I, name, a, ret); } catch (e) {} }
     switch (name) {
       case 'drawArrays': case 'drawElements': case 'drawArraysInstanced': case 'drawElementsInstanced': case 'drawRangeElements':
         I.draws++; if (CAP.probe) { try { probeDraw(I); } catch (e) {} } break;
@@ -702,7 +768,7 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
       canvas: { w: gl.drawingBufferWidth, h: gl.drawingBufferHeight, cssW: b.width, cssH: b.height, x: b.left, y: b.top,
         style: { position: cs.position, zIndex: cs.zIndex, opacity: cs.opacity, mixBlendMode: cs.mixBlendMode, filter: cs.filter, background: cs.backgroundColor } },
       dpr: devicePixelRatio, attrs, extensions: [...I.exts.keys()],
-      snap: R.snap, frames: R.frames.map((f) => ({ state: f.state, cmds: f.cmds, ms: f.ms || 0, ts: f.ts })),
+      snap: R.snap, frames: R.frames.map((f) => ({ state: f.state, cmds: f.cmds, ms: f.ms || 0, ts: f.ts, ptr: f.ptr })),
       errors: CAP.errors.slice(), overflow: !!R.overflow, binBytes: bin.size, url: location.href, at: new Date().toISOString(),
       contexts: CAP.contexts.length,
     };
@@ -746,6 +812,47 @@ export async function recordFrames(page: Page, opts: { frames?: number; timeoutM
     await page.waitForTimeout(300);
   }
   return { ok: false, error: 'no WebGL canvas drew a frame while DEA waited (the scene may render only on demand)' };
+}
+
+/** The pointer path of the tape: starts at the centre moving right, then curves up and back (a turning path, so a trail's
+ *  direction is not one fixed line), as fractions of the window. `move` frames with the pointer moving, `still` frames after it stops. */
+export function tapePointer(i: number, move: number): [number, number] {
+  const s = move <= 1 ? 0 : Math.min(i, move - 1) / (move - 1);
+  const phi = s * 1.6 * Math.PI;
+  return [0.5 + 0.2 * Math.sin(phi), 0.5 - 0.15 * (1 - Math.cos(phi))];
+}
+
+/**
+ * Continue the recording for `move + still` more frames while the pointer moves along tapePointer (the recorded "tape":
+ * what the site draws, and uploads from the CPU, while the pointer moves and as it settles). The page's frames are held
+ * again afterwards. Returns how many frames were added.
+ */
+export async function recordTape(
+  page: Page,
+  opts: { move?: number; still?: number; timeoutMs?: number } = {},
+): Promise<{ ok: true; move: number; still: number } | { ok: false; error: string }> {
+  const move = opts.move ?? 8;
+  const still = opts.still ?? 4;
+  const vp = page.viewportSize() ?? { width: 1440, height: 900 };
+  type Cap = { cont: (n: number, hold: boolean) => boolean; nframes: () => number; state: string };
+  const ok = await page.evaluate((n) => (window as unknown as { __DEA_CAP__: Cap }).__DEA_CAP__.cont(n, true), move + still).catch(() => false);
+  if (!ok) return { ok: false, error: 'the recorder could not continue' };
+  const nf = () => page.evaluate(() => (window as unknown as { __DEA_CAP__: Cap }).__DEA_CAP__.nframes()).catch(() => -1);
+  const stateOf = () => page.evaluate(() => (window as unknown as { __DEA_CAP__: Cap }).__DEA_CAP__.state).catch(() => 'gone');
+  const t0 = Date.now();
+  const limit = opts.timeoutMs ?? 240_000;
+  const base = await nf();
+  // the pointer for tape frame i moves right after frame i - 1 was recorded, so frame i is the first to see it
+  for (let i = 0; i < move + still; i++) {
+    while (i > 0 && Date.now() - t0 < limit && (await nf()) < base + i && (await stateOf()) !== 'done') await page.waitForTimeout(60);
+    if (Date.now() - t0 >= limit) return { ok: false, error: 'the tape timed out' };
+    if (i < move) {
+      const [x, y] = tapePointer(i, move);
+      await page.mouse.move(vp.width * x, vp.height * y, { steps: 1 }).catch(() => {});
+    }
+  }
+  while (Date.now() - t0 < limit && (await stateOf()) !== 'done') await page.waitForTimeout(150);
+  return { ok: true, move, still };
 }
 
 /** Let the page's animation frames run again after a recording. */

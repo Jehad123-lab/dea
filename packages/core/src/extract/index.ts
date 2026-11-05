@@ -20,6 +20,7 @@ import { REPLAY_PLAYER } from '../replay/player.ts';
 import { type RebuildStats, rebuildMd, rebuildPipeline } from '../replay/rebuild.ts';
 import { REBUILD_RUNNER } from '../replay/runner.ts';
 import { recoverScene, sceneGlb, sceneMd, sceneModule } from '../replay/scene.ts';
+import { fitTape } from '../replay/tape.ts';
 import type { InspectOptions } from '../see/inspect.ts';
 import { currentTimings, type StageTiming, Timings, type TimingsDoc, timed, withTimings } from '../timings.ts';
 import {
@@ -38,8 +39,18 @@ import {
   shaderModule,
   type Target,
   tokenFiles,
+  withScroll,
 } from './generate.ts';
-import { classifyInputs, framesStrip, INTERACTION_SCRIPT, type InteractionResult, interactionMd, meanResponse, scoreInteraction } from './interaction.ts';
+import {
+  classifyInputs,
+  diffStates,
+  framesStrip,
+  INTERACTION_SCRIPT,
+  type InteractionResult,
+  interactionMd,
+  meanResponse,
+  scoreInteraction,
+} from './interaction.ts';
 import { type KitManifest, libraryAdd } from './library.ts';
 import {
   compareImages,
@@ -663,6 +674,17 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
         } else {
           recDoc = c.doc;
           const binU8 = new Uint8Array(c.bin.buffer, c.bin.byteOffset, c.bin.byteLength);
+          // the pointer tape: frames recorded while the pointer moved and settled are kept apart from the rest frames
+          if (recDoc.tape && recDoc.frames.length > recDoc.tape.from) {
+            recDoc.tapeFrames = recDoc.frames.slice(recDoc.tape.from);
+            recDoc.frames = recDoc.frames.slice(0, recDoc.tape.from);
+            const tf = fitTape(recDoc, binU8, recDoc.tapeFrames, recDoc.tape.move);
+            recDoc.tape.anchors = tf.anchors;
+            recDoc.tape.fit = { report: tf.report, path: tf.path };
+            say(
+              `pointer tape: ${recDoc.tapeFrames.length} frames; ${tf.anchors.length} uploads anchored to the pointer path (${tf.report.map((r) => `buffer ${r.buf}: ${r.reason}`).join('; ') || 'no CPU uploads'})`,
+            );
+          } else delete recDoc.tape;
           recDoc.animate = animateEntries(recDoc);
           recDoc.graph = buildGraph(recDoc, binU8);
           // live input: what the probe measured on the site, and what the uniforms' names suggest beyond it
@@ -797,6 +819,13 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             }
           }
           layout = pick;
+          if (layout && 'layoutScroll' in ref && ref.layoutScroll) {
+            layout = withScroll(layout, ref.layoutScroll);
+            if (layout.scroll)
+              say(
+                `first screen: ${Object.keys(layout.scroll.items).length} element(s) move with scroll (keyframes at ${layout.scroll.positions.join(', ')} px)`,
+              );
+          }
           if (layout) {
             // ✔ the page's own background, read from the live page
             params = { ...params, background: rgbHex(layout.background) ?? params.background };
@@ -1031,6 +1060,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           try {
             say('interaction check: the same pointer and scroll script on the kit, running live');
             const siteFrames = ref.interaction;
+            const siteState = 'interactionState' in ref ? (ref.interactionState ?? null) : null;
             const rows: Array<{ label: string; frames: Buffer[] }> = [{ label: 'original', frames: siteFrames }];
             const { program: _p, ...rest } = params;
             const res: InteractionResult = {
@@ -1063,6 +1093,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
               const alternating = await kitSteadiness(browser, server.url, prog, vp, { steady: false }).catch(() => null);
               const k = await kitInteraction(browser, server.url, prog, vp, rest);
               const steps = await scoreInteraction(cmp, siteFrames, k.frames);
+              if (siteState) (res.stateDiff ??= {})[prog === '__replay' ? 'replay' : 'rebuild'] = diffStates(siteState, k.states);
               res[prog === '__replay' ? 'replay' : 'rebuild'] = {
                 steps,
                 response: meanResponse(steps),
@@ -1076,6 +1107,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             const siteSteps = (res.rebuild ?? res.replay)?.steps ?? null;
             res.inputs = classifyInputs(replay.inputs ?? [], probeReport, replay.clocks ?? 0, siteSteps);
             await put('preview/interaction.jpg', await framesStrip(cmp, rows));
+            if (siteState) res.siteState = siteState;
             await put('interaction.json', JSON.stringify(res, null, 2));
             interaction = res;
             const fmt = (x: { response: number | null } | null) => (x?.response != null ? pct(x.response) : 'n/a');

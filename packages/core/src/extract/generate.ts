@@ -420,6 +420,7 @@ const sceneBody = (mods: ShaderModule[], indent: string) => {
 export interface HeroLayout {
   viewport: { width: number; height: number };
   boxes: Array<{
+    k?: string;
     tag: string;
     text: string;
     x: number;
@@ -442,6 +443,7 @@ export interface HeroLayout {
   background?: string | null;
   /** ✔ flat shapes on the first screen (pills, buttons, badges): background, gradient, border, corners */
   shapes?: Array<{
+    k?: string;
     x: number;
     y: number;
     w: number;
@@ -454,8 +456,15 @@ export interface HeroLayout {
     filter?: string | null;
     opacity: number;
   }>;
+  /** ✔ how the first screen's elements move with scroll: keyframes of each element's box at a few scroll positions (px), when the page scrolls */
+  scroll?: {
+    positions: number[];
+    items: Record<string, Array<[number, number, number, number, number, number] | null>>;
+    texts?: Record<string, string>;
+  } | null;
   /** ✔ graphics on the first screen: inline SVG with its computed paint, or an image by URL (the site's own, for study) */
   graphics?: Array<{
+    k?: string;
     kind: 'svg' | 'img' | 'placeholder';
     x: number;
     y: number;
@@ -475,7 +484,7 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
  * hero. Verified: text, font, size, weight, colour and position at the reference size. Inferred: the units (the site's
  * own layout system, flex or grid, is not rebuilt).
  */
-export function heroStyles(l: HeroLayout): Array<{ tag: string; text: string; html?: string; style: Record<string, string> }> {
+export function heroStyles(l: HeroLayout): Array<{ k?: string; tag: string; text: string; html?: string; style: Record<string, string> }> {
   const vw = (px: number) => `${r2((px / l.viewport.width) * 100)}vw`;
   const vh = (px: number) => `${r2((px / l.viewport.height) * 100)}vh`;
   const tags = new Set(['h1', 'h2', 'h3', 'h4', 'p', 'span', 'a', 'li', 'small', 'strong', 'em', 'button', 'label']);
@@ -490,6 +499,7 @@ export function heroStyles(l: HeroLayout): Array<{ tag: string; text: string; ht
   });
   // shapes first (under), then graphics, then the text on top, as on the page
   const shapes = (l.shapes ?? []).map((s) => ({
+    k: s.k,
     tag: 'div',
     text: '',
     style: {
@@ -503,15 +513,16 @@ export function heroStyles(l: HeroLayout): Array<{ tag: string; text: string; ht
   }));
   const graphics = (l.graphics ?? []).map((gr) =>
     gr.kind === 'svg'
-      ? { tag: 'div', text: '', html: gr.svg ?? '', style: place(gr) }
+      ? { k: gr.k, tag: 'div', text: '', html: gr.svg ?? '', style: place(gr) }
       : gr.kind === 'img'
-        ? { tag: 'img', text: '', html: gr.src ?? '', style: { ...place(gr), objectFit: gr.fit || 'fill' } }
-        : { tag: 'div', text: '', style: { ...place(gr), background: 'repeating-conic-gradient(#8a8a8a 0 25%, #6e6e6e 0 50%) 0 0 / 8px 8px' } },
+        ? { k: gr.k, tag: 'img', text: '', html: gr.src ?? '', style: { ...place(gr), objectFit: gr.fit || 'fill' } }
+        : { k: gr.k, tag: 'div', text: '', style: { ...place(gr), background: 'repeating-conic-gradient(#8a8a8a 0 25%, #6e6e6e 0 50%) 0 0 / 8px 8px' } },
   );
   return [
     ...shapes,
     ...graphics,
     ...l.boxes.map((b) => ({
+      k: b.k,
       tag: tags.has(b.tag) ? (b.tag === 'a' || b.tag === 'button' ? 'span' : b.tag) : 'div',
       text: b.text,
       style: {
@@ -541,6 +552,78 @@ const cssText = (st: Record<string, string>) =>
     .join('; ');
 const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+/**
+ * The scroll behaviour of the first screen as a small script (plain JavaScript, no dependencies): each element that moved,
+ * scaled or faded with scroll on the site gets its box interpolated between the keyframes DEA read at a few scroll
+ * positions. Returns '' when the page did not move anything.
+ */
+export function scrollScript(l: HeroLayout): string {
+  const s = l.scroll;
+  if (!s || !Object.keys(s.items).length) return '';
+  const data = JSON.stringify({ positions: s.positions, items: s.items, vw: l.viewport.width, vh: l.viewport.height });
+  return `(function () {
+  var D = ${data};
+  var sc = document.getElementById('scene') || document.querySelector('.dea-scene');
+  if (sc && D.items.canvas) sc.setAttribute('data-dea-k', 'canvas');
+  var els = Array.prototype.slice.call(document.querySelectorAll('[data-dea-k]')).filter(function (e) { return D.items[e.getAttribute('data-dea-k')]; });
+  function at(f, s) {
+    var pts = [];
+    for (var i = 0; i < f.length; i++) if (f[i]) pts.push([D.positions[i], f[i]]);
+    if (!pts.length) return null;
+    if (s <= pts[0][0]) return pts[0][1];
+    for (var j = 0; j < pts.length - 1; j++) if (s <= pts[j + 1][0]) {
+      var t = (s - pts[j][0]) / (pts[j + 1][0] - pts[j][0]), a = pts[j][1], b = pts[j + 1][1];
+      return a.map(function (v, n) { return v + (b[n] - v) * t; });
+    }
+    return pts[pts.length - 1][1];
+  }
+  function apply() {
+    var s = window.scrollY || 0;
+    els.forEach(function (el) {
+      var b = at(D.items[el.getAttribute('data-dea-k')], s);
+      if (!b) return;
+      var st = el.style, p = function (k, v) { st.setProperty(k, v, 'important'); };
+      p('left', (b[0] / D.vw * 100) + 'vw'); p('top', (b[1] / D.vh * 100) + 'vh'); p('width', (b[2] / D.vw * 100) + 'vw');
+      if (el.getAttribute('data-dea-h') !== '0') p('height', (b[3] / D.vh * 100) + 'vh');
+      if (el.getAttribute('data-dea-k') !== 'canvas') p('opacity', String(b[4]));
+      if (b[5]) p('font-size', 'max(10px, ' + (b[5] / D.vw * 100) + 'vw)');
+    });
+  }
+  addEventListener('scroll', apply, { passive: true });
+  apply();
+})();`;
+}
+
+/**
+ * Attach what DEA read while scrolling to the layout: keyframes for the elements that moved (only those the layout has),
+ * and the final text of a block that was still being typed when the layout was first read (a later read of the same element
+ * that starts with the earlier text and is longer).
+ */
+export function withScroll(
+  l: HeroLayout,
+  s: { positions: number[]; items: Record<string, Array<[number, number, number, number, number, number] | null>>; texts?: Record<string, string> },
+): HeroLayout {
+  const keys = new Set(
+    [...l.boxes.map((b) => b.k), ...(l.shapes ?? []).map((b) => b.k), ...(l.graphics ?? []).map((b) => b.k), l.canvas ? 'canvas' : undefined].filter(
+      Boolean,
+    ) as string[],
+  );
+  const items = Object.fromEntries(Object.entries(s.items).filter(([k]) => keys.has(k)));
+  const boxes = l.boxes.map((b) => {
+    const late = b.k ? s.texts?.[b.k] : undefined;
+    return late && late.length > b.text.length && late.toLowerCase().startsWith(b.text.toLowerCase().slice(0, Math.max(2, b.text.length - 1)))
+      ? { ...b, text: late }
+      : b;
+  });
+  return { ...l, boxes, scroll: Object.keys(items).length ? { positions: s.positions, items } : null };
+}
+
+/** the room the page needs to scroll through the keyframes (the kit's first screen is fixed to the window while it does) */
+export const scrollSpacer = (l: HeroLayout): number => {
+  const s = l.scroll;
+  return s && Object.keys(s.items).length ? Math.round(Math.max(...s.positions) + l.viewport.height) : 0;
+};
+
 /** Hero.jsx for React: the first screen's text, placed as on the site. */
 export function heroJsx(l: HeroLayout): string {
   const items = heroStyles(l);
@@ -550,22 +633,32 @@ const items = ${JSON.stringify(items, null, 2)};
 // ✔ where the site's canvas sat and the page background
 const sceneCss = ${JSON.stringify(sceneCss(l, '.dea-scene'))};
 
+${
+  scrollScript(l)
+    ? `// ✔ how these elements moved with the page's scroll (keyframes read at a few scroll positions)
+const scrollScript = ${JSON.stringify(scrollScript(l))};
+const scrollSpace = ${scrollSpacer(l)};
+`
+    : ''
+}
 export default function Hero() {
-  return (
-    <section style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
+${scrollScript(l) ? "  useEffect(() => { const s = document.createElement('script'); s.textContent = scrollScript; document.body.appendChild(s); return () => s.remove(); }, []);\n" : ''}  return (
+    <>
+    <section style={{ position: '${scrollSpacer(l) ? 'fixed' : 'relative'}', ${scrollSpacer(l) ? 'inset: 0, ' : ''}width: '100vw', height: '100vh', overflow: 'hidden' }}>
       {sceneCss && <style>{sceneCss}</style>}
       {items.map((it, i) => {
         const Tag = it.tag;
         // an image by URL, an inline SVG read from the page, or a text block
-        if (Tag === 'img') return <img key={i} src={it.html} alt="" style={it.style} />;
-        if (it.html) return <div key={i} style={it.style} dangerouslySetInnerHTML={{ __html: it.html }} />;
+        if (Tag === 'img') return <img key={i} data-dea-k={it.k} src={it.html} alt="" style={it.style} />;
+        if (it.html) return <div key={i} data-dea-k={it.k} style={it.style} dangerouslySetInnerHTML={{ __html: it.html }} />;
         return (
-          <Tag key={i} style={it.style}>
+          <Tag key={i} data-dea-k={it.k} data-dea-h="0" style={it.style}>
             {it.text}
           </Tag>
         );
       })}
     </section>
+${scrollSpacer(l) ? '    <div style={{ height: scrollSpace }} />\n' : ''}    </>
   );
 }
 `;
@@ -589,15 +682,20 @@ export function sceneCss(l: HeroLayout, selector = '#scene'): string {
 /** The same hero as plain HTML, for the vanilla project and the preview. */
 export function heroHtml(l: HeroLayout): string {
   const css = sceneCss(l);
-  return `${css ? `<style>\n${css}\n</style>\n` : ''}<section class="dea-hero" style="position: relative; width: 100vw; height: 100vh; overflow: hidden">\n${heroStyles(
+  const space = scrollSpacer(l);
+  const script = scrollScript(l);
+  return `${css ? `<style>\n${css}\n</style>\n` : ''}<section class="dea-hero" style="position: ${space ? 'fixed; inset: 0' : 'relative'}; width: 100vw; height: 100vh; overflow: hidden">\n${heroStyles(
     l,
   )
     .map((it) => {
       const st = escHtml(cssText(it.style)).replace(/"/g, '&quot;');
-      if (it.tag === 'img') return `  <img src="${escHtml(it.html ?? '').replace(/"/g, '&quot;')}" alt="" style="${st}">`;
-      return `  <${it.tag} style="${st}">${it.html ?? escHtml(it.text)}</${it.tag}>`;
+      const key = it.k ? ` data-dea-k="${escHtml(it.k).replace(/"/g, '&quot;')}"` : '';
+      if (it.tag === 'img') return `  <img${key} src="${escHtml(it.html ?? '').replace(/"/g, '&quot;')}" alt="" style="${st}">`;
+      return `  <${it.tag}${key}${it.html || !it.text ? '' : ' data-dea-h="0"'} style="${st}">${it.html ?? escHtml(it.text)}</${it.tag}>`;
     })
-    .join('\n')}\n</section>`;
+    .join(
+      '\n',
+    )}\n</section>${space ? `\n<div style="height: ${space}px"></div>` : ''}${script ? `\n<script>\n${script.replace(/<\/script/gi, '<\\/script')}\n</script>` : ''}`;
 }
 
 /** Technique stand-ins: small, original modules DEA uses where a site's own system (e.g. a GPGPU simulation) is not rebuilt. */

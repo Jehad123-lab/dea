@@ -1,3 +1,5 @@
+import { TAPE_RUNTIME } from './tape.ts';
+
 // The replay player written into every kit that has a recording (replay/replay.js). Plain JavaScript with no
 // dependencies, so it runs in any bundler, framework or a bare <script type="module">.
 
@@ -12,8 +14,9 @@ export async function loadCapture(base = './replay/') {
 
 const CREATE = { createBuffer: 'buf', createTexture: 'tex', createProgram: 'prog', createShader: 'sh', createFramebuffer: 'fb', createRenderbuffer: 'rb',
   createVertexArray: 'vao', createSampler: 'smp', createQuery: 'q', createTransformFeedback: 'tf', 'ext:OES_vertex_array_object.createVertexArrayOES': 'vao' };
-const SKIP = new Set(['fenceSync', 'waitSync', 'deleteSync', 'beginQuery', 'endQuery', 'deleteQuery', 'createQuery', 'ext:EXT_disjoint_timer_query_webgl2.queryCounterEXT',
+const SKIP = new Set(['deleteTexture', 'deleteFramebuffer', 'deleteRenderbuffer', 'deleteBuffer', 'deleteVertexArray', 'deleteProgram', 'deleteSampler', 'deleteTransformFeedback', 'fenceSync', 'waitSync', 'deleteSync', 'beginQuery', 'endQuery', 'deleteQuery', 'createQuery', 'ext:EXT_disjoint_timer_query_webgl2.queryCounterEXT',
   'ext:WEBGL_lose_context.loseContext', 'ext:WEBGL_lose_context.restoreContext']);
+${TAPE_RUNTIME}
 const DRAWS = new Set(['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements', 'ext:ANGLE_instanced_arrays.drawArraysInstancedANGLE', 'ext:ANGLE_instanced_arrays.drawElementsInstancedANGLE']);
 
 /**
@@ -27,6 +30,10 @@ const DRAWS = new Set(['drawArrays', 'drawElements', 'drawArraysInstanced', 'dra
 export function createReplay(canvas, data, options = {}) {
   const { doc, bin } = data;
   const animate = options.animate !== false;
+  // the recorded rest frames, then the tape (frames recorded while the pointer moved and settled), indexed in one list
+  const R = doc.frames.length;
+  const frames = doc.tapeFrames && doc.tapeFrames.length ? doc.frames.concat(doc.tapeFrames) : doc.frames;
+  const tape = options.tape !== false && doc.tape && frames.length > R ? createTape(Object.assign({}, doc.tape, { n: frames.length - R, w: doc.canvas.cssW || doc.canvas.w, h: doc.canvas.cssH || doc.canvas.h })) : null;
   const attrs = Object.assign({}, doc.attrs, { preserveDrawingBuffer: !!options.preserveDrawingBuffer });
   canvas.width = doc.canvas.w;
   canvas.height = doc.canvas.h;
@@ -317,16 +324,16 @@ export function createReplay(canvas, data, options = {}) {
   // and matrix uniforms of the last recorded frame (the one DEA scored); clocks still follow real time, and the
   // simulation passes still run forward on the live render targets
   const steadyOf = new Map(); // "frame:cmd" -> { raw args from the last frame, that command's "frame:cmd" }
-  if (animate && options.steady !== false && doc.frames.length > 1) {
+  if (animate && options.steady !== false && R > 1) {
     const isFloat = (n) => n.startsWith('uniformMatrix') || (n.startsWith('uniform') && n.slice(7).indexOf('f') >= 0);
-    const occ = (f) => { const seen = new Map(); const out = new Map(); doc.frames[f].cmds.forEach((c, i) => { const a = c[1]; if (!isFloat(c[0]) || !a || a.$ !== 'loc') return; const k = a.p + '|' + a.n; const n = seen.get(k) || 0; seen.set(k, n + 1); out.set(k + '#' + n, i); }); return out; };
-    const L = doc.frames.length - 1;
+    const occ = (f) => { const seen = new Map(); const out = new Map(); frames[f].cmds.forEach((c, i) => { const a = c[1]; if (!isFloat(c[0]) || !a || a.$ !== 'loc') return; const k = a.p + '|' + a.n; const n = seen.get(k) || 0; seen.set(k, n + 1); out.set(k + '#' + n, i); }); return out; };
+    const L = R - 1;
     const lastOcc = occ(L);
-    for (let f = 0; f < L; f++) for (const [k, i] of occ(f)) { const j = lastOcc.get(k); if (j != null && doc.frames[L].cmds[j][0] === doc.frames[f].cmds[i][0]) steadyOf.set(f + ':' + i, { raw: doc.frames[L].cmds[j].slice(1), at: L + ':' + j }); }
+    for (let f = 0; f < frames.length; f++) if (f !== L) for (const [k, i] of occ(f)) { const j = lastOcc.get(k); if (j != null && frames[L].cmds[j][0] === frames[f].cmds[i][0]) steadyOf.set(f + ':' + i, { raw: frames[L].cmds[j].slice(1), at: L + ':' + j }); }
   }
   let t0 = 0;
   const exec = (f) => {
-    const cmds = doc.frames[f].cmds;
+    const cmds = frames[f].cmds;
     const now = performance.now();
     for (let i = 0; i < cmds.length; i++) {
       const c = cmds[i];
@@ -354,6 +361,10 @@ export function createReplay(canvas, data, options = {}) {
       if (name.startsWith('uniform') && raw[0] && raw[0].$ === 'loc') {
         const o = overrides.get(raw[0].p + '|' + raw[0].n);
         if (o) { const l = loc(raw[0].p, raw[0].n); if (name.startsWith('uniformMatrix')) gl[name](l, false, o); else if (name.endsWith('v')) gl[name](l, o); else gl[name](l, ...o); continue; }
+      }
+      if (tape && f >= R && name === 'bufferSubData') {
+        // an upload the site's CPU made while the pointer moved: its points go where the live pointer has been
+        try { const d = arg(raw[2]); const pl = d && tape.place(f - R, i, new Float32Array(d.buffer, d.byteOffset, d.byteLength >> 2)); if (pl) { gl.bufferSubData(arg(raw[0]), arg(raw[1]), pl); continue; } } catch (e) { fail('tape ' + e.message); }
       }
       let args;
       try { args = raw.map(arg); } catch (e) { fail(name + ': ' + e.message); continue; }
@@ -385,15 +396,23 @@ export function createReplay(canvas, data, options = {}) {
   // two recorded frames whose pictures differ (instances placed by simulation state, not by a uniform) flip back and forth
   // even with every uniform held: DEA then plays the last recorded frame alone (doc.hold = 'last', set after it measured the flip)
   const holdLast = animate && options.steady !== false && (options.steady === 'last' || doc.hold === 'last');
-  let frame = holdLast ? doc.frames.length - 1 : 0;
+  let frame = holdLast ? R - 1 : 0;
   let raf = 0;
   let unlisten = null;
+  let lastAbs = -1; // the frame played last (ping-pong render targets need the frames to alternate)
   const step = () => {
     if (!t0) t0 = performance.now();
     if (animate && inputs.length) { stepInputs(); applyInputs(); }
-    applyState(doc.frames[frame].state);
-    exec(frame);
-    frame = holdLast ? doc.frames.length - 1 : (frame + 1) % doc.frames.length;
+    let f = frame;
+    if (tape) {
+      let c = tape.step(live.x, live.y);
+      if (c >= 0 && !holdLast && R > 1 && lastAbs >= 0 && (R + c) % 2 === lastAbs % 2) c++; // keep the alternation
+      if (c >= 0 && c < frames.length - R) f = R + c;
+    }
+    applyState(frames[f].state);
+    exec(f);
+    lastAbs = f;
+    frame = holdLast ? R - 1 : (f + 1) % R;
   };
   return {
     gl,
@@ -401,10 +420,11 @@ export function createReplay(canvas, data, options = {}) {
     errors,
     passes: (doc.graph && doc.graph.passes) || [],
     renderFrames(n = doc.frames.length) { for (let i = 0; i < n; i++) step(); gl.flush(); },
+    tape,
     start() {
       const tick = () => { step(); raf = requestAnimationFrame(tick); };
       raf = requestAnimationFrame(tick);
-      if (options.listen !== false && typeof window !== 'undefined' && inputs.length) {
+      if (options.listen !== false && typeof window !== 'undefined' && (inputs.length || tape)) {
         // real pointer, touch and scroll drive the measured uniforms; the drawing buffer keeps the recorded size
         const onMove = (e) => { const t = e.touches ? e.touches[0] : e; if (t) setInput({ x: t.clientX / innerWidth, y: t.clientY / innerHeight }); };
         let wheel = 0;

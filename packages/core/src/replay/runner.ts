@@ -1,6 +1,8 @@
 // The editable-rebuild runner written into every kit that has a recording (rebuild/rebuild.js): builds the recorded
 // render graph from pipeline.json as three.js objects. Plain JavaScript; three.js is its only dependency.
 
+import { TAPE_RUNTIME } from './tape.ts';
+
 export const REBUILD_RUNNER = String.raw`// DEA editable rebuild (three.js). Builds the site's render graph from pipeline.json as three.js objects: one
 // RawShaderMaterial per program and draw state (the GLSL is in shaders/, edit it), a BufferGeometry per draw, cameras
 // and model matrices as three.js matrices, and a WebGLRenderTarget per framebuffer. The passes run in the site's order.
@@ -21,6 +23,7 @@ export const REBUILD_RUNNER = String.raw`// DEA editable rebuild (three.js). Bui
 //   rb.cameras[0]                                   // the site's camera (matrixWorld / projectionMatrix)
 
 import * as THREE_NS from 'three';
+${TAPE_RUNTIME}
 
 export async function loadPipeline(base = './rebuild/') {
   const root = new URL(base, location.href);
@@ -658,18 +661,21 @@ export function createRebuild(canvas, data, options = {}) {
     renderer.resetState();
   };
 
+  // the recorded rest frames, then the tape (frames recorded while the pointer moved and settled, pipeline.json "tape")
+  const RF = p.frames.length - (p.tape ? p.tape.n : 0);
+  const tape = options.tape !== false && p.tape ? createTape(p.tape) : null;
   // ---- live mode holds the recorded moment still --------------------------------------------------------------------
   // The recording has two frames so ping-pong simulations keep their read/write order; but values that differ between the
   // two (a camera mid-move, an intro fading in) would flip back and forth every frame and the picture would shake. Live,
   // every frame takes those values from the last recorded frame (the one DEA scored); clocks still follow real time and
   // the simulation passes still run forward on the live render targets.
-  if (options.animate !== false && options.steady !== false && p.frames.length > 1) {
-    const last = p.frames[p.frames.length - 1].steps;
+  if (options.animate !== false && options.steady !== false && RF > 1) {
+    const last = p.frames[RF - 1].steps;
     const keyed = (steps) => { const seen = new Map(); return steps.map((s) => { if (s.op !== 'draw') return null; const k = s.material + '#' + (seen.get(s.material) || 0); seen.set(s.material, (seen.get(s.material) || 0) + 1); return k; }); };
     const lastKeys = keyed(last);
     const byKey = new Map(lastKeys.map((k, i) => [k, last[i]]).filter(([k]) => k));
     const plain = (v) => typeof v === 'number' || (Array.isArray(v) && v.every((x) => typeof x === 'number'));
-    for (const fr of p.frames.slice(0, -1)) {
+    for (const fr of p.frames.filter((_, fi) => fi !== RF - 1)) {
       const ks = keyed(fr.steps);
       fr.steps.forEach((s, i) => {
         const L = ks[i] && byKey.get(ks[i]);
@@ -719,11 +725,13 @@ export function createRebuild(canvas, data, options = {}) {
   };
   const rawGl = (step) => {
     const b = step.bind || {};
+    if (b.make) { const k = key(b.make.kind, b.make.id); if (!objs.has(k)) objs.set(k, gl[step.fn]()); return; }
     if (b.buf) {
       // vertex data changed during the frame: update the CPU copy and the three.js attributes read from it
       const a = step.args;
       const cur = raw.get(b.buf) || new Uint8Array(0);
-      const src = arg(a[step.fn === 'bufferData' ? 1 : 2]);
+      let src = arg(a[step.fn === 'bufferData' ? 1 : 2]);
+      if (tape && step.frame >= RF && step.fn === 'bufferSubData' && src && src.buffer) { const pl = tape.place(step.frame - RF, step.cmd, new Float32Array(src.buffer, src.byteOffset, src.byteLength >> 2)); if (pl) src = pl; }
       if (step.fn === 'bufferData') {
         if (typeof src === 'number') raw.set(b.buf, new Uint8Array(src));
         else if (src) raw.set(b.buf, new Uint8Array(src.buffer, src.byteOffset, src.byteLength).slice());
@@ -769,6 +777,7 @@ export function createRebuild(canvas, data, options = {}) {
     if (e) fail('WebGL error 0x' + e.toString(16) + ' after frame ' + i);
   };
   let frame = 0;
+  let lastAbs = -1;
   let raf = 0;
   let unlisten = null;
   const api = {
@@ -782,7 +791,21 @@ export function createRebuild(canvas, data, options = {}) {
     uniforms: uniformSets,
     passes: p.passes,
     inputs,
-    renderFrames(n = p.frames.length) { for (let k = 0; k < n; k++) { if (animate) stepInputs(); runFrame(frame); frame = (frame + 1) % p.frames.length; } },
+    renderFrames(n = RF) {
+      for (let k = 0; k < n; k++) {
+        if (animate) stepInputs();
+        let f = frame;
+        if (tape) {
+          let c = tape.step(live.x, live.y);
+          if (c >= 0 && RF > 1 && lastAbs >= 0 && (RF + c) % 2 === lastAbs % 2) c++;
+          if (c >= 0 && c < p.frames.length - RF) f = RF + c;
+        }
+        runFrame(f);
+        lastAbs = f;
+        frame = (f + 1) % RF;
+      }
+    },
+    tape,
     start() {
       const loop = () => { api.renderFrames(1); raf = requestAnimationFrame(loop); };
       raf = requestAnimationFrame(loop);

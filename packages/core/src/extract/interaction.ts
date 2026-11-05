@@ -64,11 +64,106 @@ export const INTERACTION_SCRIPT: InteractionStep[] = [
 
 /** Run the script on a page that is already showing the thing to test; a PNG after each step. */
 export async function runInteraction(page: Page): Promise<Buffer[]> {
+  return (await runInteractionWithState(page)).frames;
+}
+
+/**
+ * The same, and when the recorder is in the page, what the page changed during each step (uniforms, CPU uploads, draw sizes):
+ * the kit is checked by the same script, so the two lists can be compared by name.
+ */
+export async function runInteractionWithState(page: Page): Promise<{ frames: Buffer[]; states: Array<StepState | null> }> {
   const vp = page.viewportSize() ?? { width: 1440, height: 900 };
-  const out: Buffer[] = [];
+  const frames: Buffer[] = [];
+  const states: Array<StepState | null> = [];
   for (const step of INTERACTION_SCRIPT) {
+    await page.evaluate('window.__DEA_CAP__ && window.__DEA_CAP__.diffStart && window.__DEA_CAP__.diffStart()').catch(() => {});
     await step.run(page, vp);
-    out.push(await page.screenshot({ type: 'png', timeout: 60_000 }));
+    states.push(
+      (await page.evaluate('window.__DEA_CAP__ && window.__DEA_CAP__.diffTake ? window.__DEA_CAP__.diffTake() : null').catch(() => null)) as StepState | null,
+    );
+    frames.push(await page.screenshot({ type: 'png', timeout: 60_000 }));
+  }
+  return { frames, states };
+}
+
+/** What a page changed during one step of the script (counts and ranges read inside the page; see capture.ts "state diff"). */
+export interface StepState {
+  frames: number;
+  draws: number;
+  verts: number;
+  /** float uniforms whose value moved during the step (largest relative change of any component) */
+  uniforms: Array<{ name: string; dev: number; sets: number; comps: number }>;
+  /** CPU uploads into buffers: the call, the byte size, how many times, and how many distinct contents */
+  uploads: Array<{ fn: string; size: number; n: number; distinct: number }>;
+  /** texture uploads from the CPU */
+  tex: Array<{ call: string; n: number }>;
+  /** draws whose vertex or instance count varied during the step ("program|mode|1 or i") */
+  varying: Array<{ draw: string; sizes: string[] }>;
+  ms: number;
+}
+
+/** What moved on the site during a step and not in the kit, and the other way round: the named part the score does not show. */
+export interface StepDiff {
+  step: string;
+  input: InteractionStep['input'];
+  /** moved on the site and in the kit */
+  both: string[];
+  /** moved on the site only: the unexplained part */
+  onlySite: string[];
+  /** moved in the kit only */
+  onlyKit: string[];
+  /** CPU uploads the site made and the kit did not (or made with other sizes), as "bufferSubData 6840 B ×34 (34 distinct)" */
+  uploadsOnlySite: string[];
+  uploadsOnlyKit: string[];
+  /** draws that changed size on the site and not in the kit */
+  varyingOnlySite: string[];
+  siteDraws: number | null;
+  kitDraws: number | null;
+}
+
+const EPS = 1e-3;
+const upKey = (u: StepState['uploads'][number]) => `${u.fn} ${u.size} B`;
+const upText = (u: StepState['uploads'][number]) => `${u.fn} ${u.size} B ×${u.n} (${u.distinct} distinct)`;
+
+/** Compare the state the site changed in each step with what the kit changed, by uniform name and upload size. */
+export function diffStates(site: Array<StepState | null>, kit: Array<StepState | null>): StepDiff[] {
+  return INTERACTION_SCRIPT.map((st, i) => {
+    const a = site[i];
+    const b = kit[i];
+    const moved = (s: StepState | null | undefined) => new Set((s?.uniforms ?? []).filter((u) => u.dev > EPS).map((u) => u.name));
+    const A = moved(a);
+    const B = moved(b);
+    const upA = new Map((a?.uploads ?? []).filter((u) => u.distinct > 1 || u.n > 1).map((u) => [upKey(u), u]));
+    const upB = new Map((b?.uploads ?? []).filter((u) => u.distinct > 1 || u.n > 1).map((u) => [upKey(u), u]));
+    const vA = new Map((a?.varying ?? []).map((v) => [v.draw, v.sizes.join(',')]));
+    const vB = new Set((b?.varying ?? []).map((v) => v.draw));
+    return {
+      step: st.name,
+      input: st.input,
+      both: [...A].filter((n) => B.has(n)).sort(),
+      onlySite: [...A].filter((n) => !B.has(n)).sort(),
+      onlyKit: [...B].filter((n) => !A.has(n)).sort(),
+      uploadsOnlySite: [...upA].filter(([k]) => !upB.has(k)).map(([, u]) => upText(u)),
+      uploadsOnlyKit: [...upB].filter(([k]) => !upA.has(k)).map(([, u]) => upText(u)),
+      varyingOnlySite: [...vA].filter(([k]) => !vB.has(k)).map(([k, v]) => `${k} (${v})`),
+      siteDraws: a?.draws ?? null,
+      kitDraws: b?.draws ?? null,
+    };
+  });
+}
+
+/** The diff as lines for extract.md: per step that moves an input, the named unexplained part. */
+export function diffMd(label: string, diffs: StepDiff[]): string[] {
+  const list = (xs: string[], n = 10) => (xs.length ? `${xs.slice(0, n).join(', ')}${xs.length > n ? ` +${xs.length - n}` : ''}` : '–');
+  const out = [`**${label}: what moved on the site and what moved in the kit** (by uniform name; uploads by size; the part the score does not explain)`, ''];
+  out.push(
+    '| step | moved in both | only on the site (unexplained) | only in the kit | CPU uploads only on the site | draws that changed size only on the site |',
+    '| --- | --- | --- | --- | --- | --- |',
+  );
+  for (const d of diffs.filter((x) => x.input !== 'rest')) {
+    out.push(
+      `| ${d.step} | ${d.both.length} (${list(d.both, 4)}) | ${d.onlySite.length} (${list(d.onlySite, 6)}) | ${d.onlyKit.length} (${list(d.onlyKit, 4)}) | ${list(d.uploadsOnlySite, 3)} | ${list(d.varyingOnlySite, 3)} |`,
+    );
   }
   return out;
 }
@@ -217,6 +312,10 @@ export interface InteractionResult {
   replay: KitInteraction | null;
   rebuild: KitInteraction | null;
   inputs: InputVerdict[];
+  /** per kit: what moved on the site and what moved in the kit, step by step (the named, unexplained part) */
+  stateDiff?: { replay?: StepDiff[]; rebuild?: StepDiff[] };
+  /** the site's own per-step state, as read in the page */
+  siteState?: Array<StepState | null>;
   /** uniforms the probe saw change that follow no input DEA can drive */
   unexplained: string[];
 }
@@ -343,6 +442,9 @@ export function interactionMd(r: InteractionResult): string {
       (v) =>
         `| ${v.input} | ${mark(v.status)} | ${v.replay} | ${v.rebuild} | ${v.uniforms.slice(0, 6).join(', ') || '–'}${v.uniforms.length > 6 ? ` +${v.uniforms.length - 6}` : ''} | ${v.evidence} |`,
     ),
+    ...(r.stateDiff?.rebuild || r.stateDiff?.replay
+      ? ['', ...diffMd(r.stateDiff.rebuild ? '(b) rebuild' : '(a) replay', (r.stateDiff.rebuild ?? r.stateDiff.replay) as StepDiff[])]
+      : []),
     ...(r.unexplained.length
       ? [
           '',
