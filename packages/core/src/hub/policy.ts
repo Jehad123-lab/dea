@@ -78,7 +78,7 @@ export interface HistoryLine {
   blocked?: string;
 }
 
-const SECRET_KEY = /pass(word)?|secret|token|api[-_]?key|auth|cookie|session|credential|private|otp|pin|card|cvc|cvv|ssn/i;
+export const SECRET_KEY = /pass(word)?|secret|token|api[-_]?key|auth|cookie|session|credential|private|otp|pin|card|cvc|cvv|ssn/i;
 
 /** A one-line summary of tool arguments for the history: keys, short values, secrets hidden. */
 export function summarizeArgs(args: unknown, depth = 0): string {

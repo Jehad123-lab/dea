@@ -223,15 +223,19 @@ pnpm dea hub alert 5 10                      # pause an AI app after 5 changing/
 
 ### Built-in connectors, permission modes, audit
 
-Four connectors need no MCP server, only a **scope you declare** and a token in **your own environment variable**:
+Five connectors need no MCP server, only a **scope you declare** and (where one is needed) a token in **your own environment variable**:
 
 ```powershell
 pnpm dea hub connectors                                   # what each needs and may do
 pnpm dea hub add-connector github --scope repos=you/site --token-env GITHUB_TOKEN
 pnpm dea hub add-connector vercel --scope projects=my-site --scope dirs=C:\sites\my-site\dist --token-env VERCEL_TOKEN
+pnpm dea hub add-connector gitlab --scope projects=gitlab-org/cli                   # read only; public projects need no token
 pnpm dea hub add-connector filesystem --name notes --scope root=C:\notes
 pnpm dea hub add-connector http --name api --scope baseUrl=https://api.example.com/v1 --scope methods=GET,POST
-pnpm dea hub doctor --live                                # token present? scope valid? one harmless read per connector
+pnpm dea hub doctor --live                                # what works right now: browser, PDF, each search source, tokens set; one harmless read per connector
+pnpm dea hub selftest --live                              # does this installation do what it says? real read-only calls; skips a token you did not set
+pnpm dea hub install --client cursor                      # prints the config to paste (claude, claude-code, cursor, vscode, windsurf, codex, generic); --write merges it, backup kept
+pnpm dea hub approvals                                    # changes an AI is waiting to make; dea hub approve <id> / dea hub deny <id>
 pnpm dea hub call github comment '{"repo":"you/site","number":4,"body":"thanks"}'   # asks you first
 pnpm dea hub audit                                        # every change made or refused: what, where, when, mode
 ```
@@ -240,13 +244,24 @@ pnpm dea hub audit                                        # every change made or
 |---|---|---|---|
 | `github` | repo, issues, pulls, files | `create_issue`, `comment` | `repos`: `owner/name` or `owner/*` |
 | `vercel` | projects, deployments | `deploy_static` (preview; production only if `allowProduction`) | `projects`, `dirs` (folders a deploy may be read from) |
+| `gitlab` | project, issues, merge requests, files (public projects without a token; a private one with `GITLAB_TOKEN`) | nothing: read only | `projects`: `group/name` or `group/*`; `host` for a self-managed GitLab |
 | `filesystem` | `list_dir`, `read_file` | `write_file` (never replaces without `overwrite`) | `root`: one folder; links out of it are refused |
 | `http` | `get` | `send` (POST, PUT, PATCH, DELETE, only if listed) | `baseUrl`, `methods`; never another host, never `..` |
 
 **Permission modes** (the same three DEA's hands use) decide what a *change* may do; looking is always allowed:
 `restricted` refuses every change, `supervised` (default) asks you first (in the terminal for `dea hub call`, through your AI
 app's own prompt for the gateway; an app that cannot show the prompt gets no changes), `delegated` runs changes without
-asking, but only inside the connector's declared scope. Out of scope is refused in every mode. The mode comes from `DEA_MODE`
+asking, but only inside the connector's declared scope.
+
+**Approving a change when the AI app cannot show you the question.** Through MCP the question goes through the AI app
+(elicitation). If the app cannot show it (many cannot), the change is not refused for good: it waits as an *approval* with an
+id, and the AI is told that id. In a terminal you run `dea hub approve <id>`: DEA shows the change (client, app, tool, where it
+lands, the arguments with secrets hidden) and asks `[y/N]`. It needs a keyboard (a piped `y` does not count), so an AI app that
+only has MCP tools cannot press it. The AI then asks again and the change runs. An approval is for **one exact call** (same
+client, app, tool and arguments), works **once**, and ends after **ten minutes**; `dea hub deny <id>` refuses it and the AI is
+told you declined. Honest limit: an AI that also has unrestricted shell access to your account could edit DEA's files; nothing
+running as you can be fenced off from you. Walk through it with a real stdio MCP client: `pnpm demo:approval` (no network, no
+token; it is also a test). Out of scope is refused in every mode. The mode comes from `DEA_MODE`
 or `policy.json`; an AI app cannot loosen it. Per-app access levels (`dea hub allow`) apply on top.
 
 **Secrets**: a token is read from the environment variable you name when a call runs, sent only as the Authorization header
@@ -261,15 +276,31 @@ by itself: every change is a call you or an AI app you allowed made, inside the 
 
 - DuckDuckGo's HTML results page (general; its robots.txt allows it); for programming questions also MDN, npm, GitHub
   repository search (no token: 10 searches a minute), Stack Overflow; Wikipedia for short concept queries; Hacker News on request.
-- Your own SearXNG with `DEA_SEARXNG_URL` (JSON output on). Public SearXNG instances answered a script with 429, 418 or a captcha
-  on the day this was built, so DEA does not use them.
+  **If the HTML page is blocked, limited or empty, DEA asks DuckDuckGo's lite page** (`duckduckgo-lite`, same engine, robots.txt allows
+  it) and says so; it is asked only then, in DEA's fixed source order. Your own SearXNG with `DEA_SEARXNG_URL` (JSON output on).
+  Public SearXNG instances answered a script with 429, 418 or a captcha, so DEA does not use them.
 - Each result has `title`, `url`, `snippet`, `source`, `fetched_at`, `verified` (fetched live in this call, or from the disk cache
-  in `~/.dea/web-cache`) and an `evidence` note saying what it is and what was not checked (snippets are the source's words; the
-  page was not opened). A blocked or rate-limited source is named in the answer; DEA does not retry around it, rotate addresses or
-  solve captchas. If a live source fails and an older cached answer exists, that answer is shown labelled `stale`.
+  in `~/.dea/web-cache`) and an `evidence` note. The answer has a **`status`**: `ok`, `partial` (results, but a source was blocked,
+  limited or failed: `problems` names each and why), `blocked` (nothing came back and a source refused: `BLOCKED` on the command
+  line), or `none`. DEA does not retry around a refusal, rotate addresses or solve captchas. If a live source fails and an older
+  cached answer exists, that answer is shown labelled `stale`. `--timeout` bounds the whole call.
 - `dea read <url>` fetches one public page and returns its readable text with the same labels. It honours robots.txt, sends its own
   User-Agent, spaces calls to one host, refuses localhost and private addresses, and reports bot-check pages instead of passing them.
-  Page text is data, not instructions. Both are MCP tools too (`search`, `read`).
+  Page text is data, not instructions. What kind of page it was is in `method`:
+  - `static`: the page as served.
+  - `rendered`: **the page is an empty shell that scripts fill in** (little text, a script, a `#root`), so DEA ran it in its own
+    headless browser (a fresh profile: no cookies, no logins; pictures, fonts and media are not downloaded; requests the page makes to
+    private or local addresses are refused) and read the result. `--render never|auto|always` (default `auto`). If no browser can
+    start, you get the page as served plus a warning that says so, never a pretend render.
+  - `pdf`: the PDF's **text layer**, page by page (`[page 1]`, ...), read with [unpdf](https://github.com/unjs/unpdf) (MIT, bundles
+    Mozilla's pdf.js, Apache-2.0). `--max-pages` (default 40). A scanned PDF has no text layer and DEA has no OCR: it says so.
+  - `feed`: RSS, Atom, sitemaps and sitemap indexes (also `.xml.gz`) as a list of entries (`items`).
+- `dea research "<question>"` (MCP tool `research`) is search, read and extract in one call: it searches (or takes `--url`s), opens the
+  best pages (one per site first), cuts them into passages and ranks the passages by the question's words, rarer words counting more.
+  That is plain code, not a model: the result is the pages' own words with their offset, and a **trail** of every step (what was
+  searched, which pages opened, which failed and why). The same question on the same pages gives the same passages in the same order.
+- Every call has a time budget (`--timeout`, `timeoutMs`); a call that runs out says which step did, and `research` returns what
+  finished. All of these are MCP tools (`search`, `read`, `research`).
 
 ## WebGL and 3D
 - **Verified** Scene: 145 objects (55 Mesh, 35 Group, 32 Bone, 6 Points, 5 Sprite, 3 DirectionalLight),
@@ -651,7 +682,7 @@ so into the run. Use `--no-gpu-mask` to see exactly what a GPU-less visitor gets
 
 ## MCP server (for Claude, Cursor, VS Code, Codex)
 
-`dea-mcp` exposes 19 tools over stdio (and over HTTP with `dea serve --http`):
+`dea-mcp` exposes 20 tools over stdio (and over HTTP with `dea serve --http`):
 
 | Tool | Does |
 |---|---|
@@ -664,7 +695,8 @@ so into the run. Use `--no-gpu-mask` to see exactly what a GPU-less visitor gets
 | `trace_webgl` | Live debug: WebGL compiles, uniforms (values, drivers, setter), uploads, with stacks; breakpoints with caller variables |
 | `library` | List, search and reuse saved kits |
 | `search` | Free web search (no keys): results with source, time, evidence, verified/cached label; blocked sources named |
-| `read` | Read one public page as text with the same labels (robots.txt respected, private addresses refused) |
+| `read` | Read one public page as text with the same labels (robots.txt respected, private addresses refused); pages built by scripts are rendered in DEA's own headless browser, PDFs are read from their text layer, RSS/Atom/sitemaps come back as lists |
+| `research` | Search, read and extract in one call: the passages that answer a question (ranked by plain code, no model), with the trail of every step |
 | `investigate` | Start a background investigation toward a goal; returns a run id |
 | `get_run_status` | Steps, progress and the proven report of an investigation |
 | `inspect_site` | Open a URL and save the evidence |
@@ -707,7 +739,7 @@ model, a different app, a different call order) that make the same call read the
 
 How it is kept true:
 
-- **One shape.** The structured tools (`search`, `read`, `report`, `list_runs`, `detect_stack`, `inspect_site`, `extract`)
+- **One shape.** The structured tools (`search`, `read`, `research`, `report`, `list_runs`, `detect_stack`, `inspect_site`, `extract`)
   answer `{ schema: "dea.result/1", tool, note, result }`. `content[0]` is that object as canonical JSON (keys sorted,
   numbers rounded to 3 decimals, array order meaningful and fixed by DEA). `structuredContent` carries the same object plus
   `meta`. `content[1]` repeats `meta` as text.
@@ -806,8 +838,15 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
 - `dea trace` reads values when WebGL receives them; on three.js sites the line that changes `.value` runs earlier in the
   frame, so "set by" points at the frame loop's render call, and driver kinds are correlations (Inferred).
 - Pages behind a login are not decoded; Hands never automates logins or payments.
-- The built-in GitHub, Vercel, filesystem and http connectors are tested in CI against a fake API and a temp folder; the filesystem
-  and http scoping were also run by hand, but GitHub and Vercel were not run with a real token on the machine that built them.
+- The built-in GitHub, Vercel, filesystem and http connectors are tested in CI against a fake API and a temp folder; the GitLab
+  connector against recorded answers of gitlab.com. `dea hub selftest --live` makes real read-only calls (GitHub and GitLab public
+  APIs without a token; with `GITHUB_TOKEN`, `VERCEL_TOKEN` or `GITLAB_TOKEN` set in your shell, one read each), but a **valid**
+  GitHub or Vercel token has not been run on the machine that built them: the built-in checks only saw the real GitHub API
+  refuse a made-up token.
+- `read` renders a page only when it looks like an empty shell; a page that shows some text and loads the rest later is read as
+  served (`--render always` forces it). A rendered page can differ from run to run (clocks, A/B tests). A scanned PDF has no text.
+  Search snippets are the sources' words and sources can change or block at any time. Notion and Slack connectors were not built:
+  they cannot be tested against recorded real answers without a token.
   Search sources can change their pages or limits at any time; `dea search` then reports a source as failed instead of guessing.
 - Sites behind bot protection (PerimeterX, DataDome, Cloudflare challenges, ...) are reported as `Blocked by bot
   protection` and not captured. DEA does not bypass protection or solve captchas.
@@ -852,7 +891,7 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
 evidence tabs (Stack, Design, Code, API, Hub history, Report) on the right. Core already streams the events it needs
 (`onEvent` / `streamRun`), and investigations already write `checkpoint.json` for it to follow.
 
-The default MCP tool list stays small on purpose (19 tools); connected apps reach AI apps through the separate Hub gateway.
+The default MCP tool list stays small on purpose (20 tools); connected apps reach AI apps through the separate Hub gateway.
 
 ## Credits
 

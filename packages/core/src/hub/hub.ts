@@ -1,5 +1,6 @@
 import type { Client } from '@modelcontextprotocol/client';
 import type { Mode } from '../safety/policy.ts';
+import { approvalIdOf, consumeApproval, readApproval, requestApproval } from './approvals.ts';
 import { writeAudit } from './audit.ts';
 import { type Connector, type FetchLike, findConnector, kindOf, toToolInfo } from './builtin/index.ts';
 import { connectServer, listAllTools, type ToolInfo } from './client.ts';
@@ -33,6 +34,8 @@ export interface HubOptions {
   /** environment the connectors read tokens from (default process.env) */
   env?: Record<string, string | undefined>;
   fetch?: FetchLike;
+  /** one call must finish within this many ms (default 60 000); a slower one fails with a plain error, and for a change it says the outcome is unknown */
+  callTimeoutMs?: number;
 }
 
 export interface HubEvents {
@@ -184,21 +187,30 @@ export class Hub {
       const mv = decideCall(this.opts.mode, 'write');
       if (!mv.ok) return blocked(mv.why, where);
       if (mv.via === 'approval-needed') {
+        const prior = await consumeApproval({ client, app, tool, args }, this.home);
         let yes: boolean | 'unavailable' = false;
-        try {
-          yes = this.opts.approve
-            ? await this.opts.approve({ client, app, tool, where: redact.text(where), args: line.args, mode: this.opts.mode })
-            : 'unavailable';
-        } catch {
-          yes = false;
+        if (prior) yes = true;
+        else {
+          try {
+            yes = this.opts.approve
+              ? await this.opts.approve({ client, app, tool, where: redact.text(where), args: line.args, mode: this.opts.mode })
+              : 'unavailable';
+          } catch {
+            yes = false;
+          }
         }
-        if (yes === 'unavailable')
+        if (yes === 'unavailable') {
+          const asked = await readApproval(approvalIdOf(client, app, tool, args), this.home);
+          if (asked?.status === 'denied' && Date.parse(asked.expires) > Date.now())
+            return blocked(`supervised mode: you declined this change in your terminal (approval ${asked.id}).`, where);
+          const rec = await requestApproval({ client, app, tool, where, mode: this.opts.mode, args, redact }, this.home);
           return blocked(
-            'supervised mode: this changes something and needs your OK, but nothing here can ask you. Run it with dea hub call (it asks), or set DEA_MODE=delegated to let calls inside the connector scope run.',
+            `supervised mode: this changes something and needs your OK, but nothing here can ask you. It is waiting as approval ${rec.id} (for exactly this change, once, for ten minutes). In a terminal run:  dea hub approve ${rec.id}  then ask again. Or set DEA_MODE=delegated to let calls inside the connector scope run.`,
             where,
           );
+        }
         if (yes !== true) return blocked('supervised mode: you did not approve this change.', where);
-        basis = 'approved by the user (supervised)';
+        basis = prior ? `approved by the user in a terminal (approval ${prior.id})` : 'approved by the user (supervised)';
       } else basis = builtin ? 'delegated, inside the connector scope' : 'delegated, inside the grant';
     }
 
@@ -234,8 +246,24 @@ export class Hub {
 
     try {
       let r: CallResult;
+      const limit = this.opts.callTimeoutMs ?? 60_000;
+      const within = <T>(p: Promise<T>): Promise<T> => {
+        let timer: NodeJS.Timeout | undefined;
+        const slow = new Promise<never>((_ok, no) => {
+          timer = setTimeout(
+            () =>
+              no(
+                new Error(
+                  `did not finish within ${Math.round(limit / 1000)} s (the time budget for one call).${write ? ' This call changes something: it may or may not have happened, so look before you try again.' : ''}`,
+                ),
+              ),
+            limit,
+          );
+        });
+        return Promise.race([p, slow]).finally(() => clearTimeout(timer));
+      };
       if (builtin && bt) {
-        const data = await bt.run(args, { token, scope: builtin.scope, fetch: this.opts.fetch ?? fetch, redact });
+        const data = await within(bt.run(args, { token, scope: builtin.scope, fetch: this.opts.fetch ?? fetch, redact }));
         const safe = redact.deep(data);
         const text = JSON.stringify(
           {
@@ -250,7 +278,7 @@ export class Hub {
           2,
         );
         r = { content: [{ type: 'text', text: text.length > 60_000 ? `${text.slice(0, 60_000)}\n[cut at 60000 characters]` : text }] };
-      } else r = (await (await this.client(app)).callTool({ name: tool, arguments: args })) as CallResult;
+      } else r = (await within((async () => (await this.client(app)).callTool({ name: tool, arguments: args }))())) as CallResult;
       await logCall({ ...line, ok: !r.isError, ms: Date.now() - t0, ...(r.isError ? { error: redact.text(firstText(r)) } : {}) }, this.home);
       await finish(r.isError ? 'failed' : 'done', r.isError ? firstText(r) : undefined);
       if (destructive) await this.checkAlert(client);

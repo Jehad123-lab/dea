@@ -10,6 +10,8 @@ export interface PoliteOptions {
   /** minimum gap between two calls to one host, ms (default 1000) */
   gapMs?: number;
   timeoutMs?: number;
+  /** ends the call early (a shared time budget) */
+  signal?: AbortSignal;
   maxBytes?: number;
   /** check robots.txt first (pages yes; documented JSON APIs no) */
   robots?: boolean;
@@ -137,6 +139,9 @@ export function refuseAddress(raw: string): string | null {
 
 // ---------------------------------------------------------------- the fetch
 
+const sig = (o: PoliteOptions): AbortSignal =>
+  o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(o.timeoutMs ?? 15_000)]) : AbortSignal.timeout(o.timeoutMs ?? 15_000);
+
 const BLOCK_MARKERS = /(antibot|captcha|are you a (robot|human)|unusual traffic|verify you are human|access denied|cf-chl|attention required)/i;
 
 export interface PoliteResponse {
@@ -144,6 +149,8 @@ export interface PoliteResponse {
   url: string;
   contentType: string;
   body: string;
+  /** the raw bytes (up to maxBytes), for PDFs */
+  bytes: Uint8Array;
   truncated: boolean;
 }
 
@@ -168,7 +175,7 @@ export async function politeGet(url: string, o: PoliteOptions = {}): Promise<Pol
     if (!entry || now() - entry.at > 3_600_000) {
       let rules: RobotsRules = { allow: [], disallow: [] };
       try {
-        const r = await f(`${u.protocol}//${host}/robots.txt`, { headers: { 'user-agent': USER_AGENT }, signal: AbortSignal.timeout(o.timeoutMs ?? 15_000) });
+        const r = await f(`${u.protocol}//${host}/robots.txt`, { headers: { 'user-agent': USER_AGENT }, signal: sig(o) });
         if (r.ok) rules = parseRobots((await r.text()).slice(0, 500_000));
         else if (r.status === 401 || r.status === 403) rules = { allow: [], disallow: ['/'] };
       } catch {
@@ -185,7 +192,7 @@ export async function politeGet(url: string, o: PoliteOptions = {}): Promise<Pol
   const r = await f(url, {
     headers: { 'user-agent': USER_AGENT, accept: o.accept ?? '*/*', 'accept-language': 'en', ...o.headers },
     redirect: 'follow',
-    signal: AbortSignal.timeout(o.timeoutMs ?? 15_000),
+    signal: sig(o),
   });
   const contentType = r.headers.get('content-type') ?? '';
   if (r.status === 429)
@@ -210,5 +217,5 @@ export async function politeGet(url: string, o: PoliteOptions = {}): Promise<Pol
       .trim().length < 1500
   )
     throw new WebBlocked('blocked', `${host} answered with a bot-check page; DEA does not get past those`);
-  return { status: r.status, url: r.url || url, contentType, body, truncated };
+  return { status: r.status, url: r.url || url, contentType, body, bytes: truncated ? buf.slice(0, max) : buf, truncated };
 }

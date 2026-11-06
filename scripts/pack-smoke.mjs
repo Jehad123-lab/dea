@@ -53,6 +53,15 @@ try {
   const help = await run(join(app, 'node_modules', '.bin', win ? 'dea.cmd' : 'dea'), ['--help']);
   if (!help.includes('serve')) throw new Error('serve missing from help');
 
+  step('dea hub selftest and doctor from the packed build (offline checks; PDF reader bundled)');
+  const deaBin = join(app, 'node_modules', '.bin', win ? 'dea.cmd' : 'dea');
+  const self = await run(deaBin, ['hub', 'selftest']);
+  console.log(self.split('\n').slice(-3).join('\n'));
+  if (!/6 passed, 0 skipped, 0 failed/.test(self)) throw new Error('hub selftest did not pass 6 of 6');
+  const doc = await run(deaBin, ['hub', 'doctor']).catch((e) => String(e.message));
+  if (!/ok\s+read: PDF text layers/.test(doc)) throw new Error(`the packed build cannot read PDFs:\n${doc}`);
+  console.log('PDF reader works from the tarball');
+
   step('dea-mcp answers initialize + tools/list on stdio');
   const msgs = [
     { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } },

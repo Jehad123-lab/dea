@@ -28,8 +28,20 @@ export interface SourceReport {
 
 export type ResultLabel = 'verified' | 'cached' | 'mixed' | 'none';
 
+/** ok = every asked source answered; partial = results, but a source was blocked, limited or failed; blocked = nothing, and a source refused us; none = nothing was found and nothing was refused */
+export type SearchStatus = 'ok' | 'partial' | 'blocked' | 'none';
+
+export interface SearchProblem {
+  source: string;
+  kind: 'blocked' | 'rate_limited' | 'error' | 'stale';
+  why: string;
+}
+
 export interface SearchResponse {
   query: string;
+  status: SearchStatus;
+  /** which sources failed and why, in DEA's fixed source order (empty when status is ok) */
+  problems: SearchProblem[];
   /** verified = every result fetched live now; cached = all from disk; mixed = both; none = no results */
   label: ResultLabel;
   fetched_at: string;
@@ -52,6 +64,14 @@ export interface ReadResponse {
   verified: boolean;
   evidence: string;
   links?: Array<{ text: string; url: string }>;
+  /** how the text was made: static = the page as served; rendered = after DEA's own headless browser ran the page's scripts; pdf; feed = RSS/Atom/sitemap */
+  method: 'static' | 'rendered' | 'pdf' | 'feed';
+  /** pdf: pages in the document and pages read */
+  pages?: { total: number; read: number };
+  /** feed: the entries, in the feed's own order */
+  items?: Array<{ title: string; url: string; date?: string; summary?: string }>;
+  /** things that did not work and what DEA did instead (a render that could not start, a PDF cut at the page limit) */
+  warnings?: string[];
 }
 
 /** A source refused or limited us. DEA reports it and does not try another way round it. */

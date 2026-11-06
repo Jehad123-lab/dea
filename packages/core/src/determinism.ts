@@ -109,6 +109,8 @@ type Stringy = Record<string, unknown>;
 /** Search: what was found is the result; when, from which cache state, and how fast is meta. */
 export function searchAnswer(r: {
   query: string;
+  status: string;
+  problems: Array<{ source: string; kind: string; why: string }>;
   label: string;
   fetched_at: string;
   results: Array<{
@@ -127,6 +129,8 @@ export function searchAnswer(r: {
   return {
     result: {
       query: r.query,
+      status: r.status,
+      ...(r.problems.length ? { problems: r.problems } : {}),
       results: r.results.map((x) => ({ title: x.title, url: x.url, snippet: x.snippet, source: x.source, ...(x.license ? { license: x.license } : {}) })),
     },
     meta: {
@@ -154,6 +158,10 @@ export function readAnswer(r: {
   verified: boolean;
   evidence: string;
   links?: Array<{ text: string; url: string }>;
+  method: string;
+  pages?: { total: number; read: number };
+  items?: Array<{ title: string; url: string; date?: string; summary?: string }>;
+  warnings?: string[];
 }): { result: Stringy; meta: Stringy } {
   return {
     result: {
@@ -165,6 +173,10 @@ export function readAnswer(r: {
       truncated: r.truncated,
       chars: r.chars,
       content_type: r.content_type,
+      method: r.method,
+      ...(r.pages ? { pages: r.pages } : {}),
+      ...(r.items ? { items: r.items } : {}),
+      ...(r.warnings ? { warnings: r.warnings } : {}),
       ...(r.links ? { links: r.links } : {}),
     },
     meta: { status: r.status, fetched_at: r.fetched_at, verified: r.verified, evidence: r.evidence },
@@ -175,4 +187,20 @@ export function readAnswer(r: {
 export function ledgerAnswer(q: Record<string, unknown>): { result: Stringy; meta: Stringy } {
   const { stable, meta } = splitMeta(q);
   return { result: stable as Stringy, meta };
+}
+
+/** Research (search, read, extract): the passages and the trail are the result; when and how long are meta. */
+export function researchAnswer(r: {
+  question: string;
+  status: string;
+  passages: unknown[];
+  trail: unknown[];
+  fetched_at: string;
+  evidence: string;
+  timings: unknown[];
+}): { result: Stringy; meta: Stringy } {
+  return {
+    result: { question: r.question, status: r.status, passages: r.passages, trail: r.trail },
+    meta: { fetched_at: r.fetched_at, evidence: r.evidence, timings: r.timings },
+  };
 }

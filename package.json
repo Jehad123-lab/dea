@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dea": "tsx packages/cli/src/index.ts",
+    "demo:approval": "tsx packages/mcp/scripts/approval-flow.ts",
     "mcp": "tsx packages/mcp/src/stdio.ts",
     "lint": "biome check .",
     "format": "biome format --write .",

@@ -7,8 +7,10 @@ import {
   CATALOG,
   CONNECTORS,
   type Connector,
+  capabilities,
   checkName,
   connectServer,
+  decideApproval,
   findCatalog,
   findConnector,
   Hub,
@@ -18,12 +20,16 @@ import {
   LEVELS,
   type Level,
   listAllTools,
+  listApprovals,
   loadHub,
   parseServersConfig,
+  readApproval,
   readAudit,
   readHistory,
   SecretStore,
   type ServerDef,
+  selftest,
+  selftestFailed,
   updateHub,
 } from '@dea/core';
 import type { Command } from 'commander';
@@ -54,6 +60,24 @@ async function askYesNo(question: string): Promise<boolean | 'unavailable'> {
   } finally {
     rl.close();
   }
+}
+
+/**
+ * `dea hub approve <id>`: show the waiting change and ask. Needs a person at a keyboard (no --yes, no piped answer): that is the
+ * whole point, an AI app that only has MCP tools cannot press it.
+ */
+export async function approveFlow(id: string, ask: (q: string) => Promise<boolean | 'unavailable'>, home = hubHome()): Promise<string> {
+  const r = await readApproval(id, home);
+  if (!r) throw new Error(`There is no approval ${id}. See: dea hub approvals`);
+  if (r.status !== 'pending') throw new Error(`Approval ${id} is already ${r.status}.`);
+  if (Date.parse(r.expires) <= Date.now()) throw new Error(`Approval ${id} ended (it lasts ten minutes). Ask the AI to try again and a new one is made.`);
+  const yes = await ask(
+    `${r.client} wants to change something:\n  ${r.tool} on ${r.app}: ${r.where}\n  mode: ${r.mode}\n  arguments:\n${r.preview.replace(/^/gm, '    ')}\nAllow this one change?`,
+  );
+  if (yes === 'unavailable') throw new Error('Approving needs a terminal where you can type. Open one yourself and run: dea hub approve ' + id);
+  if (yes !== true) return `Not approved. ${id} stays waiting until it ends; run dea hub deny ${id} to refuse it.`;
+  await decideApproval(id, 'approved', home);
+  return `Approved ${id}: ${r.client} can now make exactly this change once in the next ten minutes (it has to ask again).`;
 }
 
 /** key=value[,value...] pairs into a scope object: list-valued keys become arrays, true/false become booleans. */
@@ -293,7 +317,7 @@ export function registerHub(program: Command, run: (fn: () => Promise<void>) => 
 
   hub
     .command('connectors')
-    .description('built-in connectors (GitHub, Vercel deploy, one folder, one web address): what each needs and what its scope means')
+    .description('built-in connectors (GitHub, GitLab read-only, Vercel deploy, one folder, one web address): what each needs and what its scope means')
     .action(() =>
       run(async () => {
         for (const c of Object.values(CONNECTORS)) {
@@ -383,15 +407,60 @@ export function registerHub(program: Command, run: (fn: () => Promise<void>) => 
     );
 
   hub
+    .command('install')
+    .description('connect an AI app to DEA Hub: prints the config to paste; --write merges it into the app’s config file (backup kept, nothing else touched)')
+    .requiredOption('--client <app>', `${CLIENTS.join(' | ')} | generic`)
+    .option('--write', 'merge it into the app’s config file instead of only printing')
+    .option('--with-decode', 'also add DEA’s decode tools (dea) next to the Hub (dea-hub)')
+    .option('--project', 'the project config in this folder instead of your user config (cursor, vscode, claude-code)')
+    .action((f: { client: string; write?: boolean; withDecode?: boolean; project?: boolean }) =>
+      run(async () => {
+        if (f.client !== 'generic' && !(CLIENTS as readonly string[]).includes(f.client) && f.client !== 'claude-desktop')
+          throw new Error(`Unknown client "${f.client}". Use: ${CLIENTS.join(', ')}, generic`);
+        if (!f.write) return void out(previewInstall(f.client, { hubOnly: !f.withDecode, project: f.project }));
+        if (f.client === 'generic') throw new Error('generic has no config file DEA knows: copy the printed snippet into your client.');
+        out(await installClient(f.client, { hub: true, hubOnly: !f.withDecode, project: f.project }));
+      }),
+    );
+
+  hub
+    .command('selftest')
+    .description(
+      'does this installation do what it says? offline checks always; --live also makes real read-only calls (public ones, and your tokens from GITHUB_TOKEN / VERCEL_TOKEN / GITLAB_TOKEN if set)',
+    )
+    .option('--live', 'make real read-only calls; a token variable that is not set is skipped, never asked for')
+    .option('--json', 'print JSON')
+    .action((f: { live?: boolean; json?: boolean }) =>
+      run(async () => {
+        const checks = await selftest({ live: f.live });
+        if (f.json) out(JSON.stringify({ live: Boolean(f.live), checks }, null, 2));
+        else {
+          for (const c of checks) out(`${c.status === 'pass' ? 'pass' : c.status === 'skip' ? 'skip' : 'FAIL'}  [${c.group}] ${c.title}\n      ${c.note}`);
+          const n = (s: string) => checks.filter((c) => c.status === s).length;
+          out(`\n${n('pass')} passed, ${n('skip')} skipped, ${n('fail')} failed${f.live ? '' : '  (offline only: add --live for real calls)'}`);
+        }
+        if (selftestFailed(checks)) process.exitCode = 1;
+      }),
+    );
+
+  hub
     .command('doctor')
-    .description('check every connected app: token present, scope valid, tools listed; --live also makes one harmless read per built-in connector')
+    .description(
+      'what works right now (browser render, PDF, search sources, tokens set) and every connected app: token present, scope valid, tools listed; --live also asks each search source and makes one harmless read per connector',
+    )
     .option('--live', 'make one read call per built-in connector to prove the token works')
     .action((f: { live?: boolean }) =>
       run(async () => {
         const cfg = await loadHub();
         const names = Object.keys(cfg.mcpServers);
-        out(`Mode: ${hubMode()}   Home: ${hubHome()}   Audit: ${auditPath()}`);
-        if (!names.length) return void out('No apps yet. Try: dea hub connectors');
+        out(`Mode: ${hubMode()}   Home: ${hubHome()}   Audit: ${auditPath()}\n`);
+        out(`What works on this machine${f.live ? ' (asked just now)' : ''}:`);
+        for (const c of await capabilities({ live: f.live }))
+          out(
+            `  ${c.status === 'works' ? 'ok     ' : c.status === 'limited' ? 'limited' : c.status === 'no' ? 'NO     ' : 'unknown'} ${c.title}\n          ${c.note}`,
+          );
+        out('');
+        if (!names.length) return void out('No apps connected yet. Try: dea hub connectors');
         const h = new Hub();
         let bad = 0;
         try {
@@ -443,6 +512,39 @@ export function registerHub(program: Command, run: (fn: () => Promise<void>) => 
           await h.close();
         }
         if (bad) process.exitCode = 1;
+      }),
+    );
+
+  hub
+    .command('approvals')
+    .description('changes an AI asked for that are waiting for your OK (supervised mode, when the AI app cannot show you the question itself)')
+    .action(() =>
+      run(async () => {
+        const list = (await listApprovals(hubHome())).filter((r) => r.status === 'pending' && Date.parse(r.expires) > Date.now());
+        if (!list.length) return void out('Nothing is waiting for your OK.');
+        for (const r of list)
+          out(`${r.id}  ${r.client} wants ${r.tool} on ${r.app}: ${r.where}   (until ${r.expires})\n    dea hub approve ${r.id}   or   dea hub deny ${r.id}`);
+      }),
+    );
+
+  hub
+    .command('approve')
+    .description('say yes to ONE waiting change (shows it first; needs a terminal, so an AI app cannot press it)')
+    .argument('<id>', 'the approval id the AI was given (see dea hub approvals)')
+    .action((id: string) =>
+      run(async () => {
+        out(await approveFlow(id, askYesNo));
+      }),
+    );
+
+  hub
+    .command('deny')
+    .description('say no to a waiting change')
+    .argument('<id>')
+    .action((id: string) =>
+      run(async () => {
+        await decideApproval(id, 'denied', hubHome());
+        out(`Denied ${id}. The AI is told you declined if it asks again.`);
       }),
     );
 
@@ -589,6 +691,8 @@ export function registerHub(program: Command, run: (fn: () => Promise<void>) => 
 
 // ---------------- client configs
 
+export const CLIENTS = ['claude', 'claude-code', 'cursor', 'vscode', 'windsurf', 'codex'] as const;
+
 export interface ClientTarget {
   file: string;
   /** "mcpServers" for most; VS Code uses "servers"; Codex is TOML */
@@ -617,27 +721,74 @@ export function clientTarget(client: string, o: { project?: boolean; home?: stri
     case 'codex':
       return { file: join(home, '.codex', 'config.toml'), key: 'toml' };
     default:
-      throw new Error(`Unknown client "${client}". Use: claude, claude-code, cursor, vscode, windsurf, codex`);
+      throw new Error(`Unknown client "${client}". Use: ${CLIENTS.join(', ')}, generic`);
   }
 }
 
 type Launchers = Pick<ReturnType<typeof launchers>, 'node' | 'mcp' | 'cli'>;
 
-export function entriesFor(client: string, o: { hub?: boolean; l?: Launchers } = {}): Record<string, { command: string; args: string[] }> {
+export function entriesFor(client: string, o: { hub?: boolean; hubOnly?: boolean; l?: Launchers } = {}): Record<string, { command: string; args: string[] }> {
   const l = o.l ?? launchers();
   const name = client === 'claude-desktop' ? 'claude' : client;
-  const e: Record<string, { command: string; args: string[] }> = { dea: { command: l.node, args: [l.mcp] } };
-  if (o.hub) e['dea-hub'] = { command: l.node, args: [l.cli, 'hub', 'serve', '--client', name] };
+  const e: Record<string, { command: string; args: string[] }> = o.hubOnly ? {} : { dea: { command: l.node, args: [l.mcp] } };
+  if (o.hub || o.hubOnly) e['dea-hub'] = { command: l.node, args: [l.cli, 'hub', 'serve', '--client', name] };
   return e;
 }
 
-/** Merge DEA's entries into the client's config file, keeping everything else; backs the old file up first. */
+type Entries = Record<string, { command: string; args: string[] }>;
+
+/** The text to paste into a client's MCP config: the same shape the client's own file uses. */
+export function snippetFor(client: string, entries: Entries): string {
+  if (client === 'codex')
+    return Object.entries(entries)
+      .map(([n, e]) => `[mcp_servers.${n}]\ncommand = ${JSON.stringify(e.command)}\nargs = [${e.args.map((a) => JSON.stringify(a)).join(', ')}]\n`)
+      .join('\n');
+  const key = client === 'vscode' ? 'servers' : 'mcpServers';
+  return `${JSON.stringify({ [key]: Object.fromEntries(Object.entries(entries).map(([n, e]) => [n, key === 'servers' ? { type: 'stdio', ...e } : e])) }, null, 2)}\n`;
+}
+
+/** A backup name that does not exist yet: an earlier backup is never overwritten. */
+async function freeBackupName(file: string): Promise<string> {
+  const first = `${file}.dea-backup`;
+  if (
+    !(await readFile(first).then(
+      () => true,
+      () => false,
+    ))
+  )
+    return first;
+  for (let i = 2; ; i++) {
+    const n = `${file}.dea-backup-${i}`;
+    if (
+      !(await readFile(n).then(
+        () => true,
+        () => false,
+      ))
+    )
+      return n;
+  }
+}
+
+/**
+ * Print what DEA would put in a client's MCP config, without touching any file (what `dea hub install` does without --write).
+ * `generic` is any other MCP client: the standard mcpServers snippet.
+ */
+export function previewInstall(client: string, o: { hubOnly?: boolean; project?: boolean; l?: Launchers; target?: ClientTarget } = {}): string {
+  const entries = entriesFor(client, { hubOnly: o.hubOnly !== false, hub: true, l: o.l });
+  const snippet = snippetFor(client === 'generic' ? 'claude' : client, entries);
+  if (client === 'generic')
+    return `Add this to your MCP client's server list (the standard "mcpServers" shape):\n\n${snippet}\nThen restart the client. Hub access starts read-only on every app: dea hub allow generic <app> full  to widen it.`;
+  const t = o.target ?? clientTarget(client, { project: o.project });
+  return `${client} reads its MCP servers from ${t.file}. Add:\n\n${snippet}\nOr let DEA merge it (keeping everything else, and a backup of your file):  dea hub install --client ${client} --write`;
+}
+
+/** Merge DEA's entries into the client's config file, keeping everything else; backs the old file up first, under a name that is free. */
 export async function installClient(
   client: string,
-  o: { hub?: boolean; project?: boolean; dryRun?: boolean; target?: ClientTarget; l?: Launchers } = {},
+  o: { hub?: boolean; hubOnly?: boolean; project?: boolean; dryRun?: boolean; target?: ClientTarget; l?: Launchers } = {},
 ): Promise<string> {
   const t = o.target ?? clientTarget(client, { project: o.project });
-  const entries = entriesFor(client, { hub: o.hub, l: o.l });
+  const entries = entriesFor(client, { hub: o.hub, hubOnly: o.hubOnly, l: o.l });
   const before = await readFile(t.file, 'utf8').catch(() => null);
   let text: string;
   if (t.key === 'toml') {
@@ -649,22 +800,33 @@ export async function installClient(
     }
     text = toml;
   } else {
-    const j = before?.trim() ? (JSON.parse(before) as Record<string, any>) : {};
+    let j: Record<string, any>;
+    try {
+      j = before?.trim() ? (JSON.parse(before) as Record<string, any>) : {};
+    } catch {
+      throw new Error(
+        `${t.file} is not plain JSON (comments or a trailing comma?), so DEA did not touch it. Add this yourself:\n\n${snippetFor(client, entries)}`,
+      );
+    }
     j[t.key] = { ...(j[t.key] ?? {}) };
     for (const [n, e] of Object.entries(entries)) j[t.key][n] = t.key === 'servers' ? { type: 'stdio', ...e } : e;
     text = `${JSON.stringify(j, null, 2)}\n`;
   }
   if (o.dryRun) return `Would write ${t.file}:\n${text}`;
   await mkdir(dirname(t.file), { recursive: true });
-  if (before !== null) await copyFile(t.file, `${t.file}.dea-backup`);
+  let backup: string | null = null;
+  if (before !== null) {
+    backup = await freeBackupName(t.file);
+    await copyFile(t.file, backup);
+  }
   await writeFile(t.file, text);
-  if (o.hub) {
+  if (o.hub || o.hubOnly) {
     await updateHub((c) => {
       const n = client === 'claude-desktop' ? 'claude' : client;
       c.clients[n] ??= { enabled: true, apps: {} };
     });
   }
-  return `Added ${Object.keys(entries).join(' and ')} to ${t.file}${before !== null ? ` (old file kept as ${t.file}.dea-backup)` : ''}.\nRestart ${client} to load it.${o.hub ? ` Hub access for ${client}: read-only on every app until you run  dea hub allow ${client} <app> full` : ''}`;
+  return `Added ${Object.keys(entries).join(' and ')} to ${t.file}${backup ? ` (your old file is kept as ${backup})` : ''}.\nRestart ${client} to load it.${o.hub || o.hubOnly ? ` Hub access for ${client}: read-only on every app until you run  dea hub allow ${client} <app> full` : ''}`;
 }
 
 export { hubHome, launchers };

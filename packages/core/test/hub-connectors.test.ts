@@ -73,7 +73,7 @@ afterEach(async () => {
 
 describe('connector registry', () => {
   it('lists the built-in connectors with their tools marked read-only or changing', async () => {
-    expect(Object.keys(CONNECTORS).sort()).toEqual(['filesystem', 'github', 'http', 'vercel']);
+    expect(Object.keys(CONNECTORS).sort()).toEqual(['filesystem', 'github', 'gitlab', 'http', 'vercel']);
     const hub = await setup('supervised');
     const tools = await hub.appTools('gh');
     expect(tools.find((t) => t.name === 'get_repo')?.annotations).toMatchObject({ readOnlyHint: true });
@@ -514,4 +514,22 @@ describe('vercel connector', () => {
     expect(where).toMatch(/vercel project site from .*dist \(preview\)/);
     expect(calls.length).toBe(0);
   });
+});
+
+describe('time budget for one call', () => {
+  it('a call that does not finish fails with a plain error; a change says its outcome is unknown, and the audit log records the failure', async () => {
+    const hang = (async (_input: string | URL | Request, init: RequestInit = {}) =>
+      new Promise<Response>((_ok, no) => init.signal?.addEventListener('abort', () => no(init.signal?.reason)))) as typeof fetch;
+    const hub = await setup('delegated', { callTimeoutMs: 1000, fetch: hang });
+    const t0 = Date.now();
+    const read = await hub.call('bot', 'gh', 'get_repo', { repo: 'me/site' });
+    expect(Date.now() - t0).toBeLessThan(5000);
+    expect(read.isError).toBe(true);
+    expect(text(read)).toMatch(/did not finish within 1 s \(the time budget for one call\)/);
+    expect(text(read)).not.toMatch(/may or may not/);
+    const write = await hub.call('bot', 'gh', 'create_issue', { repo: 'me/site', title: 'x' });
+    expect(text(write)).toMatch(/may or may not have happened, so look before you try again/);
+    const stages = (await readAudit({ app: 'gh' }, home)).map((l) => l.stage);
+    expect(stages).toEqual(['intent', 'failed']);
+  }, 30_000);
 });

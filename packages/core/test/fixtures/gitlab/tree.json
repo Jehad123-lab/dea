@@ -1,0 +1,7 @@
+[
+  { "id": "85a5a1b44904319f73745a96186d5adcc813271b", "name": ".claude", "type": "tree", "path": ".claude", "mode": "040000" },
+  { "id": "7026e9e3238b3891bcc658619e6806d7339d956a", "name": ".gitlab", "type": "tree", "path": ".gitlab", "mode": "040000" },
+  { "id": "4e0a120137a10582bf4e6bfea508d4e14cdeeb58", "name": ".vscode", "type": "tree", "path": ".vscode", "mode": "040000" },
+  { "id": "fea8383dcf9fdb4ad4ee7013c074680b1a46a5a4", "name": "cmd", "type": "tree", "path": "cmd", "mode": "040000" },
+  { "id": "2cafe16a8ccaccb4fd71952faf14ed35a4c45b59", "name": "docs", "type": "tree", "path": "docs", "mode": "040000" }
+]

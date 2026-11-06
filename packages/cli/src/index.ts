@@ -4,6 +4,7 @@ import { join, relative } from 'node:path';
 import {
   type BrowserChoice,
   ContentCache,
+  canonicalJson,
   canvasLine,
   decodeAssets,
   decodeCode,
@@ -25,11 +26,14 @@ import {
   listRuns,
   measureStability,
   planInvestigation,
+  RESULT_SCHEMA,
   type RunDoc,
   readRun,
   readUrl,
   renderReport,
   renderTimings,
+  researchAnswer,
+  researchWeb,
   resolveRun,
   runInvestigation,
   type StepKind,
@@ -442,12 +446,20 @@ program
   .option('--source <names>', 'only these sources, comma separated: duckduckgo, wikipedia, github, npm, mdn, stackexchange, hackernews, searxng')
   .option('--limit <n>', 'results to show', '8')
   .option('--fresh', 'skip the cache and ask the sources again')
+  .option('--timeout <seconds>', 'give up on slow sources after this long', '45')
   .option('--json', 'print JSON')
-  .action((q: string[], flags: { source?: string; limit: string; fresh?: boolean; json?: boolean }) =>
+  .action((q: string[], flags: { source?: string; limit: string; fresh?: boolean; timeout: string; json?: boolean }) =>
     run(async () => {
-      const r = await webSearch(q.join(' '), { sources: flags.source?.split(',').map((x) => x.trim()), limit: Number(flags.limit) || 8, fresh: flags.fresh });
+      const r = await webSearch(q.join(' '), {
+        sources: flags.source?.split(',').map((x) => x.trim()),
+        limit: Number(flags.limit) || 8,
+        fresh: flags.fresh,
+        timeoutMs: (Number(flags.timeout) || 45) * 1000,
+      });
       if (flags.json) return void process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
-      process.stdout.write(`${r.label.toUpperCase()}  ${r.results.length} results for "${r.query}"\n`);
+      process.stdout.write(
+        `${r.status === 'blocked' ? 'BLOCKED' : r.label.toUpperCase()}  ${r.results.length} results for "${r.query}"${r.status === 'partial' ? `  (partial: ${r.problems.map((p) => `${p.source} ${p.kind}`).join(', ')})` : ''}\n`,
+      );
       r.results.forEach((x, i) => {
         process.stdout.write(
           `\n${i + 1}. ${x.title}\n   ${x.url}\n   ${x.snippet.slice(0, 200)}\n   [${x.source}${x.verified ? '' : ', cached'}${x.license ? `, ${x.license}` : ''}]\n`,
@@ -464,14 +476,94 @@ program
   .option('--max <chars>', 'cut the text here', '12000')
   .option('--links', 'also list the page links')
   .option('--fresh', 'skip the cache')
+  .addOption(
+    new Option('--render <mode>', 'never = as served; auto = run scripts in DEA’s headless browser only when the page is an empty shell; always')
+      .choices(['never', 'auto', 'always'])
+      .default('auto'),
+  )
+  .option('--max-pages <n>', 'PDFs: pages to read', '40')
+  .option('--timeout <seconds>', 'give up after this long', '60')
   .option('--json', 'print JSON')
-  .action((url: string, flags: { max: string; links?: boolean; fresh?: boolean; json?: boolean }) =>
-    run(async () => {
-      const r = await readUrl(url, { maxChars: Number(flags.max) || 12000, links: flags.links, fresh: flags.fresh });
-      if (flags.json) return void process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
-      process.stdout.write(`${r.title || r.final_url}\n${r.final_url}  [${r.verified ? 'verified' : 'cached'}, ${r.fetched_at}]\n${r.evidence}\n\n${r.text}\n`);
-      for (const l of r.links ?? []) process.stdout.write(`- ${l.text}: ${l.url}\n`);
-    }),
+  .action(
+    (
+      url: string,
+      flags: { max: string; links?: boolean; fresh?: boolean; render: 'never' | 'auto' | 'always'; maxPages: string; timeout: string; json?: boolean },
+    ) =>
+      run(async () => {
+        const r = await readUrl(url, {
+          maxChars: Number(flags.max) || 12000,
+          links: flags.links,
+          fresh: flags.fresh,
+          render: flags.render,
+          maxPages: Number(flags.maxPages) || 40,
+          timeoutMs: (Number(flags.timeout) || 60) * 1000,
+        });
+        if (flags.json) return void process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
+        process.stdout.write(
+          `${r.title || r.final_url}\n${r.final_url}  [${r.verified ? 'verified' : 'cached'}, ${r.method}, ${r.fetched_at}]\n${r.evidence}\n\n${r.text}\n`,
+        );
+        for (const l of r.links ?? []) process.stdout.write(`- ${l.text}: ${l.url}\n`);
+      }),
+  );
+
+program
+  .command('research')
+  .description(
+    'search, read and extract in one call: the passages that answer a question, ranked by plain code, with the trail of every step (no model involved)',
+  )
+  .argument('<question...>', 'what you want to know')
+  .option('--url <url...>', 'read these pages instead of searching')
+  .option('--pages <n>', 'pages to open', '3')
+  .option('--passages <n>', 'passages to return', '6')
+  .option('--source <names>', 'only these search sources, comma separated')
+  .addOption(new Option('--render <mode>', 'scripts: never, auto (only empty shells), always').choices(['never', 'auto', 'always']).default('auto'))
+  .option('--fresh', 'skip the cache')
+  .option('--timeout <seconds>', 'time budget for the whole call', '90')
+  .option('--json', 'print the structured answer (the same JSON the MCP tool returns)')
+  .action(
+    (
+      q: string[],
+      flags: {
+        url?: string[];
+        pages: string;
+        passages: string;
+        source?: string;
+        render: 'never' | 'auto' | 'always';
+        fresh?: boolean;
+        timeout: string;
+        json?: boolean;
+      },
+    ) =>
+      run(async () => {
+        const r = await researchWeb(q.join(' '), {
+          urls: flags.url,
+          pages: Number(flags.pages) || 3,
+          passages: Number(flags.passages) || 6,
+          sources: flags.source?.split(',').map((x) => x.trim()),
+          render: flags.render,
+          fresh: flags.fresh,
+          timeoutMs: (Number(flags.timeout) || 90) * 1000,
+        });
+        if (flags.json) {
+          const a = researchAnswer(r);
+          return void process.stdout.write(`${canonicalJson({ schema: RESULT_SCHEMA, tool: 'research', result: a.result, meta: a.meta })}\n`);
+        }
+        process.stdout.write(`${r.status.toUpperCase()}  ${r.passages.length} passages for "${r.question}"\n`);
+        for (const [i, p] of r.passages.entries())
+          process.stdout.write(
+            `\n${i + 1}. ${p.title || p.url}  (score ${p.score})\n   ${p.url}  @${p.offset}\n   ${p.text.replace(/\s+/g, ' ').slice(0, 400)}\n`,
+          );
+        process.stdout.write('\nTrail:\n');
+        for (const t of r.trail)
+          process.stdout.write(
+            t.step === 'search'
+              ? `  search: ${t.status}, ${t.results} results${t.problems.length ? ` (${t.problems.map((p) => `${p.source} ${p.kind}`).join(', ')})` : ''}\n`
+              : t.ok
+                ? `  read ${t.url}: ${t.method}, ${t.chars} chars, ${t.passages} passages used\n`
+                : `  read ${t.url}: FAILED ${t.error}\n`,
+          );
+        process.stdout.write(`${r.evidence}\n`);
+      }),
   );
 
 common(

@@ -17,6 +17,8 @@ export interface Source {
   /** the sentence that goes into each result's evidence note */
   basis: string;
   headers?: Record<string, string>;
+  /** asked only when the named source gave nothing usable (blocked, limited, failed or empty): the same question through another door */
+  fallbackFor?: string;
 }
 
 type Raw = Omit<WebResult, 'fetched_at' | 'verified' | 'evidence'>;
@@ -43,6 +45,23 @@ export function parseDuckDuckGo(html: string, limit = 8): Raw[] {
     if (url.startsWith('//')) url = `https:${url}`;
     if (!/^https?:\/\//.test(url) || /duckduckgo\.com\/y\.js/.test(url)) continue; // ads
     out.push({ title: plain(m[2]), url, snippet: plain(m[3]), source: 'duckduckgo' });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** DuckDuckGo's lite page: the same engine through a plainer page, used when the HTML page is blocked or empty. */
+export function parseDuckDuckGoLite(html: string, limit = 8): Raw[] {
+  const out: Raw[] = [];
+  const re =
+    /<a\b[^>]*href="([^"]+)"[^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>(?:[\s\S]*?<td[^>]*class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>)?/g;
+  for (const m of html.matchAll(re)) {
+    let url = decodeEntities(m[1]);
+    const u = /[?&]uddg=([^&]+)/.exec(url);
+    if (u) url = decodeURIComponent(u[1]);
+    if (url.startsWith('//')) url = `https:${url}`;
+    if (!/^https?:\/\//.test(url) || /duckduckgo\.com\/y\.js/.test(url)) continue; // ads
+    out.push({ title: plain(m[2]), url, snippet: plain(m[3] ?? ''), source: 'duckduckgo-lite' });
     if (out.length >= limit) break;
   }
   return out;
@@ -159,6 +178,17 @@ export const SOURCES: Record<string, Source> = {
     parse: parseDuckDuckGo,
     basis: "listed on DuckDuckGo's results page for this query; the snippet is the search engine's own text and the page itself was not opened",
   },
+  'duckduckgo-lite': {
+    name: 'duckduckgo-lite',
+    title: 'DuckDuckGo (lite results page, fallback)',
+    kind: 'page',
+    gapMs: 2000,
+    about: 'the same web search through DuckDuckGo’s plain page: asked only when the HTML page is blocked, limited or empty',
+    url: (s) => `https://lite.duckduckgo.com/lite/?q=${q(s)}`,
+    parse: parseDuckDuckGoLite,
+    basis: "listed on DuckDuckGo's lite results page for this query; the snippet is the search engine's own text and the page itself was not opened",
+    fallbackFor: 'duckduckgo',
+  },
   wikipedia: {
     name: 'wikipedia',
     title: 'Wikipedia search API',
@@ -255,9 +285,11 @@ export async function runSource(
   limit: number,
   f: Fetch | undefined,
   sleep?: (ms: number) => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<{ raw: Raw[]; body: string }> {
   const r = await politeGet(src.url(query, limit), {
     fetch: f,
+    signal,
     sleep,
     gapMs: src.gapMs,
     robots: src.kind === 'page',

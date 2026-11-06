@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { buildLedger, canonicalJson, type LedgerInput, ledgerAnswer, queryLedger, RunWriter } from '@dea/core';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { makePdf } from '../../core/test/fixtures/makepdf.ts';
 import { createServer } from '../src/server.ts';
 
 // Same inputs, same outputs, whichever AI drives it: two different clients, in different orders, with the arguments spelled
@@ -16,6 +17,10 @@ process.env.DEA_HOME = home;
 
 const PAGE =
   '<html><head><title>Fixture page</title><meta name="description" content="a recorded page"></head><body><h1>Hello</h1><p>Same words every time.</p><a href="https://example.test/a">link a</a></body></html>';
+const GUIDE_A =
+  '<html><head><title>Instancing guide</title></head><body><main><h1>Instancing guide</h1><p>Instanced rendering draws many copies of one mesh in a single draw call, which cuts the per-object cost on the CPU.</p><p>Unrelated paragraph about cooking pasta with plenty of salt and olive oil for a long time in a big pot.</p></main></body></html>';
+const GUIDE_B =
+  '<html><head><title>Other</title></head><body><main><p>The weather today is mild and the market sells fruit near the river bank every morning of the week, rain or shine.</p><p>Draw calls cost CPU time because each one validates state; instanced rendering reduces how many calls are made.</p></main></body></html>';
 const ledgerInput = (runId: string): LedgerInput => ({
   url: 'https://fixture.test/',
   runId,
@@ -37,12 +42,12 @@ const ledgerInput = (runId: string): LedgerInput => ({
   },
 });
 
-async function makeClient(name: string, web: Record<string, { body: string; type?: string }>, now: number) {
+async function makeClient(name: string, web: Record<string, { body: string | Uint8Array; type?: string }>, now: number) {
   const f = (async (input: string | URL | Request) => {
     const url = String(input);
     const hit = Object.entries(web).find(([k]) => url.includes(k));
     return hit
-      ? new Response(hit[1].body, { status: 200, headers: { 'content-type': hit[1].type ?? 'application/json' } })
+      ? new Response(hit[1].body as BodyInit, { status: 200, headers: { 'content-type': hit[1].type ?? 'application/json' } })
       : new Response('not found', { status: 404 });
   }) as typeof fetch;
   const [a, b] = InMemoryTransport.createLinkedPair();
@@ -89,6 +94,14 @@ beforeAll(async () => {
     'wikipedia.org': { body: await fx('wikipedia.json') },
     'fixture.test/robots.txt': { body: 'User-agent: *\nAllow: /', type: 'text/plain' },
     'fixture.test/page': { body: PAGE, type: 'text/html' },
+    'a.test/robots.txt': { body: 'User-agent: *\nAllow: /', type: 'text/plain' },
+    'a.test/guide': { body: GUIDE_A, type: 'text/html' },
+    'b.test/robots.txt': { body: 'User-agent: *\nAllow: /', type: 'text/plain' },
+    'b.test/other': { body: GUIDE_B, type: 'text/html' },
+    'feed.test/robots.txt': { body: 'User-agent: *\nAllow: /', type: 'text/plain' },
+    'feed.test/rss': { body: await fx('hn.rss.xml'), type: 'application/rss+xml' },
+    'doc.test/robots.txt': { body: 'User-agent: *\nAllow: /', type: 'text/plain' },
+    'doc.test/paper.pdf': { body: makePdf(['The measured result is stable', 'Method and data'], 2), type: 'application/pdf' },
   };
   one = await makeClient('client-one', web, Date.parse('2026-11-05T10:00:00Z'));
   two = await makeClient('client-two', web, Date.parse('2026-11-05T17:45:00Z')); // another clock reading, another client
@@ -129,6 +142,40 @@ describe('same inputs, same outputs, whichever AI drives it', () => {
     expect(core(b).text).toBe(core(a).text);
     expect((a.structuredContent as any).meta.verified).toBe(true);
     expect((b.structuredContent as any).meta.fetched_at).not.toBe((a.structuredContent as any).meta.fetched_at); // the other clock reading is meta, not result
+  });
+
+  it('research: two clients, different argument order and clocks, identical passages, trail and text', async () => {
+    const q = 'how does instanced rendering reduce draw calls';
+    const a = await one.callTool({ name: 'research', arguments: { question: q, urls: ['https://a.test/guide', 'https://b.test/other'], passages: 3 } });
+    const b = await two.callTool({
+      name: 'research',
+      arguments: { passages: 3, fresh: true, urls: ['https://a.test/guide', 'https://b.test/other'], question: `  ${q}` },
+    });
+    expect(a.isError).toBeFalsy();
+    const ca = core(a);
+    expect(ca.result.status).toBe('found');
+    expect(ca.result.passages.length).toBeGreaterThan(0);
+    expect(ca.result.trail.map((t: any) => t.step)).toEqual(['read', 'read']);
+    expect(core(b).result.passages).toEqual(ca.result.passages);
+    expect(core(b).result.trail).toEqual(ca.result.trail);
+    expect(ca.text).not.toMatch(/fetched_at|2026-11-05|"ms"/);
+    expect((a.structuredContent as any).meta.fetched_at).not.toBe((b.structuredContent as any).meta.fetched_at);
+  });
+
+  it('read: a feed and a PDF come back the same through both clients', async () => {
+    for (const args of [{ url: 'https://feed.test/rss' }, { url: 'https://doc.test/paper.pdf', maxPages: 1 }]) {
+      const a = await one.callTool({ name: 'read', arguments: args });
+      const b = await two.callTool({ name: 'read', arguments: { ...args } });
+      expect(a.isError).toBeFalsy();
+      expect(core(b).text).toBe(core(a).text);
+    }
+    const feed = core(await one.callTool({ name: 'read', arguments: { url: 'https://feed.test/rss' } }));
+    expect(feed.result.method).toBe('feed');
+    expect(feed.result.items.length).toBeGreaterThan(10);
+    const pdf = core(await one.callTool({ name: 'read', arguments: { url: 'https://doc.test/paper.pdf', maxPages: 1 } }));
+    expect(pdf.result.method).toBe('pdf');
+    expect(pdf.result.pages).toEqual({ total: 2, read: 1 });
+    expect(pdf.result.text).toContain('The measured result is stable p1');
   });
 
   it('report and list_runs: identical in any call order', async () => {

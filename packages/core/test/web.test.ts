@@ -270,7 +270,13 @@ describe('read', () => {
     await expect(read('http://localhost/x', { fetch: f, home })).rejects.toThrow(/will not read/);
   });
   it('reports a non-text file instead of printing bytes', async () => {
-    const { f } = fakeFetch({ 'robots.txt': { body: '', type: 'text/plain' }, 'example.org/a.pdf': { body: '%PDF', type: 'application/pdf' } });
-    await expect(read('https://example.org/a.pdf', { fetch: f, sleep: noSleep, home })).rejects.toThrow(/not readable text/);
+    const { f } = fakeFetch({
+      'robots.txt': { body: '', type: 'text/plain' },
+      'example.org/a.png': { body: 'PNG', type: 'image/png' },
+      'example.org/a.pdf': { body: '%PDF', type: 'application/pdf' },
+    });
+    await expect(read('https://example.org/a.png', { fetch: f, sleep: noSleep, home })).rejects.toThrow(/not readable text/);
+    // a damaged PDF is reported as damaged, not printed as bytes
+    await expect(read('https://example.org/a.pdf', { fetch: f, sleep: noSleep, home })).rejects.toThrow(/The PDF could not be read/);
   });
 });

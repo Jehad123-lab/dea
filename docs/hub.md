@@ -10,7 +10,7 @@ dea search "webgl instancing" [--source mdn,npm] [--limit 8] [--fresh] [--json]
 dea read https://example.org/page [--max 12000] [--links] [--fresh] [--json]
 ```
 
-Sources: DuckDuckGo HTML results; MDN, npm, GitHub repository search and Stack Overflow for programming questions;
+Sources: DuckDuckGo HTML results (with DuckDuckGo lite as a fallback when the HTML page is blocked, limited or empty); MDN, npm, GitHub repository search and Stack Overflow for programming questions;
 Wikipedia for short concept queries; Hacker News (`--source hackernews`); your own SearXNG (`DEA_SEARXNG_URL`).
 
 What comes back, per result: `title`, `url`, `snippet`, `source`, `fetched_at`, `verified`, `evidence`. A result set is
@@ -28,6 +28,9 @@ Politeness and limits, as built:
   AI app cannot use it to reach into your network. (It checks the address as written; it does not defend against a public
   name that resolves to a private address.)
 - Page text is returned with a note that it is data, not instructions.
+- `read` has four methods, reported in `method`: `static`, `rendered` (an empty shell run in DEA's own headless browser: fresh profile,
+  no pictures, private addresses refused), `pdf` (text layer; no OCR), `feed` (RSS, Atom, sitemaps). Every call has a time budget.
+- `dea research "question"` chains search, read and extract (passages ranked by plain code) and returns the trail of every step.
 
 ## Connectors
 
@@ -36,7 +39,7 @@ A connector is an app the Hub can call. Two kinds, one set of rules:
 1. **MCP servers**: any server you configure (`dea hub add name -- command args`, or `dea hub connect <app>` for the official
    remote ones). DEA lists its tools, calls them, and re-exposes them as `<app>__<tool>` through `dea hub serve` /
    `dea mcp install --hub`.
-2. **Built-in connectors**: `github`, `vercel` (static deploy), `filesystem` (one folder), `http` (one base address).
+2. **Built-in connectors**: `github`, `gitlab` (read only), `vercel` (static deploy), `filesystem` (one folder), `http` (one base address).
    `dea hub connectors` lists their tools and scopes; `dea hub add-connector <kind> --scope key=value --token-env VAR` adds one.
 
 `dea hub list | tools <app> | call <app> <tool> '{json}' | remove <app> | doctor [--live] | audit | mode` manage them.
@@ -47,11 +50,19 @@ A connector is an app the Hub can call. Two kinds, one set of rules:
 2. **Scope** (built-in connectors): what the connector may touch, declared when you add it: repos, projects and deploy
    folders, one folder, one base address. Outside it is refused in every mode.
 3. **Permission mode** (`DEA_MODE` or `policy.json`): `restricted` refuses every change; `supervised` (default) asks you
-   before each change; `delegated` lets changes run inside the scope. Looking never asks. A tool of an MCP server counts as a
+   before each change (through the AI app if it can show the question; otherwise the change waits as an approval you give in a
+   terminal with `dea hub approve <id>`: one exact call, once, ten minutes); `delegated` lets changes run inside the scope. Looking never asks. A tool of an MCP server counts as a
    change unless the server marks it read-only.
 4. **Audit**: every change writes `intent` then `done`/`failed` (or `denied`) to `~/.dea/audit.jsonl` with the time, client,
    app, tool, where it lands, mode and basis. If the line cannot be written, the change is not made.
 5. **Alert**: more than N changing calls in M minutes pauses that AI app (`dea hub alert`).
+
+### Check it
+
+`dea hub selftest` runs offline checks (modes, approvals, scope, redaction, connectors) in a temp folder. `--live` adds real
+read-only calls, and for each of `GITHUB_TOKEN`, `VERCEL_TOKEN`, `GITLAB_TOKEN` that is set in your shell one read that proves the
+token; an unset variable is skipped. `dea hub doctor [--live]` says what works right now. `dea hub install --client <app>` prints the
+MCP config for Claude, Cursor, VS Code, Windsurf, Codex or any other client (`generic`); `--write` merges it with a backup.
 
 ### Secrets
 

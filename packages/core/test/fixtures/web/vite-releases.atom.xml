@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/" xml:lang="en-US">
+  <id>tag:github.com,2008:https://github.com/vitejs/vite/releases</id>
+  <link type="text/html" rel="alternate" href="https://github.com/vitejs/vite/releases"/>
+  <link type="application/atom+xml" rel="self" href="https://github.com/vitejs/vite/releases.atom"/>
+  <title>Release notes from vite</title>
+  <updated>2026-11-05T05:37:00Z</updated>
+  <entry>
+    <id>tag:github.com,2008:Repository/257485422/v8.3.6</id>
+    <updated>2026-11-05T05:57:16Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/vitejs/vite/releases/tag/v8.3.6"/>
+    <title>v8.3.6</title>
+    <content type="html">&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;await overlapping plugin container close calls (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23935&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23935/hovercard&quot;&gt;#23935&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/175bbeb231fe8bbf260b0b3866b30080690c4f5e&quot;&gt;175bbeb&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;build:&lt;/strong&gt; resolve dynamic imports with queries appended when collecting CSS dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23909&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23909/hovercard&quot;&gt;#23909&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/df365589738866363fff7335ed58948a5c440580&quot;&gt;df36558&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;build:&lt;/strong&gt; use stable module ids in chunk import map hash signatures (fix &lt;a href=&quot;https://github.com/vitejs/vite/issues/23975&quot; data-hovercard-type=&quot;issue&quot; data-hovercard-url=&quot;/vitejs/vite/issues/23975/hovercard&quot;&gt;#23975&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23976&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23976/hovercard&quot;&gt;#23976&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/8069835ac32ae7682b34de55fdba6c5d2484bae0&quot;&gt;8069835&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;bundled-dev:&lt;/strong&gt; allow named imports from Node built-ins (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23858&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23858/hovercard&quot;&gt;#23858&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/4260c756944a430e897f689efcfa4f8648953488&quot;&gt;4260c75&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;bundled-dev:&lt;/strong&gt; reload when hmr cannot run an entry again (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23849&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23849/hovercard&quot;&gt;#23849&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/a236886026c3a5de0680ea616de7de830d7a90e7&quot;&gt;a236886&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update &lt;code&gt;@rollup/plugin-alias&lt;/code&gt; to v6.0.1 (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23862&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23862/hovercard&quot;&gt;#23862&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/67c965b1df64249bceb747037e87d22f75b3e471&quot;&gt;67c965b&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update all non-major dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23896&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23896/hovercard&quot;&gt;#23896&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/46b91c5bf9c2901b8511c893bc3fc38b8bba6e4f&quot;&gt;46b91c5&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update all non-major dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23966&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23966/hovercard&quot;&gt;#23966&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/b3cb0575aff63004a71301a1ec798aeea2aa05d7&quot;&gt;b3cb057&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update rolldown-related dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23868&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23868/hovercard&quot;&gt;#23868&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/a63eb8722e7d47d1efb710b6410c8d5e5a04a18f&quot;&gt;a63eb87&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update rolldown-related dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23967&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23967/hovercard&quot;&gt;#23967&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/0105733e610dd5b770bb5397e8d9fbc54a9f6312&quot;&gt;0105733&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;dev:&lt;/strong&gt; escape ANSI escape sequence for &lt;code&gt;server.forwardConsole&lt;/code&gt; (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23933&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23933/hovercard&quot;&gt;#23933&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/4f340fdb1b619089bbf8ae5dc56c2c0866224306&quot;&gt;4f340fd&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;html:&lt;/strong&gt; remove adjacent module tags on the first line (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23823&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23823/hovercard&quot;&gt;#23823&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/eab1dc2752fcccf7f06427afc9915794e256e3bc&quot;&gt;eab1dc2&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;ignore pnpm&#39;s .modules.yaml as a Vite Task input (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23634&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23634/hovercard&quot;&gt;#23634&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/95c2daf1352b3509ec93e6e08a0eaabe23a61b28&quot;&gt;95c2daf&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;optimizer:&lt;/strong&gt; detect cache dir precisely (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23912&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23912/hovercard&quot;&gt;#23912&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/cc9bc2131d471bb4d60364614b326ada3ca7d10d&quot;&gt;cc9bc21&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;optimizer:&lt;/strong&gt; resolve subpath imports (#) with Vite&#39;s resolver (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23959&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23959/hovercard&quot;&gt;#23959&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/0fdd81e9460dd44806b2b6290603ee2c8366a54e&quot;&gt;0fdd81e&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;respect &lt;code&gt;build.sourcemap&lt;/code&gt; from environment (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23879&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23879/hovercard&quot;&gt;#23879&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/82e7aa0374a15e1c67594557ab5893c91578f897&quot;&gt;82e7aa0&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;server:&lt;/strong&gt; escape HTML attributes (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23995&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23995/hovercard&quot;&gt;#23995&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/a27039101e3726498063c9662da9c0c097016bd1&quot;&gt;a270391&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;server:&lt;/strong&gt; preserve &lt;code&gt;$&lt;/code&gt; patterns in static alias replacements (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23703&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23703/hovercard&quot;&gt;#23703&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/1b6ed05397c0670e6114e3e1380188f0313ae590&quot;&gt;1b6ed05&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;ssr:&lt;/strong&gt; convert external require against built-in modules to import for &lt;code&gt;ssr.target=webworker&lt;/code&gt; (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23759&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23759/hovercard&quot;&gt;#23759&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/a711f1c6328ca7f59857ed99e32853cf49b19a15&quot;&gt;a711f1c&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;use top-level &lt;code&gt;input&lt;/code&gt; for SSR build when &lt;code&gt;build.ssr: true&lt;/code&gt; (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23898&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23898/hovercard&quot;&gt;#23898&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/90bc034a97e7eccd0f3cbc69904fffa625a4c34d&quot;&gt;90bc034&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;wasm:&lt;/strong&gt; reject &lt;code&gt;.wasm&lt;/code&gt; outside &lt;code&gt;server.fs&lt;/code&gt; (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23914&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23914/hovercard&quot;&gt;#23914&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/64e24670e49900c33a3d3e3c701a5ec4d76573f2&quot;&gt;64e2467&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;watch files that have a query or hash referenced with &lt;code&gt;new URL(..., import.meta.url)&lt;/code&gt; (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23780&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23780/hovercard&quot;&gt;#23780&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/e954a9cda0b5254be495a937333a0be1b8503d8f&quot;&gt;e954a9c&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;worker:&lt;/strong&gt; keep chunks conflicted with unused workers that are still used by a live worker (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23956&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23956/hovercard&quot;&gt;#23956&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/7139ef35cf6c9c0979385a467e8499fc19dfd099&quot;&gt;7139ef3&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Performance Improvements&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;build:&lt;/strong&gt; remove preload link listeners on settle (fix &lt;a href=&quot;https://github.com/vitejs/vite/issues/23920&quot; data-hovercard-type=&quot;issue&quot; data-hovercard-url=&quot;/vitejs/vite/issues/23920/hovercard&quot;&gt;#23920&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23922&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23922/hovercard&quot;&gt;#23922&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/8109efd30319704224db3b7e3b7090348999effb&quot;&gt;8109efd&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;css:&lt;/strong&gt; index rendered modules once per output for &lt;code&gt;cssScopeTo&lt;/code&gt; (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23889&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23889/hovercard&quot;&gt;#23889&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/1b905e562aed9b47c3ab5959149bb1566eb7a9a5&quot;&gt;1b905e5&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Miscellaneous Chores&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;align charset case (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23863&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23863/hovercard&quot;&gt;#23863&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/a976df38815d00102bb1d9fa32e0fec7c05d210a&quot;&gt;a976df3&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Build System&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;generate sourcemaps in import-meta-current-dirname plugin (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23904&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23904/hovercard&quot;&gt;#23904&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/20d355a00b036499f4b9fd5aa99ff754ca3d4d06&quot;&gt;20d355a&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;</content>
+    <author>
+      <name>github-actions[bot]</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/in/15368?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/257485422/plugin-legacy@8.2.4</id>
+    <updated>2026-11-05T05:42:26Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/vitejs/vite/releases/tag/plugin-legacy%408.2.4"/>
+    <title>plugin-legacy@8.2.4</title>
+    <content type="html">&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update all non-major dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23217&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23217/hovercard&quot;&gt;#23217&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/ba958bddfc9cabe302c6b34269dcf5c9634531e0&quot;&gt;ba958bd&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update all non-major dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23337&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23337/hovercard&quot;&gt;#23337&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/d55081581ddd4d55667fef38e85d02ab7f879f15&quot;&gt;d550815&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update all non-major dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23404&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23404/hovercard&quot;&gt;#23404&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/238ad811c7fb9e4730cbd317d0657867ed3447b3&quot;&gt;238ad81&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update all non-major dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23445&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23445/hovercard&quot;&gt;#23445&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/fc7c104e74d35a97fa313d5dd6f1b5e7d5b26159&quot;&gt;fc7c104&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update all non-major dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23482&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23482/hovercard&quot;&gt;#23482&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/3c752c8932bc0599465ba4a6d8f44aaf1e934c3d&quot;&gt;3c752c8&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update all non-major dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23601&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23601/hovercard&quot;&gt;#23601&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/9944fa6033873f13ae88f59e023ab642c50fee2b&quot;&gt;9944fa6&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update all non-major dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23648&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23648/hovercard&quot;&gt;#23648&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/8a4c19cfc035f2dd203f2fa6d00ab9256a5e77c9&quot;&gt;8a4c19c&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update all non-major dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23896&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23896/hovercard&quot;&gt;#23896&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/46b91c5bf9c2901b8511c893bc3fc38b8bba6e4f&quot;&gt;46b91c5&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update all non-major dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23966&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23966/hovercard&quot;&gt;#23966&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/b3cb0575aff63004a71301a1ec798aeea2aa05d7&quot;&gt;b3cb057&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update rolldown-related dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23483&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23483/hovercard&quot;&gt;#23483&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/9aecbbfa5fb5da4b9981c099cb9746a9fd210806&quot;&gt;9aecbbf&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update rolldown-related dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23733&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23733/hovercard&quot;&gt;#23733&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/43f0d052e514c3ad2dea2f7dc44b0720e1f62f48&quot;&gt;43f0d05&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update rolldown-related dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23967&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23967/hovercard&quot;&gt;#23967&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/0105733e610dd5b770bb5397e8d9fbc54a9f6312&quot;&gt;0105733&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;respect &lt;code&gt;build.sourcemap&lt;/code&gt; from environment (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23879&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23879/hovercard&quot;&gt;#23879&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/82e7aa0374a15e1c67594557ab5893c91578f897&quot;&gt;82e7aa0&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Miscellaneous Chores&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update dependency tsdown to ^0.23.2 (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23895&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23895/hovercard&quot;&gt;#23895&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/ac9a56d8925bf05d0b18bca0b273362d697bb4f4&quot;&gt;ac9a56d&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; use typescript v7 (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23778&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23778/hovercard&quot;&gt;#23778&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/928e721b36690ac0f3f118290a21fc0cc4349055&quot;&gt;928e721&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;merge prereleases in changelog (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23466&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23466/hovercard&quot;&gt;#23466&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/99bd9d1d46153fa939f4a304cc0177db42e28776&quot;&gt;99bd9d1&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;use oxfmt &lt;code&gt;sortImports&lt;/code&gt; (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23319&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23319/hovercard&quot;&gt;#23319&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/97ad042170f4c71b518239723b733dd98e8e3e76&quot;&gt;97ad042&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Code Refactoring&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;plugin-legacy:&lt;/strong&gt; use JSON import for core-js version (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23771&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23771/hovercard&quot;&gt;#23771&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/0075c4bdd8d2cd731a839411cf36cf9f8d754a8a&quot;&gt;0075c4b&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;</content>
+    <author>
+      <name>github-actions[bot]</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/in/15368?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/257485422/create-vite@9.3.4</id>
+    <updated>2026-11-05T06:02:20Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/vitejs/vite/releases/tag/create-vite%409.3.4"/>
+    <title>create-vite@9.3.4</title>
+    <content type="html">&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;create-vite:&lt;/strong&gt; keep TypeScript 6 when using ESLint (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23931&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23931/hovercard&quot;&gt;#23931&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/28e1710790ac5ef65ed5e84cbb20438bc3218f01&quot;&gt;28e1710&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update all non-major dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23966&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23966/hovercard&quot;&gt;#23966&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/b3cb0575aff63004a71301a1ec798aeea2aa05d7&quot;&gt;b3cb057&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;deps:&lt;/strong&gt; update rolldown-related dependencies (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23967&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23967/hovercard&quot;&gt;#23967&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/0105733e610dd5b770bb5397e8d9fbc54a9f6312&quot;&gt;0105733&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;</content>
+    <author>
+      <name>github-actions[bot]</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/in/15368?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/257485422/create-vite@9.3.3</id>
+    <updated>2026-10-27T09:27:16Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/vitejs/vite/releases/tag/create-vite%409.3.3"/>
+    <title>create-vite@9.3.3</title>
+    <content type="html">&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;create-vite:&lt;/strong&gt; include template files in package (&lt;a href=&quot;https://github.com/vitejs/vite/issues/23915&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/vitejs/vite/pull/23915/hovercard&quot;&gt;#23915&lt;/a&gt;) (&lt;a href=&quot;https://github.com/vitejs/vite/commit/f4abfb51b03b04b16b6322eec1b401dedee56748&quot;&gt;f4abfb5&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;</content>
+    <author>
+      <name>github-actions[bot]</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/in/15368?s=60&amp;v=4"/>
+  </entry>
+  </feed>

@@ -210,13 +210,34 @@ Found by running igloo.inc and the WebGL fluid simulation; each rule is general.
 - History and audit lines hide secrets in free text and URL parameters as well as in argument names; tests prove tokens do not
   appear in results, errors, history, audit or config.
 
+### Hub, phase 2
+
+- `search`: when DuckDuckGo's HTML page is blocked, limited or empty, DuckDuckGo's lite page answers as a labelled fallback; the
+  answer has `status` (`ok`, `partial`, `blocked`, `none`) and `problems` (each failed source and why); a time budget bounds the
+  call; sources are still asked in DEA's fixed order.
+- `read`: pages that scripts build are rendered in DEA's own headless browser (`render: auto|never|always`; private addresses
+  refused; failure falls back to the served page with a warning); PDFs are read from their text layer (unpdf, MIT); RSS, Atom,
+  sitemaps and gzipped sitemaps come back as lists; `method` says which; `timeoutMs` bounds the call.
+- New `research` tool and `dea research`: search, read and extract in one call, passages ranked by plain code, with a trail of every
+  step. The default MCP tool list is now 20 tools.
+- Supervised mode, outside the AI: when the AI app cannot show the question, the change waits as an approval; `dea hub approve <id>`
+  (needs a terminal), `dea hub deny`, `dea hub approvals`; one exact call, once, ten minutes. `pnpm demo:approval` walks it with a
+  real stdio MCP client and is a test.
+- `dea hub selftest [--live]`: offline checks of modes, approvals, scope, redaction and connectors; with `--live`, real read-only
+  calls, and one read per token you put in `GITHUB_TOKEN`, `VERCEL_TOKEN` or `GITLAB_TOKEN`; an unset variable is skipped.
+- `dea hub doctor` now says what works right now (browser render, PDF, each search source with `--live`, tokens set by name).
+- `dea hub install --client <app>|generic`: prints the config to paste; `--write` merges it and keeps a backup under a name that is
+  free (an earlier backup is never overwritten); a file that is not plain JSON is left untouched.
+- New connector `gitlab` (read only; public projects need no token). Every Hub call has a time budget (60 s); a change that times
+  out says its outcome is unknown.
+
 ### Act and connect
 
 - Hands (`dea session`, MCP `browse` / `interact` / `submit`): a browser that stays open, with a policy file; submits
   always ask, logins and payments are never automated.
 - `dea investigate --goal`: plans and runs the steps, with checkpoints and resume, and writes a proven report.
 - DEA Hub: connect apps once and choose what each AI app may do with them; history and a kill switch.
-- `dea-mcp`: 17 tools over stdio, or over Streamable HTTP with `dea serve --http` (127.0.0.1, bearer token).
+- `dea-mcp`: 20 tools over stdio, or over Streamable HTTP with `dea serve --http` (127.0.0.1, bearer token).
 - `dea mcp install --client claude|claude-code|cursor|vscode|windsurf|codex`.
 
 ### Build
