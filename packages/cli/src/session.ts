@@ -83,7 +83,11 @@ export function registerSession(program: Command, wrap: (fn: () => Promise<void>
     .option('--headed', 'show the browser window (you can type passwords there yourself)')
     .option('--idle <minutes>', 'close by itself after this long with nothing to do', '30')
     .option('--viewport <WxH>', 'window size', '1440x900')
-    .action((url: string | undefined, flags: { browser: BrowserChoice; mode?: Mode; headed?: boolean; idle: string; viewport: string }) =>
+    .option(
+      '--profile <name>',
+      'use the DEA browser profile you logged in with by hand (dea browser login <name>); every change then asks first in supervised mode',
+    )
+    .action((url: string | undefined, flags: { browser: BrowserChoice; mode?: Mode; headed?: boolean; idle: string; viewport: string; profile?: string }) =>
       wrap(async () => {
         const home = deaHome();
         const running = await SessionClient.find(home);
@@ -101,6 +105,7 @@ export function registerSession(program: Command, wrap: (fn: () => Promise<void>
           headless: !flags.headed,
           idleMinutes: Number(flags.idle),
           policy,
+          ...(flags.profile ? { profile: flags.profile } : {}),
           viewport: m ? { width: Number(m[1]), height: Number(m[2]) } : undefined,
         };
         await mkdir(home, { recursive: true });

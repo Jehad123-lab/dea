@@ -202,3 +202,71 @@ describe.skipIf(!process.env.DEA_E2E)('scroll tape (real browser)', () => {
     240_000,
   );
 });
+
+// A tall page that scrolls natively, with a WebGL scene that depends on how far down it is (nothing from any site).
+const tallScene = `<!doctype html><html><body style="margin:0;background:#111"><div style="height:30000px"><h1 style="color:#fff">Tall</h1></div>
+<canvas id="c" width="160" height="100" style="width:160px;height:100px;position:fixed;left:0;top:0"></canvas>
+<script>
+const gl = document.getElementById('c').getContext('webgl2');
+const sh = (t, s) => { const x = gl.createShader(t); gl.shaderSource(x, s); gl.compileShader(x); return x; };
+const p = gl.createProgram();
+gl.attachShader(p, sh(gl.VERTEX_SHADER, '#version 300 es\\nin vec2 position; void main(){ gl_Position = vec4(position, 0., 1.); }'));
+gl.attachShader(p, sh(gl.FRAGMENT_SHADER, '#version 300 es\\nprecision highp float; uniform float uT; out vec4 o; void main(){ o = vec4(uT, 0.4, 1. - uT, 1.); }'));
+gl.bindAttribLocation(p, 0, 'position'); gl.linkProgram(p); gl.useProgram(p);
+const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, 1,1, -1,-1, 1,1, -1,1]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+const u = gl.getUniformLocation(p, 'uT');
+const tick = () => { gl.uniform1f(u, Math.min(1, scrollY / 29000)); gl.drawArrays(gl.TRIANGLES, 0, 6); requestAnimationFrame(tick); };
+requestAnimationFrame(tick);
+</script></body></html>`;
+
+describe.skipIf(!process.env.DEA_E2E)('scroll tape over a long page (real browser)', () => {
+  it('covers the whole page with a bounded number of stops, and the last stops hold the scene as it is far down', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dea-tall-'));
+    const { browser } = await launchBrowser('chromium', true);
+    const server = await serveDir(dir);
+    try {
+      await writeFile(join(dir, 'page.html'), tallScene);
+      const ctx = await browser.newContext({ viewport: { width: 320, height: 200 } });
+      await ctx.addInitScript({ content: REPLAY_CAPTURE_SCRIPT });
+      const page = await ctx.newPage();
+      await page.goto(`${server.url}/page.html`);
+      await page.waitForTimeout(1000);
+      expect((await recordFrames(page, { frames: 2, timeoutMs: 30_000 })).ok).toBe(true);
+      const st = await recordScrollTape(page, { stops: 3, step: 100, settle: 3, maxStops: 12, timeoutMs: 180_000 });
+      expect(st.ok).toBe(true);
+      if (!st.ok) return;
+      const down = st.rec.stops.slice(0, -1);
+      expect(st.rec.mechanism).toBe('native');
+      // a bounded number of stops (12 at most, and home), reaching the end of the page (29800 px of scroll)
+      expect(st.rec.stops.length).toBeLessThanOrEqual(13);
+      expect(down.length).toBeGreaterThanOrEqual(10);
+      expect(down[down.length - 1].sc).toBeGreaterThan(29800 * 0.95);
+      for (let i = 1; i < down.length; i++) expect(down[i].sc).toBeGreaterThan(down[i - 1].sc);
+      expect(st.rec.stops[st.rec.stops.length - 1].sc).toBe(0);
+      expect(st.rec.docHeight).toBeGreaterThanOrEqual(30000);
+      expect(st.rec.docHeight).toBeLessThan(30100);
+      expect(st.rec.reach).toBeGreaterThan(29800 * 0.95);
+      // the first stops are close together (100 px), the rest are spread
+      expect(down[1].sc - down[0].sc).toBeLessThan(150);
+      expect(down[4].sc - down[3].sc).toBeGreaterThan(1000);
+      const rec = await pullRecording(page);
+      await releaseFrames(page);
+      const raw = rec as NonNullable<typeof rec>;
+      const c = compactCapture(raw.doc, new Uint8Array(raw.bin.buffer, raw.bin.byteOffset, raw.bin.byteLength));
+      const doc = c.doc;
+      doc.scroll = { from: 2, mechanism: st.rec.mechanism, step: st.rec.step, settle: st.rec.settle, stops: st.rec.stops };
+      doc.scrollFrames = doc.frames.slice(2);
+      doc.frames = doc.frames.slice(0, 2);
+      const fit = fitScrollTape(doc, new Uint8Array(c.bin.buffer, c.bin.byteOffset, c.bin.byteLength), { stops: st.rec.stops });
+      expect(tapeMoved(fit)).toBe(true);
+      // the scene far down differs from the top: the recorded uniform changed
+      expect(fit?.stops[fit.stops.length - 1].changed).toBeGreaterThan(0.5);
+    } finally {
+      await browser.close();
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 240_000);
+});

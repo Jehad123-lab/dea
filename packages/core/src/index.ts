@@ -24,6 +24,23 @@ export { brainFromEnv, checkCitations } from './brain/llm.ts';
 export { goalTerms, matchedTerms, pageTerms, planInvestigation, rankLinks } from './brain/planner.ts';
 export type { Brain, Checkpoint, Claim, EvidenceRef, InvestigationPlan, PlanStep, StepKind, StepState } from './brain/types.ts';
 export {
+  type BenchResult,
+  type BenchTimings,
+  bench,
+  benchLabel,
+  benchMd,
+  classifyRenderer,
+  type DoctorReport,
+  doctor,
+  doctorMd,
+  type GpuKind,
+  type GpuProbe,
+  parseAngle,
+  probeGpu,
+  SOFTWARE_LABEL,
+  softwareWarning,
+} from './browser/gpu.ts';
+export {
   type BrowserChoice,
   browserInfo,
   installObservers,
@@ -38,6 +55,21 @@ export {
   withSharedBrowser,
 } from './browser/open.ts';
 export { alignToReference, type PhaseInfo } from './browser/phase.ts';
+export {
+  ensureProfile,
+  findBrowserExecutable,
+  forgetProfile,
+  isEverydayBrowserPath,
+  launchProfile,
+  listProfiles,
+  loginArgs,
+  loginSession,
+  type ProfileInfo,
+  type ProfileMarker,
+  profilePath,
+  profilesHome,
+  validProfileName,
+} from './browser/profile.ts';
 export { type SettleOptions, type SettleResult, settleScene } from './browser/settle.ts';
 export { BotProtectionError, type BotWall, classifyBotWall, type WallEvidence } from './browser/wall.ts';
 export { type CacheOptions, type CacheStats, ContentCache, cacheKey, currentCache, fmtMb, withCache } from './cache.ts';

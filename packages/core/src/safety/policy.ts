@@ -186,6 +186,8 @@ export interface ActionRequest {
   secretField?: boolean;
   /** how many actions this session already took */
   count?: number;
+  /** the session runs on a DEA browser profile the person logged in with by hand: its pages may be signed in */
+  profile?: boolean;
 }
 
 export interface Verdict {
@@ -209,11 +211,20 @@ export function checkAction(policy: Policy, req: ActionRequest): Verdict {
     const d = domainAllowed(policy, req.url);
     if (!d.ok) return { decision: 'deny', reason: d.reason ?? 'domain not allowed' };
   }
-  const base = decide(policy.mode, req.kind);
+  let base = decide(policy.mode, req.kind);
+  // a profile carries the person's logins: a change to a page (typing, a click, a selection) asks first in supervised mode, on every
+  // site, because DEA cannot tell which pages are signed in. Looking, scrolling and opening pages stay free.
+  const profileAsk = Boolean(req.profile) && policy.mode === 'supervised' && req.kind === 'interact';
+  if (profileAsk) base = 'ask';
   if (base === 'deny') return { decision: 'deny', reason: `${policy.mode} mode does not allow ${req.kind} actions (${req.action})` };
   if (base === 'ask') {
     if (req.confirmed) return { decision: 'allow', reason: `${req.action} confirmed by the user` };
-    return { decision: 'ask', reason: `${req.action} sends data, so it needs your explicit OK (${policy.mode} mode)` };
+    return {
+      decision: 'ask',
+      reason: profileAsk
+        ? `${req.action} changes a page in your DEA browser profile, which may be signed in, so it needs your explicit OK (${policy.mode} mode)`
+        : `${req.action} sends data, so it needs your explicit OK (${policy.mode} mode)`,
+    };
   }
   return { decision: 'allow', reason: `${policy.mode} mode allows ${req.kind}` };
 }

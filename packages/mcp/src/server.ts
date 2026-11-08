@@ -577,7 +577,9 @@ export function createServer(opts: ServerOptions = {}): McpServer {
     if (state.hands) return state.hands;
     const envMode = process.env.DEA_MODE as Mode | undefined;
     const policy = loadPolicy(deaHome(), { mode: envMode && MODES.includes(envMode) ? envMode : undefined });
-    state.hands = await HandsSession.start({ policy, browser: browserChoice, headless: process.env.DEA_HEADED !== '1' });
+    // a DEA browser profile is chosen by the person in the MCP client config (DEA_PROFILE), never by a tool call
+    const profile = process.env.DEA_PROFILE?.trim() || undefined;
+    state.hands = await HandsSession.start({ policy, browser: browserChoice, headless: process.env.DEA_HEADED !== '1', profile });
     return state.hands;
   };
   const answer = async (r: ActionResult) => {

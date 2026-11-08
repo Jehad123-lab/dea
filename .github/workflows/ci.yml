@@ -88,3 +88,21 @@ jobs:
           $env:DEA_HUB_HOME = "$env:RUNNER_TEMP\dea-hub"
           pnpm -s dea hub list
           pnpm -s dea mcp install --client vscode --project --hub --dry-run
+      - name: "dea doctor and dea bench in Microsoft Edge - a runner has no graphics card, software WebGL is the expected answer"
+        shell: pwsh
+        run: |
+          pnpm -s dea doctor --browser msedge --json | Out-File -Encoding utf8 doctor.json
+          Get-Content doctor.json
+          pnpm -s dea bench --browser msedge --out bench-out
+          Get-Content bench-out/dea-bench.md
+          $b = Get-Content bench-out/dea-bench.json -Raw | ConvertFrom-Json
+          if ($b.result.gpu.kind -eq 'hardware' -and $null -eq $b.meta.timings) { throw 'a hardware GPU must carry timings' }
+          if ($b.result.gpu.kind -ne 'hardware' -and $null -ne $b.meta.timings) { throw 'software or no WebGL must not carry speed numbers' }
+          if ($b.result.gpu.kind -eq 'software' -and $b.meta.label -ne 'software render, not a speed measure') { throw 'software must be labelled' }
+          if ($env:COMPUTERNAME -and ((Get-Content bench-out/dea-bench.json -Raw) -like "*$env:COMPUTERNAME*")) { throw 'the result names the machine' }
+      - name: "DEA browser profile on Windows - a folder of its own, never the everyday profile"
+        shell: pwsh
+        run: |
+          $env:DEA_PROFILES_HOME = "$env:RUNNER_TEMP\dea-profiles"
+          pnpm -s dea browser profiles
+          pnpm -s test:e2e packages/core/test/round10.e2e.test.ts

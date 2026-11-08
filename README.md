@@ -183,6 +183,29 @@ Plan (rules): "use" → what it is built with; "fonts" → how it looks and move
   local Ollama at `http://localhost:11434/v1`). It may only choose among DEA's own steps, and any sentence of its
   answer that cites no DEA evidence is removed. Off by default.
 
+## Doctor and bench (is there a graphics card?)
+
+```powershell
+pnpm dea doctor                 # Node, the browser, WebGL: a graphics card or software on the CPU, free disk space
+pnpm dea doctor --headed        # the same with a browser window (some PCs fall back to software when headless)
+pnpm dea bench --headed         # a small built-in scene on your card; writes dea-bench.json and dea-bench.md
+pnpm dea bench https://example.org/ --headed   # also the frame rate of one public page, idle and while scrolled
+```
+
+`dea doctor` reads the WebGL renderer string the browser gives a page and the browser's own GPU report, and says
+**hardware** or **software** (SwiftShader, llvmpipe, Windows' basic driver). In software it prints a plain warning: scenes draw at a few frames
+a second, time-driven scenes land in another phase on each load, sites that check for a GPU may show a simpler version, and
+frame rates from this machine are not a speed measure of a site or a kit. `dea bench` prints and saves speed numbers (a
+full-window shader, many small draws, a 2048 × 2048 texture upload, the animation-frame rate, optionally one page's frame rate)
+**only when a hardware GPU is in use**; in software it saves the label "software render, not a speed measure" and no numbers.
+
+The result file holds the GPU name and backend, browser name and version, OS name, release and architecture, CPU model and count,
+memory size, Node's version, DEA's version, the time, and the numbers. It holds no host name, user name, folder path, address,
+login or environment variable (a test checks the host name, user name and home folder). Send `dea-bench.json` or `dea-bench.md` as it is.
+
+On Windows 11 with Edge: `pnpm dea bench --headed -b msedge` in PowerShell. If it says software, open `edge://gpu`, look for
+"Hardware accelerated" next to WebGL, update the graphics driver, and check Settings → System → "Use graphics acceleration when available".
+
 ## Hands (`dea session`)
 
 One browser kept open between commands. Elements are addressed by the refs in the latest snapshot (`e12`).
@@ -199,6 +222,39 @@ pnpm dea session stop                # writes the session report with a screensh
 `.dea/policy.json` (see `policy.example.json`) sets the mode — `restricted` (look and scroll), `supervised` (default:
 acts, asks before submits), `delegated` (submits without asking) — plus allowed/blocked domains and actions. Logins and
 payments are never automated. Every action is logged to `actions.jsonl`.
+
+### Your own logins (`dea browser`)
+
+For a site that needs you to be signed in, DEA has a browser profile of its own, in `~/.dea/profiles/<name>`. You sign in by hand,
+once, and DEA reads that site afterwards.
+
+```powershell
+pnpm dea browser login work https://example.org/login   # a visible Edge/Chrome window opens; sign in yourself; close it when done
+pnpm dea session start --profile work https://example.org/account
+pnpm dea browser profiles                               # name, size, last login, last use
+pnpm dea browser forget work --yes                      # deletes the folder and every login in it
+```
+
+What it is and is not:
+
+- **DEA's own folder only.** The profile is a folder DEA makes (a marker file inside). DEA never opens a folder it did not make and
+  refuses anything that looks like your everyday Chrome, Edge, Brave, Vivaldi, Opera or Firefox profile. There is no mode that uses your
+  everyday browser, and DEA never attaches to a browser that is already running: the login window is an ordinary browser process started with
+  this one folder and **no remote-debugging port**, so nothing, DEA included, can control or read it.
+- **DEA never sees your password.** You type it into the site's own page in that window. DEA does not read the window, has no password
+  field of its own, and does not type secrets (`dea session` still refuses password, one-time-code and card fields, and never submits a login or
+  payment form, in any mode).
+- **What stays on disk.** After you sign in, the browser keeps cookies and local storage in the folder, protected by your operating system account
+  (not by a DEA password). Anyone who can read your user folder as you, or any program running as you, can use those logins. Treat the folder like
+  a signed-in browser: use a separate account on the site where you can, sign out inside the window when you are done, and run
+  `dea browser forget` when you no longer need it. A session cookie works like a password until it expires or you sign out.
+- **Work with it is read-first.** `--profile` applies to `dea session` (and to the MCP hands tools when `DEA_PROFILE` is set in the MCP client
+  config; a tool call cannot choose a profile). Looking, scrolling and opening pages are free. In **supervised** mode every change (a click, typing, a
+  selection) asks first, on every site, because DEA cannot tell which pages are signed in; submits ask in every mode that allows them;
+  restricted mode refuses all changes. The session log records what happened.
+- **One user at a time.** The browser refuses to open a profile that is already open: close the login window before starting a session.
+- A site can still notice an automated browser, sign you out, or ask for another check; DEA does not try to get around that.
+
 
 ## DEA Hub
 
@@ -542,6 +598,11 @@ machine with a GPU). `--library <name> --tag hero` saves the kit; `--batch urls.
 
 ### The whole page (`dea extract`, not `--quick`)
 
+*Scroll-driven WebGL.* The recorded WebGL scenes follow the scroll too: after the first screens (stops close together) the scroll tape
+spreads its remaining stops over the rest of the page (a native-scrolling page; a wheel-only page keeps the first stops), re-planning after
+every stop from where the page really is, within a stop count, a time, the run budget and a size budget (`--tape-mb`). A stop is recorded
+until the page's scroll has nearly settled; identical uploads are stored once. The kit then plays the stop nearest to the live scroll.
+
 The kit follows the page below the first screen. After the first screen is chosen, extract loads the page fresh, waits until
 the scene is stable (see below), scrolls it one stop at a time (every 0.8 screens; a page that only answers the wheel is
 driven by the wheel and its px-per-step is measured), waits for each stop to settle (lazy content has loaded, lazy images
@@ -862,7 +923,10 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
   the width it was read (no reflow at other widths), and click, hover, menu and form states, other routes and canvas drawing
   that starts empty (a whiteboard) are not rebuilt. A canvas that is not the scene is a still picture of one moment. A virtual
   (wheel-only) scroll is read by the wheel and kept as native scrolling in the kit; it is tested on a purpose-written page only.
-  Scroll-driven 3D is followed through the scroll tape (stops, not a continuous recording).
+  Scroll-driven 3D is followed through the scroll tape (stops, not a continuous recording), which reaches as far down a long page as
+  its budgets allow (stop count, time, the run budget, and what it may add to the recording: `--tape-mb`, 64 MB by default), not always
+  the end: where it stopped and why is in the page map and the report (`ended`). A WebGL page whose sections bring their own big
+  textures costs several MB per stop, so a long one needs a larger `--tape-mb` (and a larger `--max-capture-mb`) or is covered in part.
 - "Scene stable" and "in phase" are judged on a 64x40 grey thumbnail: a change smaller than that is not seen. A time-driven scene
   (igloo.inc) can be started in the same phase as the reference, but its animation over scroll is still not reproduced, and the
   noise floor from `dea stability` is measured over a handful of runs, not a population.

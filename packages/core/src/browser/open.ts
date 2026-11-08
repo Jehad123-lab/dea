@@ -260,6 +260,49 @@ export const LOADER_VISIBLE = `(() => {
   return false;
 })()`;
 
+/**
+ * How far a loading screen says it is, 0 to 100, or null when it shows no number (runs in the page): an ARIA progress value, or the
+ * largest "42%" / "042" counter shown inside an element named like a loader. Read twice, a rising number says the loader is working.
+ */
+export const LOADER_PROGRESS = `(() => {
+  let best = null;
+  const take = (v) => { if (Number.isFinite(v) && v >= 0 && v <= 100 && (best === null || v > best)) best = v; };
+  for (const el of document.querySelectorAll('[role=progressbar]')) { const v = el.getAttribute('aria-valuenow'); if (v != null) take(+v / ((+el.getAttribute('aria-valuemax') || 100) / 100)); }
+  for (const el of document.querySelectorAll('[class*=loader i],[id*=loader i],[class*=preload i],[id*=preload i],[class*=loading i],[class*=progress i],[class*=counter i],[class*=percent i]')) {
+    const cs = getComputedStyle(el); if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) continue;
+    const t = (el.textContent || '').trim(); if (t.length > 12) continue;
+    const m = /^(\\d{1,3})\\s?%?$/.exec(t); if (m) take(+m[1]);
+  }
+  return best;
+})()`;
+
+/**
+ * Wait for a loading screen to finish. Software WebGL loads slowly, so a fixed wait either gives up on a loader that is still
+ * moving or waits on one that is stuck: this waits while the loader shows progress (a rising counter, or a picture that keeps
+ * changing) and gives up after `stuckMs` without any, or at `maxMs`. Returns how it ended, so a report can say it.
+ */
+export async function waitForLoader(
+  page: Page,
+  o: { maxMs?: number; stuckMs?: number; pollMs?: number; changed?: () => Promise<number> } = {},
+): Promise<{ gone: boolean; waitedMs: number; progress: number | null; reason: 'gone' | 'stuck' | 'cap' }> {
+  const maxMs = o.maxMs ?? 420_000;
+  const stuckMs = o.stuckMs ?? 60_000;
+  const poll = o.pollMs ?? 2_500;
+  const t0 = Date.now();
+  let last: number | null = null;
+  let moved = Date.now();
+  while (Date.now() - t0 < maxMs) {
+    if (!(await page.evaluate(LOADER_VISIBLE).catch(() => false))) return { gone: true, waitedMs: Date.now() - t0, progress: last, reason: 'gone' };
+    const p = (await page.evaluate(LOADER_PROGRESS).catch(() => null)) as number | null;
+    if (p !== null && (last === null || p > last)) moved = Date.now();
+    if (p !== null) last = p;
+    if (o.changed && (await o.changed().catch(() => 0)) > 0) moved = Date.now();
+    if (Date.now() - moved > stuckMs) return { gone: false, waitedMs: Date.now() - t0, progress: last, reason: 'stuck' };
+    await page.waitForTimeout(poll);
+  }
+  return { gone: false, waitedMs: Date.now() - t0, progress: last, reason: 'cap' };
+}
+
 export async function settle(page: Page, maxMs: number): Promise<void> {
   const t0 = Date.now();
   const read = () =>

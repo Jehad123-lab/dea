@@ -193,6 +193,31 @@ Found by running igloo.inc and the WebGL fluid simulation; each rule is general.
 - When no first-screen reading beats the plain heading, the whole-page read can stand on its own if its first screen is no worse.
 - A screenshot that fails once under heavy software WebGL is retried, then taken from the page's own surface.
 
+### Round 10: the whole page for scroll-driven WebGL, a GPU check, DEA's own logins
+
+- **The scroll tape covers the whole page.** It used to record eight stops down the first 3,000 px of a long page, so a scene that
+  changes further down was never recorded. Now the first stops are close together (the first screens), and the rest of a native-scrolling
+  page is spread over the stops that the stop count (40), the time (15 minutes), the run budget and the size budget (`--tape-mb`, default
+  64 MB added to the recording) still allow, re-planned after every stop from where the page actually is; a stop is recorded until the scroll
+  signal holds still, a long wheel input is given as a stream of notches (a site may limit what one event moves), and the page's wheel ratio
+  is measured from the first stops. When a budget ends the tape before the end of the page, the recording says where and why (`ended`, in
+  the page map and the report) instead of looking complete.
+- **Smaller recordings.** The same bytes uploaded twice (a buffer re-sent every frame, a texture that did not change) are stored once, in the
+  recorder and again when the capture is compacted; the capture cache key changed (a recording made by the older tape is not served).
+- **`dea doctor`**: Node, the browser, WebGL (the renderer string and the browser's own GPU report), free disk space; says *hardware* or
+  *software* (SwiftShader, llvmpipe, Windows' basic driver) and, for software, a plain warning with what to try.
+- **`dea bench [url]`**: a small built-in scene (a full-window shader, many small draws, a texture upload, the animation-frame rate), and with a
+  url the frame rate of that public page idle and while scrolled; writes `dea-bench.json` and `dea-bench.md`. Speed numbers only for a hardware
+  GPU; software is labelled "software render, not a speed measure" and carries none. The file holds no host name, user name, path or login (tested).
+  Windows runs both in CI in Edge.
+- **`dea browser login|profiles|forget`** and `--profile <name>` on `dea session start` (`DEA_PROFILE` for the MCP hands tools): a browser
+  profile that belongs to DEA, in `~/.dea/profiles`, which you sign in to by hand in a plain visible window with no remote-debugging port. DEA
+  never opens a folder it did not make, refuses everyday browser profile folders, never attaches to a running browser, and never sees or types a
+  password. In supervised mode every change on a session that uses a profile asks first. The risk is written in the README.
+- **Loading screens**: the reference watch keeps waiting while the loader shows progress (a rising counter or a picture that keeps changing),
+  up to seven minutes, and says so; a stuck loader is still reported, not copied.
+- Design only, not built: a read-only mail connector for the Hub (`docs/hub.md`), because it cannot be tested honestly without recorded answers.
+
 ### Hub: free search and built-in connectors
 
 - `dea search` and `dea read` (MCP tools `search`, `read`): free keyless sources (DuckDuckGo HTML, MDN, npm, GitHub repository

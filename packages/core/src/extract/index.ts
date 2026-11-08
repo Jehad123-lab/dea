@@ -138,6 +138,8 @@ export interface ExtractOptions extends InspectOptions {
   noReplay?: boolean;
   /** the largest recording (after compaction) DEA keeps, in MB (default 64); a bigger one is dropped with a note */
   maxCaptureMb?: number;
+  /** what the scroll tape may add to the recording, in MB (default 64): its stops are spread over the page to reach the end within it */
+  tapeMb?: number;
 }
 
 /** What the recording and replay of the site's WebGL frames gave. */
@@ -234,7 +236,8 @@ async function readJson<T>(p: string): Promise<T | null> {
 const STAGE_CACHE_VERSION = 1;
 // bumped when the probe or the capture's result format changes; the recorder's own source is hashed into the key too, so a change
 // to it never serves a recording made by the old one
-const CAPTURE_CACHE_VERSION = 3;
+// 4: the scroll tape covers the whole page (recordScrollTape), so a recording made by the old tape is not served
+const CAPTURE_CACHE_VERSION = 4;
 /** the recorder and the first-screen reader: a change to either takes the capture again instead of reusing an older reading */
 const CAPTURE_CODE = createHash('sha1').update(REPLAY_CAPTURE_SCRIPT).update(LAYOUT_READ(null)).digest('hex').slice(0, 12);
 
@@ -277,6 +280,7 @@ async function referenceFor(
     frames,
     interact,
     opts.browser ?? 'auto',
+    opts.tapeMb ?? null,
   );
   const d = cache ? await cache.get('capture', key) : null;
   if (cache && d) {
@@ -316,7 +320,7 @@ async function referenceFor(
       ? `taking the reference screenshot: watching until the page settles (up to ${Math.round(ms / 1000)} s), the frame with the most detail`
       : 'taking the reference screenshot (after the intro, the frame with the most detail)',
   );
-  const r = await referenceShot(browser, url, vp, ms, opts.section ?? null, record, smart, frames, interact);
+  const r = await referenceShot(browser, url, vp, ms, opts.section ?? null, record, smart, frames, interact, opts.tapeMb);
   // a capture whose recording failed is not kept: the next run tries again
   if (cache && r.png && (!record || r.recording)) {
     const files: Record<string, string | Uint8Array> = {
@@ -770,7 +774,8 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
         say('recorded the WebGL frames behind that screenshot; building the render graph and the replay');
         const doneBuild = mark('build the replay, editable rebuild and scene');
         const c = compactCapture(recording.doc, new Uint8Array(recording.bin.buffer, recording.bin.byteOffset, recording.bin.byteLength));
-        const capMb = opts.maxCaptureMb ?? 64;
+        // a recording with a scroll tape carries the scenes down the whole page (the tape's own budget is 64 MB), so its default cap is larger
+        const capMb = opts.maxCaptureMb ?? (recording.doc.scroll ? 128 : 64);
         if (c.bin.length > capMb * 1e6) {
           replayError = `the recording is ${(c.bin.length / 1e6).toFixed(1)} MB after compaction, over the ${capMb} MB cap (--max-capture-mb ${Math.ceil(c.bin.length / 1e6)} keeps it)`;
           say(`recording dropped: ${replayError}`);

@@ -86,6 +86,10 @@ export interface CaptureDoc {
     mechanism: 'native' | 'virtual';
     step: number;
     settle: number;
+    /** the document height, the furthest scroll the tape reached, and why it stopped short of the end (see recordScrollTape) */
+    docHeight?: number;
+    reach?: number;
+    ended?: string;
     stops: Array<{ sc: number; f0: number; f1: number; dom?: unknown }>;
     fit?: import('./scrolltape.ts').ScrollTapeFit;
   };
@@ -839,8 +843,18 @@ export function compactCapture(doc: CaptureDoc, bin: Uint8Array, opts: { drop?: 
     return o;
   };
   const slice = (o: number, l: number) => bin.subarray(o, o + l);
+  // the same bytes referenced twice (the recorder stores a re-upload once) are written once
+  const written = new Map<string, number>();
+  const putRef = (o: number, l: number): number => {
+    const k = `${o}:${l}`;
+    const w = written.get(k);
+    if (w !== undefined) return w;
+    const n = put(slice(o, l));
+    written.set(k, n);
+    return n;
+  };
   let dropped = 0;
-  for (const B of out.snap.buffers) B.o = put(slice(B.o, B.l));
+  for (const B of out.snap.buffers) B.o = putRef(B.o, B.l);
   for (const T of out.snap.textures) {
     for (const L of T.levels ?? []) {
       const lv = L as typeof L & { upFmt?: number; upType?: number; alloc?: number[] };
@@ -860,7 +874,7 @@ export function compactCapture(doc: CaptureDoc, bin: Uint8Array, opts: { drop?: 
         lv.o = put(new Uint8Array(h.buffer));
         lv.l = h.byteLength;
         lv.upType = 0x140b;
-      } else lv.o = put(raw);
+      } else lv.o = putRef(lv.o, lv.l);
     }
   }
   // every other binary reference (command arguments, compressed and image uploads) keeps its bytes
@@ -872,7 +886,7 @@ export function compactCapture(doc: CaptureDoc, bin: Uint8Array, opts: { drop?: 
     }
     const o = x as Record<string, unknown>;
     if ((o.$ === 'bin' || o.$ === 'img') && typeof o.o === 'number') {
-      o.o = put(slice(o.o, Number(o.l)));
+      o.o = putRef(o.o, Number(o.l));
       return;
     }
     for (const v of Object.values(o)) walk(v);

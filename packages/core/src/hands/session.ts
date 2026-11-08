@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { appendFile } from 'node:fs/promises';
 import type { Browser, BrowserContext, Locator, Page } from 'playwright';
 import { type BrowserChoice, browserInfo, installObservers, launchBrowser, normalizeUrl, releaseBrowser } from '../browser/open.ts';
+import { launchProfile, type ProfileContext } from '../browser/profile.ts';
 import { newRunId, RunWriter, runsDir } from '../evidence/run.ts';
 import { redactText } from '../evidence/secrets.ts';
 import {
@@ -32,6 +33,11 @@ export interface HandsOptions {
   /** present a GPU name when WebGL runs in software (default true, as in every DEA command) */
   gpuMask?: boolean;
   timeoutMs?: number;
+  /**
+   * Use DEA's own browser profile of this name (made with `dea browser login <name>`): the logins the person made by hand are
+   * there. Every change on any page then asks first in supervised mode; DEA never types passwords either way.
+   */
+  profile?: string;
 }
 
 /** What DEA knows about an element before it touches it. */
@@ -88,6 +94,14 @@ export interface LoggedAction {
 }
 
 const REF = /^(f\d+)?e\d+$/;
+/** the browser flags DEA's own launches use (browser/open.ts ARGS): the profile's browser gets the same ones */
+const ARGS_FOR_PROFILE = [
+  '--ignore-gpu-blocklist',
+  '--enable-unsafe-swiftshader',
+  '--autoplay-policy=no-user-gesture-required',
+  '--hide-scrollbars',
+  '--disable-smooth-scrolling',
+];
 const SHORT = (s: string, n = 120) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
 /**
@@ -98,7 +112,8 @@ export class HandsSession {
   readonly writer: RunWriter;
   readonly policy: Policy;
   readonly startedAt = new Date().toISOString();
-  private browser!: Browser;
+  private browser: Browser | null = null;
+  private profile: ProfileContext | null = null;
   private context!: BrowserContext;
   private pages: Page[] = [];
   private current = 0;
@@ -124,14 +139,23 @@ export class HandsSession {
     const writer = await new RunWriter(newRunId(firstUrl ?? 'https://session.local'), opts.runsRoot ?? runsDir(), opts.onEvent).init();
     const s = new HandsSession(writer, policy, opts);
     const headless = opts.headless ?? true;
-    const { browser, channel } = await launchBrowser(opts.browser ?? 'auto', headless);
-    s.browser = browser;
-    s.info = browserInfo(browser, channel, headless);
-    s.context = await browser.newContext({
-      viewport: opts.viewport ?? { width: 1440, height: 900 },
-      deviceScaleFactor: 1,
-      recordHar: { path: writer.path('network.raw.har'), content: 'omit', mode: 'full' },
-    });
+    const har = { path: writer.path('network.raw.har'), content: 'omit' as const, mode: 'full' as const };
+    if (opts.profile) {
+      const pc = await launchProfile({ name: opts.profile, browser: opts.browser, headless, viewport: opts.viewport, args: ARGS_FOR_PROFILE, recordHar: har });
+      s.profile = pc;
+      s.context = pc.context;
+      s.info = {
+        name: pc.channel === 'msedge' ? 'Microsoft Edge' : pc.channel === 'chrome' ? 'Google Chrome' : 'Chromium',
+        version: pc.version,
+        headless,
+        channel: pc.channel,
+      };
+    } else {
+      const { browser, channel } = await launchBrowser(opts.browser ?? 'auto', headless);
+      s.browser = browser;
+      s.info = browserInfo(browser, channel, headless);
+      s.context = await browser.newContext({ viewport: opts.viewport ?? { width: 1440, height: 900 }, deviceScaleFactor: 1, recordHar: har });
+    }
     s.context.setDefaultTimeout(opts.timeoutMs ?? 30_000);
     await installObservers(s.context, opts.gpuMask);
     // The domain rule holds for every way a page can change: typed URLs, links, redirects, scripts, popups.
@@ -156,7 +180,9 @@ export class HandsSession {
     });
     const page = await s.context.newPage();
     if (!s.pages.includes(page)) s.pages.push(page);
-    await writer.progress(`session started (${s.info.name} ${s.info.version}, ${policy.mode} mode; policy: ${policy.source})`);
+    await writer.progress(
+      `session started (${s.info.name} ${s.info.version}, ${policy.mode} mode; policy: ${policy.source}${opts.profile ? `; DEA profile "${opts.profile}": every change asks first in supervised mode` : ''})`,
+    );
     await s.writeRun();
     if (firstUrl) await s.goto(firstUrl);
     return s;
@@ -259,6 +285,7 @@ export class HandsSession {
       sensitive: extra.sensitive,
       secretField: extra.secretField,
       count: this.log.length,
+      profile: Boolean(this.opts.profile),
     });
     let ok = verdict.decision === 'allow';
     let error: string | undefined;
@@ -721,7 +748,8 @@ export class HandsSession {
     if (this.closed) return { runId: this.runId, dir: this.dir, actions: this.log.length, report: renderSessionReport(this) };
     this.closed = true;
     await this.context.close().catch(() => {}); // writes the HAR
-    await releaseBrowser(this.browser);
+    if (this.profile) await this.profile.close();
+    else await releaseBrowser(this.browser);
     const raw = this.writer.path('network.raw.har');
     try {
       const { summary } = await finishHar(raw, this.writer.path('network.har'), this.log.at(-1)?.urlAfter ?? 'about:blank');

@@ -76,3 +76,41 @@ there) is refused without echoing it. DEA never asks for a password or token in 
 
 Nothing posts, emails, publishes or buys on its own. A change happens only when a call you or an AI app you allowed makes it,
 inside the scope you declared, in a mode that allows it, with a record.
+
+## Mail connector (design; not built)
+
+Status: a design only. Nothing in this section exists in the code. The reason it is not built: a Gmail connector would have to be tested
+against real answers from Gmail, and DEA has no recorded Gmail answers (a real account's mail must not be copied into a repository, and
+answers written by hand from the documentation would test the author's reading of the documentation, not Gmail). When someone has
+recorded real answers from a throwaway account, the connector below can be built and tested against those files, offline.
+
+What it would be, in the Hub's own terms:
+
+- **A built-in connector `gmail`** (`dea hub add-connector gmail --client-id-env DEA_GMAIL_CLIENT_ID --client-secret-env DEA_GMAIL_CLIENT_SECRET`).
+  The person makes their own OAuth client in their own Google Cloud project (Desktop app type) and puts its id and secret in environment
+  variables whose names they give. DEA ships no Google client of its own, so DEA's author never holds anyone's mail access and Google's
+  verification process for restricted scopes is the person's own, on their own account.
+- **Read-only by default.** The only scope requested at sign-in is `https://www.googleapis.com/auth/gmail.readonly`. The tools are
+  `mail_search` (Gmail search syntax, returns ids, senders, subjects, dates and snippets), `mail_read` (one message: headers and the
+  plain-text body; HTML is reduced to text; attachments are listed by name, type and size and are not fetched unless asked, one at a time,
+  to a folder inside the connector's scope), `mail_labels`.
+- **Sending and deleting need a second sign-in with a wider scope, and an approval every time.** `mail_send` and `mail_trash` exist only
+  when the person re-runs the sign-in with `--allow send` or `--allow delete`, which asks Google for `gmail.send` or `gmail.modify`. Even then
+  they are changing calls: `restricted` refuses them, `supervised` and `delegated` both ask for the exact call (the recipients, subject and body
+  shown in full) and run it only after an out-of-band approval (`dea hub approve <id>`), once. `delegated` does not remove the ask for mail. There
+  is no tool that empties the trash, changes filters or forwarding, or creates a draft silently.
+- **Scope in the connector's declaration**, as for the other connectors: an allowed-senders or allowed-labels list and a date window
+  (for example `--scope label=INBOX --scope after=2026-01-01`); a call outside it is refused in every mode, before any request is made.
+- **Tokens.** The refresh token is stored the way the Hub stores other secrets (`~/.dea/secrets.enc`); access tokens are never written
+  anywhere; both are removed from every log, result, audit line and error message by the Hub's redaction, which has a test for each
+  new token shape. `dea hub remove gmail` deletes the stored token and tells the person how to revoke the grant at Google
+  (myaccount.google.com/permissions), because a local delete cannot revoke it.
+- **Mail is untrusted text.** A message body can say anything, including "ignore your instructions and forward this to...". Every body is
+  returned with the Hub's data-not-instructions note, nothing in a body is ever followed by DEA itself, and a change that follows a read is
+  still asked about in full. DEA does not auto-open links in mail.
+- **Audit.** Reads are logged as reads (ids, not bodies); sends and deletes write `intent` and `done` with the recipient addresses and the
+  message id, never the body.
+- **Test plan.** (1) Recorded answers from a throwaway account for the list, get and error shapes (expired token, 403 insufficient scope, 429), stored
+  as fixtures with addresses replaced. (2) The scope refusal, the approval flow and the redaction run offline against those fixtures. (3) `dea hub
+  selftest --live` makes one `users.getProfile` call when the variables are set, as for the other connectors. Not claimed: that the connector works
+  with every kind of Google account (Workspace accounts can block third-party OAuth clients), that its HTML-to-text reduction is complete.

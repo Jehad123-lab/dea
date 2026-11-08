@@ -124,12 +124,25 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
 
   // ---- serialising arguments for the recording -----------------------------------------------------------------------
   const bin = { parts: [], size: 0 };
+  // the same bytes uploaded again (a buffer re-sent every frame, a texture that did not change) are stored once: the second reference points at the first
+  const binIndex = new Map();
+  const sameBytes = (a, b) => { if (a.byteLength !== b.byteLength) return false; for (let i = 0; i < a.byteLength; i++) if (a[i] !== b[i]) return false; return true; };
   const addBin = (u8) => {
+    const n = u8.byteLength;
+    let key = null;
+    if (n >= 64) {
+      let h = 2166136261; const st = n > 65536 ? 7 : 1;
+      for (let i = 0; i < n; i += st) h = Math.imul(h ^ u8[i], 16777619);
+      key = n + ':' + (h >>> 0);
+      const hit = binIndex.get(key);
+      if (hit) for (const c of hit) if (sameBytes(c.u8, u8)) return c.o;
+    }
     const pad = (8 - (bin.size % 8)) % 8;
     if (pad) { bin.parts.push(new Uint8Array(pad)); bin.size += pad; }
     const o = bin.size;
     bin.parts.push(u8);
-    bin.size += u8.byteLength;
+    bin.size += n;
+    if (key) { const l = binIndex.get(key); if (l) l.push({ o, u8 }); else binIndex.set(key, [{ o, u8 }]); }
     return o;
   };
   const copyView = (v) => new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength));
@@ -663,6 +676,7 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
       return cb.apply(this, arguments);
     });
   };
+  CAP.binSize = () => bin.size;
   CAP.nframes = () => (CAP.target && CAP.target.rec ? CAP.target.rec.frames.length : 0);
   CAP.cont = (n, hold) => { if (CAP.state !== 'done') return false; CAP.opts.hold = hold !== false; CAP.contPending = n; CAP.hold = false; const h = held.splice(0); for (const cb of h) raf0.call(window, cb); return true; };
   CAP.release = () => { CAP.hold = false; const h = held.splice(0); for (const cb of h) raf0.call(window, cb); };
@@ -910,6 +924,11 @@ export interface ScrollTapeRecording {
   mechanism: 'native' | 'virtual';
   step: number;
   settle: number;
+  /** the document height and the furthest scroll the tape reached (px; 0 when the page does not scroll natively) */
+  docHeight?: number;
+  reach?: number;
+  /** why the tape stopped short of the end of the page, when it did */
+  ended?: string;
 }
 
 /** What a section and the canvases in view are, read at a scroll stop (runs in the page). */
@@ -931,63 +950,204 @@ export const STOP_DOM = `(() => {
 })()`;
 
 /**
- * Continue the recording while the page is scrolled, a stop at a time: a wheel step, then `settle` frames. The wheel is the
- * one input every scroll mechanism answers (a native scroll, a virtual scroll that moves one container by a transform, a
- * fixed stage that moves its scene by the wheel). The last stop returns to the top, so the buffers the site uploads only when
- * something changes hold the state of the top again. Frames carry the scroll signal (`sc`); each stop's DOM is read beside them.
+ * How far the next scroll stop goes, in wheel px. After the first stops (close together: the first screens are where intros and
+ * hero scenes play) the rest of a long page is covered by stops that spread what is left evenly over the stops the budgets still
+ * allow, so a bounded number of stops reaches the end of the page instead of only its first screens. Called again after every stop
+ * with where the page actually is, so a stop that moved less than planned (or a budget that shrank) is absorbed by the next ones.
+ * Pure. `left` is the page px still to cover, `stopsLeft` the stops the stop count, the time and the size allow (0 = none),
+ * `minStep` the shortest stop (page px), `ratio` wheel px per page px (1 for a page that scrolls 1:1, 2 for one that moves half
+ * a page px per wheel px). Returns null when there is nothing left to cover or no stop left to do it with.
  */
-export async function recordScrollTape(
-  page: Page,
-  opts: { stops?: number; step?: number; settle?: number; timeoutMs?: number } = {},
-): Promise<{ ok: true; rec: ScrollTapeRecording } | { ok: false; error: string }> {
-  const K = opts.stops ?? 8;
+export function nextScrollStep(o: { left: number; stopsLeft: number; minStep: number; ratio: number }): { wheel: number; page: number } | null {
+  const ratio = o.ratio > 0 ? o.ratio : 1;
+  if (o.stopsLeft <= 0 || o.left <= o.minStep / 2) return null;
+  const page = Math.min(o.left, Math.max(o.minStep, o.left / o.stopsLeft));
+  return { wheel: Math.max(1, Math.round(page * ratio)), page };
+}
+
+export interface ScrollTapeOpts {
+  /** stops spaced by `step` at the top (default 8) */
+  stops?: number;
+  /** the most stops in all (default 40): the rest of a long page is spread over what is left */
+  maxStops?: number;
+  /** the wheel px of a head stop (default 0.45 of the window) */
+  step?: number;
+  /** frames recorded at each stop before it is checked for having settled (default 2; one more is recorded to check) */
+  settle?: number;
+  /** the whole tape's time (default 15 minutes: a stop costs seconds on a GPU and up to a minute in software WebGL) */
+  timeoutMs?: number;
+  /** called after each stop with the stop, its number and the time it took (ms) */
+  onStop?: (s: ScrollStop, i: number, ms: number) => void;
+  /** what the tape may add to the recording's binary (default 64 MB): the stops are spread to reach the end of the page within it, and it ends there, saying so */
+  maxBytes?: number;
+  /** true when the run's own budget is spent: the tape ends there */
+  shouldStop?: () => boolean;
+}
+
+/**
+ * Continue the recording while the page is scrolled, a stop at a time: a wheel step, then frames until the page has stopped
+ * moving. The wheel is the one input every scroll mechanism answers (a native scroll, a virtual scroll that moves one container
+ * by a transform, a fixed stage that moves its scene by the wheel). The first stops are close together; the rest of a long
+ * page is covered by evenly spaced stops (nextScrollStep), bounded by a stop count, the time and the recording's size, and
+ * what ended it is stated in `ended`. The last stop returns to the top, so the buffers the site uploads only when something
+ * changes hold the state of the top again. Frames carry the scroll signal (`sc`); each stop's DOM is read beside them.
+ */
+export async function recordScrollTape(page: Page, opts: ScrollTapeOpts = {}): Promise<{ ok: true; rec: ScrollTapeRecording } | { ok: false; error: string }> {
   const vp = page.viewportSize() ?? { width: 1440, height: 900 };
+  // a long page gets a shorter dense head (the first screens), so the stops that are left reach the end of it
+  const height0 = ((await page.evaluate('document.documentElement.scrollHeight').catch(() => 0)) as number) || 0;
+  const headN = opts.stops ?? (height0 > vp.height * 8 ? 5 : 8);
+  const maxN = Math.max(headN, opts.maxStops ?? 40);
   const step = opts.step ?? Math.round(vp.height * 0.45);
-  const settle = opts.settle ?? 4;
-  const limit = opts.timeoutMs ?? 300_000;
-  type Cap = { cont: (n: number, hold: boolean) => boolean; nframes: () => number; state: string; wheel: number };
-  const nf = () => page.evaluate(() => (window as unknown as { __DEA_CAP__: Cap }).__DEA_CAP__.nframes()).catch(() => -1);
-  const stateOf = () => page.evaluate(() => (window as unknown as { __DEA_CAP__: Cap }).__DEA_CAP__.state).catch(() => 'gone');
-  const signal = () =>
-    page
-      .evaluate(() => {
-        return (window as unknown as { __DEA_CAP__: { signal: () => number } }).__DEA_CAP__.signal();
-      })
-      .catch(() => 0);
+  const settle = opts.settle ?? 2;
+  const limit = opts.timeoutMs ?? 900_000;
+  const maxBytes = opts.maxBytes ?? 64_000_000;
+  type Cap = {
+    cont: (n: number, hold: boolean) => boolean;
+    nframes: () => number;
+    state: string;
+    wheel: number;
+    binSize?: () => number;
+    signal: () => number;
+  };
+  const cap = <T>(expr: string, dflt: T) =>
+    page.evaluate(`(() => { const c = window.__DEA_CAP__; return ${expr}; })()`).then(
+      (v) => v as T,
+      () => dflt,
+    );
+  const nf = () => cap<number>('c.nframes()', -1);
+  const stateOf = () => cap<string>('c.state', 'gone');
+  const signal = () => cap<number>('c.signal()', 0);
+  const binSize = () => cap<number>('c.binSize ? c.binSize() : 0', 0);
   const t0 = Date.now();
   const base = await nf();
   if (base < 0) return { ok: false, error: 'the recorder was not in the page' };
+  const bin0 = await binSize();
   let at = 0;
   const stops: ScrollStop[] = [];
-  const segment = async (delta: number): Promise<ScrollStop | null> => {
-    if (delta) await page.mouse.wheel(0, delta).catch(() => {});
+  let ended = '';
+  /** record `n` more frames (the page's animation frames are released for them) and wait until they are in */
+  const frames = async (n: number): Promise<boolean> => {
     const before = await nf();
-    const ok = await page.evaluate((n) => (window as unknown as { __DEA_CAP__: Cap }).__DEA_CAP__.cont(n, true), settle).catch(() => false);
-    if (!ok) return null;
-    while (Date.now() - t0 < limit && (await nf()) < before + settle) await page.waitForTimeout(80);
-    while (Date.now() - t0 < limit && (await stateOf()) !== 'done') await page.waitForTimeout(120);
-    if (Date.now() - t0 >= limit) return null;
+    const ok = await page.evaluate((k) => (window as unknown as { __DEA_CAP__: Cap }).__DEA_CAP__.cont(k, true), n).catch(() => false);
+    if (!ok) return false;
+    const tf = Date.now();
+    // one stop may not take longer than 3 minutes (a scene that stops drawing frames would hold the whole tape)
+    const alive = () => Date.now() - t0 < limit && Date.now() - tf < 180_000;
+    while (alive() && (await nf()) < before + n) await page.waitForTimeout(80);
+    while (alive() && (await stateOf()) !== 'done') await page.waitForTimeout(120);
+    return alive();
+  };
+  /** a wheel input of any size: a long one is given as a stream of notches of one head step (a site may limit what one event moves) */
+  const chunk = Math.max(100, step);
+  const wheel = async (delta: number) => {
+    const sign = delta < 0 ? -1 : 1;
+    let left = Math.abs(delta);
+    while (left > 0) {
+      const d = Math.min(left, chunk);
+      await page.mouse.wheel(0, sign * d).catch(() => {});
+      left -= d;
+      if (left > 0) await page.waitForTimeout(50);
+    }
+  };
+  const segment = async (delta: number): Promise<ScrollStop | null> => {
+    if (delta) await wheel(delta);
+    if (!(await frames(settle))) return null;
+    // a page that eases its scroll is still moving after a few frames: more are recorded until the signal holds (a few rounds at most)
+    let prev = await signal();
+    let confirm = false;
+    for (let k = 0; k < 4; k++) {
+      if (!(await frames(1))) return null;
+      const cur = await signal();
+      // still moving by more than a couple of px (or a thousandth of a stop) between two frames: more frames, a few at most
+      if (Math.abs(cur - prev) < Math.max(2, step / Math.max(1, ratio) / 400)) {
+        confirm = true;
+        break;
+      }
+      prev = cur;
+    }
     const n = await nf();
     const dom = (await page.evaluate(STOP_DOM).catch(() => null)) as StopDom | null;
-    const wh = (await page.evaluate(() => (window as unknown as { __DEA_CAP__: { wheel: number } }).__DEA_CAP__.wheel).catch(() => 0)) as number;
-    const stop: ScrollStop = { sc: await signal(), wh: Math.round(wh), f0: at, f1: n - base - 1, dom };
+    const wh = await cap<number>('c.wheel', 0);
+    // the frame that only confirmed the scroll had stopped is not the stop: a scene that uploads only when something changes has
+    // nothing to upload in it, so the stop is the frame before (the same picture, with the commands the scene issued to get there)
+    const stop: ScrollStop = { sc: await signal(), wh: Math.round(wh), f0: at, f1: n - base - 1 - (confirm ? 1 : 0), dom };
     at = n - base;
     return stop;
   };
-  for (let i = 0; i < K; i++) {
-    const s = await segment(step);
-    if (!s) return stops.length ? finish() : { ok: false, error: 'the scroll tape timed out or the recorder stopped' };
+  let total = 0;
+  let docHeight = 0;
+  let perStop = 0;
+  let perBytes = 0;
+  let ratio = 1;
+  let native = false;
+  let binPrev = bin0;
+  // the first stops: close together, as before
+  const headDeltas: number[] = Array.from({ length: headN }, () => step);
+  for (let i = 0; ; i++) {
+    let delta: number;
+    if (i < headN) delta = headDeltas[i];
+    else {
+      // what is left of the page, and how many stops the count, the time and the size still allow
+      const pos = Math.max(0, stops[stops.length - 1]?.sc ?? 0);
+      const timeLeft = limit - (Date.now() - t0) - 60_000; // a minute is kept for the way back to the top
+      const byTime = Math.floor(timeLeft / Math.max(1, perStop));
+      const byBytes = perBytes > 0 ? Math.floor((maxBytes - (binPrev - bin0)) / perBytes) : Number.POSITIVE_INFINITY;
+      const byCount = maxN - i;
+      const allowed = Math.min(byTime, byBytes, byCount);
+      const left = docHeight - vp.height - pos;
+      const nxt = native ? nextScrollStep({ left, stopsLeft: allowed, minStep: Math.round(step / ratio), ratio }) : null;
+      if (!nxt) {
+        if (native && left > step / ratio / 2)
+          ended = `${allowed <= 0 ? (byTime <= 0 ? 'the time allowed for the tape' : byBytes <= 0 ? `the ${Math.round(maxBytes / 1e6)} MB allowed for the tape` : 'the stop count') : 'the page'} ended it at ${Math.round(pos)} px of ${docHeight} px`;
+        break;
+      }
+      delta = nxt.wheel;
+    }
+    if (opts.shouldStop?.()) {
+      ended = 'the run budget was spent';
+      break;
+    }
+    const ts = Date.now();
+    const s = await segment(delta);
+    if (!s) {
+      if (!stops.length) return { ok: false, error: 'the scroll tape timed out or the recorder stopped' };
+      ended = 'the tape time was spent';
+      break;
+    }
     stops.push(s);
+    total += delta;
+    const took = Date.now() - ts;
+    perStop = perStop ? perStop * 0.6 + took * 0.4 : took;
+    const nb = await binSize();
+    const grew = Math.max(0, nb - binPrev);
+    perBytes = perBytes ? perBytes * 0.6 + grew * 0.4 : grew;
+    binPrev = nb;
+    opts.onStop?.(s, i, took);
+    if (i === headN - 1) {
+      // the head is in: how the page answers the wheel is known now
+      ratio = s.sc > 1 && s.wh > 1 ? s.wh / s.sc : 1;
+      docHeight = ((await page.evaluate('document.documentElement.scrollHeight').catch(() => 0)) as number) || 0;
+      native = (await cap<boolean>('c.moved === true', false)) && docHeight > vp.height * 1.2;
+      // the head's own bytes do not set the rate: the first tail stops do (new sections bring new textures)
+      perBytes = 0;
+      if (!native) break;
+    }
   }
-  const top = await segment(-(K + 1) * step);
-  if (top) stops.push({ ...top, sc: 0, wh: 0 });
-  return finish();
-  async function finish(): Promise<{ ok: true; rec: ScrollTapeRecording }> {
-    const native = (await page.evaluate('window.__DEA_CAP__.moved === true').catch(() => false)) as boolean;
-    // a page that scrolls natively is put back at the top whatever the tape did
+  // back to the top: the whole way up (a long page in a few steps), then the stop that holds the state of the top
+  const up = -Math.ceil(total * 1.05 + step);
+  let top = await segment(up);
+  if (top && top.sc > 2) {
     await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
-    return { ok: true, rec: { frames: at, stops, mechanism: native ? 'native' : 'virtual', step, settle } };
+    top = (await segment(0)) ?? top;
   }
+  if (top) stops.push({ ...top, sc: 0, wh: 0 });
+  const moved = await cap<boolean>('c.moved === true', false);
+  // a page that scrolls natively is put back at the top whatever the tape did
+  await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
+  const reach = Math.max(0, ...stops.map((x) => x.sc));
+  if (!ended && native && docHeight && reach < docHeight - vp.height - step) ended = `the stops reached ${Math.round(reach)} px of ${docHeight} px`;
+  return { ok: true, rec: { frames: at, stops, mechanism: moved ? 'native' : 'virtual', step, settle, docHeight, reach, ended: ended || undefined } };
 }
 
 /** How many press listeners (mousedown, pointerdown, touchstart) the page has registered. */

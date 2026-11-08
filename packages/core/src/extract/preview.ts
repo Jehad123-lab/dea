@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import type { Browser, Page } from 'playwright';
 import { NAME_SHIM } from '../browser/init.ts';
-import { installObservers, LOADER_VISIBLE } from '../browser/open.ts';
+import { installObservers, LOADER_PROGRESS, LOADER_VISIBLE } from '../browser/open.ts';
 import { alignToReference, type PhaseInfo, phaseInfo } from '../browser/phase.ts';
 import { thumbOfImage } from '../browser/settle.ts';
 import { assertNotBotWall } from '../browser/wall.ts';
@@ -822,6 +822,8 @@ export async function referenceShot(
   frames = 2,
   /** after the recording: run the scripted pointer and scroll (frames for the interaction check) and the input probe */
   interact = false,
+  /** what the scroll tape may add to the recording, in MB */
+  tapeMb?: number,
 ): Promise<{
   /** a frame after each step of the interaction script, on the live site */
   interaction?: Buffer[];
@@ -863,7 +865,11 @@ export async function referenceShot(
     let loader = false;
     const watchStart = currentTimings()?.now() ?? 0;
     let quiet = 0;
-    while (Date.now() - t0 < ms || (loader && Date.now() - t0 < hardCap)) {
+    // ...and keeps buying it for as long as the loader shows it is working (a rising counter, or a picture that keeps changing), up to 7 minutes
+    let progressAt = Date.now();
+    let lastPct: number | null = null;
+    let lastScore = -1;
+    while (Date.now() - t0 < ms || (loader && (Date.now() - t0 < hardCap || (Date.now() - progressAt < 45_000 && Date.now() - t0 < 420_000)))) {
       if (smart && !loader && best.score > 0 && quiet >= 4 && Date.now() - t0 >= 8000) {
         currentTimings()?.note(`settled after ${Math.round((Date.now() - t0) / 1000)} s (cap ${Math.round(ms / 1000)} s)`);
         break;
@@ -897,6 +903,13 @@ export async function referenceShot(
         return Math.sqrt(s2 / (d.length / 4) - m * m);
       }, png)) as number;
       loader = (await page.evaluate(LOADER_VISIBLE).catch(() => false)) as boolean;
+      if (loader) {
+        const pct = (await page.evaluate(LOADER_PROGRESS).catch(() => null)) as number | null;
+        if ((pct !== null && (lastPct === null || pct > lastPct)) || (lastScore >= 0 && Math.abs(score - lastScore) > 1.5)) progressAt = Date.now();
+        if (pct !== null) lastPct = pct;
+        lastScore = score;
+      } else if (lastScore >= 0 && lastPct !== null)
+        currentTimings()?.note(`the loading screen finished after ${Math.round((Date.now() - t0) / 1000)} s (it showed ${lastPct}% last)`);
       // frames behind a loader only count when nothing better comes
       const s2 = loader ? score * 0.25 : score;
       quiet = s2 > best.score * 1.02 || loader ? 0 : quiet + 1;
@@ -937,7 +950,15 @@ export async function referenceShot(
         // the scroll tape: the recording continued while the page is scrolled, a stop at a time (what a scroll-driven scene did)
         const scrollTape =
           interact && !overBudget()
-            ? await timed('record the scroll tape', () => recordScrollTape(page).catch((e) => ({ ok: false as const, error: String(e) })))
+            ? await timed('record the scroll tape', () =>
+                recordScrollTape(page, {
+                  shouldStop: overBudget,
+                  maxBytes: (tapeMb ?? 64) * 1e6,
+                  onStop: process.env.DEA_DEBUG_TAPE
+                    ? (st, i, ms) => console.error(`tape stop ${i}: scroll ${st.sc}, wheel ${st.wh}, frames ${st.f0}-${st.f1}, ${Math.round(ms / 1000)} s`)
+                    : undefined,
+                }).catch((e) => ({ ok: false as const, error: String(e) })),
+              )
             : null;
         setDragStep(presses > 0);
         const recording = await timed('read the recording out of the page', () => pullRecording(page).catch(() => null));
@@ -952,6 +973,9 @@ export async function referenceShot(
             step: scrollTape.rec.step,
             settle: scrollTape.rec.settle,
             stops: scrollTape.rec.stops,
+            docHeight: scrollTape.rec.docHeight,
+            reach: scrollTape.rec.reach,
+            ended: scrollTape.rec.ended,
           };
         }
         await releaseFrames(page);

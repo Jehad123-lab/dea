@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
   type BrowserChoice,
+  bench,
+  benchMd,
   ContentCache,
   canonicalJson,
   canvasLine,
@@ -10,8 +12,11 @@ import {
   decodeCode,
   decodeDesign,
   decodeMotion,
+  doctor,
+  doctorMd,
   extract,
   fmtMb,
+  forgetProfile,
   type InspectOptions,
   type InspectResult,
   inspectSite,
@@ -23,7 +28,9 @@ import {
   libraryRemove,
   librarySearch,
   libraryUse,
+  listProfiles,
   listRuns,
+  loginSession,
   measureStability,
   planInvestigation,
   RESULT_SCHEMA,
@@ -271,7 +278,8 @@ common(
     .option('--verify-build', 'run npm install and npm run build in the generated project and report it')
     .option('--no-trace', 'skip the live WebGL trace (uniform values and drivers)')
     .option('--no-replay', "do not record the site's WebGL frames (no capture replay, no editable rebuild)")
-    .option('--max-capture-mb <mb>', 'the largest recording kept, after compaction', '64')
+    .option('--max-capture-mb <mb>', 'the largest recording kept, after compaction (default 64; 128 when the recording carries a scroll tape)')
+    .option('--tape-mb <mb>', 'what the scroll tape may add to the recording (default 64): its stops are spread over the whole page within it')
     .option('--no-research', 'do not search free sources for the techniques found')
     .option('--no-page', 'keep to the first screen: do not read the page below it (the whole page is read by default)')
     .option('--batch <file>', 'extract every URL in a text file (one per line)')
@@ -308,7 +316,8 @@ common(
       page: boolean;
       reference?: string;
       referenceMs?: string;
-      maxCaptureMb: string;
+      maxCaptureMb?: string;
+      tapeMb?: string;
       quick?: boolean;
       cache: boolean;
       cacheDir?: string;
@@ -382,7 +391,8 @@ common(
                 verifyBuild: flags.verifyBuild,
                 noTrace: !flags.trace,
                 noReplay: !flags.replay,
-                maxCaptureMb: Number(flags.maxCaptureMb) || 64,
+                maxCaptureMb: Number(flags.maxCaptureMb) || undefined,
+                tapeMb: Number(flags.tapeMb) || undefined,
                 noResearch: !flags.research,
                 noPage: !flags.page,
               });
@@ -916,6 +926,97 @@ program
       if (flags.json) return void process.stdout.write(`${JSON.stringify(runs, null, 2)}\n`);
       if (!runs.length) return void process.stdout.write('No runs yet. Try: dea inspect https://threejs.org/examples/webgl_animation_keyframes.html\n');
       for (const r of runs) process.stdout.write(`${r.id}  ${r.kind.padEnd(7)}  ${r.title || r.url}\n`);
+    }),
+  );
+
+program
+  .command('doctor')
+  .description('is this machine ready? Node, the browser, WebGL (a graphics card, or software on the CPU, with a plain warning), free disk space')
+  .addOption(new Option('-b, --browser <name>', 'browser to use').choices(['auto', 'chrome', 'msedge', 'chromium']).default('auto'))
+  .option('--headed', 'open the browser with a window (a headless browser can fall back to software WebGL on some PCs)')
+  .option('--json', 'print JSON')
+  .action((flags: { browser: BrowserChoice; headed?: boolean; json?: boolean }) =>
+    run(async () => {
+      const r = await doctor({ browser: flags.browser, headless: !flags.headed, home: process.env.DEA_HOME });
+      process.stdout.write(flags.json ? `${JSON.stringify(r, null, 2)}\n` : doctorMd(r));
+      if (r.checks.some((c) => c.status === 'no')) process.exitCode = 1;
+    }),
+  );
+
+program
+  .command('bench')
+  .description(
+    'measure this machine’s graphics card with a small built-in scene (and, with a url, a public page’s frame rate) and write dea-bench.json and dea-bench.md: GPU name, browser, OS, CPU, numbers; nothing personal. Software WebGL is labelled and gets no speed numbers',
+  )
+  .argument('[url]', 'optional public page whose frame rate to measure (idle and while scrolled)')
+  .addOption(new Option('-b, --browser <name>', 'browser to use').choices(['auto', 'chrome', 'msedge', 'chromium']).default('auto'))
+  .option('--headed', 'open the browser with a window (use this on a PC with a graphics card)')
+  .option('--out <dir>', 'where dea-bench.json and dea-bench.md are written (default: the current folder)')
+  .option('--quick', 'a shorter run')
+  .option('--json', 'print JSON')
+  .action((url: string | undefined, flags: { browser: BrowserChoice; headed?: boolean; out?: string; quick?: boolean; json?: boolean }) =>
+    run(async () => {
+      const r = await bench({ browser: flags.browser, headless: !flags.headed, url, quick: flags.quick, version: VERSION });
+      const dir = flags.out ?? process.cwd();
+      await mkdir(dir, { recursive: true });
+      const md = benchMd(r);
+      await writeFile(join(dir, 'dea-bench.json'), `${JSON.stringify(r, null, 2)}\n`);
+      await writeFile(join(dir, 'dea-bench.md'), md);
+      process.stdout.write(
+        flags.json ? `${JSON.stringify(r, null, 2)}\n` : `${md}\nWritten: ${join(dir, 'dea-bench.json')} and ${join(dir, 'dea-bench.md')}\n`,
+      );
+    }),
+  );
+
+const browserCmd = program
+  .command('browser')
+  .description('DEA’s own browser profile: log in to a site by hand once, and DEA can read it afterwards (never your everyday browser)');
+browserCmd
+  .command('login')
+  .description(
+    'open a visible Edge/Chrome window with a profile that belongs to DEA, so you can sign in by hand; close the window when you are done. DEA never sees your password, and does not read or control that window',
+  )
+  .argument('[name]', 'profile name (letters, digits, - and _)', 'default')
+  .argument('[url]', 'https page to open first')
+  .addOption(new Option('-b, --browser <name>', 'browser to use').choices(['auto', 'chrome', 'msedge', 'chromium']).default('auto'))
+  .action((name: string, url: string | undefined, flags: { browser: BrowserChoice }) =>
+    run(async () => {
+      const r = await loginSession({
+        name,
+        url,
+        browser: flags.browser,
+        onOpen: ({ dir, browser }) =>
+          process.stdout.write(
+            `Opening ${browser} with DEA's own profile "${name}" (${dir}).\nSign in to the sites DEA should be able to read. Type your passwords in that window yourself: DEA does not see them, does not read the window and is not attached to it.\nWhen you are done, close the window. Then: dea session start --profile ${name} <url>\nWaiting for the window to close...\n`,
+          ),
+      });
+      process.stdout.write(
+        `Closed after ${r.seconds} s. Profile "${r.name}" saved in ${r.dir}.\nWhat it holds: what the browser keeps after a sign-in (cookies, local storage), encrypted by your operating system account. Delete it any time: dea browser forget ${r.name} --yes\n`,
+      );
+    }),
+  );
+browserCmd
+  .command('profiles', { isDefault: true })
+  .description('the DEA browser profiles on this machine')
+  .option('--json', 'print JSON')
+  .action((flags: { json?: boolean }) =>
+    run(async () => {
+      const ps = await listProfiles();
+      if (flags.json) return void process.stdout.write(`${JSON.stringify(ps, null, 2)}\n`);
+      if (!ps.length) return void process.stdout.write('No DEA browser profiles yet. Make one: dea browser login\n');
+      for (const p of ps)
+        process.stdout.write(`${p.name}  ${p.sizeMb} MB  last login ${p.lastLoginAt ?? 'never'}  last used ${p.lastUsedAt ?? 'never'}  ${p.dir}\n`);
+    }),
+  );
+browserCmd
+  .command('forget')
+  .description('delete a DEA browser profile and everything the browser kept in it (the logins too)')
+  .argument('<name>', 'profile name')
+  .option('--yes', 'really delete it')
+  .action((name: string, flags: { yes?: boolean }) =>
+    run(async () => {
+      if (!flags.yes) throw new Error(`This deletes the profile "${name}" and every login kept in it. Run again with --yes.`);
+      process.stdout.write(`Deleted ${await forgetProfile(name)}\n`);
     }),
   );
 
