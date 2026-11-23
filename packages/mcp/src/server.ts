@@ -82,6 +82,11 @@ export interface ServerOptions {
   state?: ServerState;
   /** how search and read reach the web (tests pass a recorded fetch, a fixed clock and a private cache folder) */
   web?: { fetch?: typeof fetch; sleep?: (ms: number) => Promise<void>; now?: () => number; home?: string };
+  /**
+   * May the hands tools open the DEA browser profile named in DEA_PROFILE (the person's own sign-ins)? Default true for
+   * the local stdio server; dea serve --http allows it only for the clients named with --profile-client.
+   */
+  allowProfile?: boolean;
 }
 export interface ServerState {
   hands: HandsSession | null;
@@ -578,7 +583,8 @@ export function createServer(opts: ServerOptions = {}): McpServer {
     const envMode = process.env.DEA_MODE as Mode | undefined;
     const policy = loadPolicy(deaHome(), { mode: envMode && MODES.includes(envMode) ? envMode : undefined });
     // a DEA browser profile is chosen by the person in the MCP client config (DEA_PROFILE), never by a tool call
-    const profile = process.env.DEA_PROFILE?.trim() || undefined;
+    // over HTTP a remote client gets it only when the owner named that client (dea serve --http --profile-client <name>)
+    const profile = opts.allowProfile === false ? undefined : process.env.DEA_PROFILE?.trim() || undefined;
     state.hands = await HandsSession.start({ policy, browser: browserChoice, headless: process.env.DEA_HEADED !== '1', profile });
     return state.hands;
   };
