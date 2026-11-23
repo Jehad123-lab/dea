@@ -47,7 +47,7 @@ try {
   step('dea --version (plain node, from dist)');
   const v = (await run(join(app, 'node_modules', '.bin', win ? 'dea.cmd' : 'dea'), ['--version'])).trim();
   console.log(v);
-  if (v !== '0.1.0') throw new Error(`unexpected version ${v}`);
+  if (v !== '0.2.0') throw new Error(`unexpected version ${v}`);
 
   step('dea --help lists serve');
   const help = await run(join(app, 'node_modules', '.bin', win ? 'dea.cmd' : 'dea'), ['--help']);

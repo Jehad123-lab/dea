@@ -62,7 +62,7 @@ import { Command, Option } from 'commander';
 import { launchers, registerHub } from './hub.ts';
 import { registerSession } from './session.ts';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 interface CommonFlags {
   browser: BrowserChoice;

@@ -215,7 +215,7 @@ export async function serveHttp(o: HttpOptions = {}): Promise<HttpServer> {
       const authInfo = { token: 'redacted', clientId: who, scopes: [] as string[] };
       if (path === '/mcp') return await sendResponse(res, await tools.fetch(request, { authInfo }));
       if (path === '/hub') return await sendResponse(res, await gateway.fetch(request, { authInfo }));
-      if (path === '/' || path === '/health') return json(res, 200, { name: 'dea', version: '0.1.0', client: who, endpoints: { tools: '/mcp', hub: '/hub' } });
+      if (path === '/' || path === '/health') return json(res, 200, { name: 'dea', version: '0.2.0', client: who, endpoints: { tools: '/mcp', hub: '/hub' } });
       return json(res, 404, { error: 'not_found', endpoints: ['/mcp', '/hub'] });
     } catch (e) {
       log(`dea serve: ${(e as Error).message}`);

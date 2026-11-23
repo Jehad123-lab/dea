@@ -1,6 +1,6 @@
 {
   "name": "dea-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DEA: decode any website and prove it. Stack, design, motion, shaders, code and APIs, every fact labelled Verified, Inferred or Unknown. CLI + MCP server for humans and AI agents.",
   "author": "Jehad Uddin",
   "license": "MIT",
