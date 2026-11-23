@@ -703,18 +703,39 @@ export function createServer(opts: ServerOptions = {}): McpServer {
   server.registerTool(
     'submit',
     {
-      title: 'Submit a form (asks the user first)',
+      title: 'Submit a form, or approve a waiting action (asks the user first)',
       description:
-        'Submit the form that holds `target` (a field or its submit button). The first call never sends anything: it returns NEEDS THE USER’S OK with a preview of exactly what would be sent and a one-time confirm token. Show the preview to the user; only after they say yes call again with the same target and that confirm token. Logins and payments are never submitted by DEA in any mode.',
+        'Submit the form that holds `target` (a field or its submit button). The first call never sends anything: it returns NEEDS THE USER’S OK with a preview of exactly what would be sent and a one-time confirm token. Show the preview to the user; only after they say yes call again with the same target and that confirm token. Logins and payments are never submitted by DEA in any mode. To approve an interact action that came back as NEEDS THE USER’S OK because it tried to send data (a select, press, type or fill), call submit with `action` and the exact same arguments you gave interact, plus the confirm token.',
       inputSchema: z.object({
-        target,
+        target: target.optional().describe('the field or button; for fill leave it out'),
         confirm: z.string().optional().describe('the one-time token from the previous NEEDS THE USER’S OK answer, after the user said yes'),
+        action: z
+          .enum(['click', 'type', 'select', 'press', 'fill'])
+          .optional()
+          .describe('only to approve a waiting interact action: the action it was, repeated with the same arguments and the token'),
+        text: z.string().optional().describe('with action type'),
+        values: z.array(z.string()).optional().describe('with action select'),
+        key: z.string().optional().describe('with action press'),
+        fields: z
+          .record(z.string(), z.union([z.string(), z.boolean()]))
+          .optional()
+          .describe('with action fill'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     },
-    async ({ target, confirm }) => {
+    async ({ target, confirm, action, text, values, key, fields }) => {
       try {
         const s = await getHands();
+        if (action) {
+          // the same arguments interact sent, so the token's binding matches; "confirmed" never comes from the AI
+          const args: Record<string, unknown> = { target, confirm };
+          if (action === 'type') Object.assign(args, { text, enter: false });
+          if (action === 'select') args.values = values;
+          if (action === 'press') args.key = key;
+          if (action === 'fill') args.fields = fields;
+          return answer((await dispatch(s, action, args)) as ActionResult);
+        }
+        if (!target) throw new Error('submit needs a target (or an action to approve).');
         const info = await s.describe(target);
         const method = info.inForm ? 'submit' : 'click';
         return answer((await dispatch(s, method, { target, confirm })) as ActionResult);

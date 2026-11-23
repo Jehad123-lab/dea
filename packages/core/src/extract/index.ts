@@ -1540,6 +1540,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     colors: Object.values(design?.tokens?.color ?? {}).map((v) => String((v as { $value?: string }).$value)),
     fonts: Object.values(design?.tokens?.fontFamily ?? {}).map((v) => String((v as { $value?: string }).$value)),
     techniques: techniques.map((t) => t.name),
+    ownAssets: Boolean(opts.ownAssets),
     provenance: `Extracted from ${url} on ${extractedAt.slice(0, 10)} by DEA. Third-party code, shaders, fonts and assets belong to their owners.`,
   };
   await put('dea-kit.json', `${JSON.stringify(kit, null, 2)}\n`);
