@@ -136,3 +136,12 @@ describe('framer export: why it is blank', () => {
     expect(code).toMatch(/why && inCanvas \?/);
   });
 });
+
+describe('framer export: poster', () => {
+  it("falls back to the rebuild's own still beside pipeline.json, and hides it if missing", () => {
+    const { code } = framerComponent(pipeline(), { name: 'Hero' });
+    expect(code).toContain('+ "poster.png"');
+    expect(code).toContain('onError={() => setPosterGone(true)}');
+    expect(code).toContain('poster?.src ||');
+  });
+});

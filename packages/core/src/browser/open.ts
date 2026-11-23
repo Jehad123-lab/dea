@@ -121,6 +121,7 @@ export async function launchBrowser(choice: BrowserChoice, headless: boolean): P
 async function startBrowser(choice: BrowserChoice, headless: boolean): Promise<{ browser: Browser; channel: string }> {
   const order: Array<'chrome' | 'msedge' | 'chromium'> = choice === 'auto' ? ['chrome', 'msedge', 'chromium'] : [choice];
   const errors: string[] = [];
+  const full: string[] = [];
   for (const channel of order) {
     try {
       const browser = await chromium.launch({
@@ -130,10 +131,29 @@ async function startBrowser(choice: BrowserChoice, headless: boolean): Promise<{
       });
       return { browser, channel };
     } catch (e) {
-      errors.push(`${channel}: ${(e as Error).message.split('\n')[0]}`);
+      const msg = (e as Error).message;
+      errors.push(`${channel}: ${msg.split('\n')[0]}`);
+      full.push(msg);
     }
   }
-  throw new Error(`Could not start a browser.\n${errors.join('\n')}\nInstall Chrome or Edge, or run: npx playwright install chromium`);
+  throw new Error(`Could not start a browser.\n${errors.join('\n')}\n${browserStartHint(full)}`);
+}
+
+/**
+ * What to do when no browser starts. The usual case on a fresh Linux box or container: Chromium is downloaded but the
+ * system libraries it links against are not installed, and Playwright only says "browser has been closed".
+ */
+export function browserStartHint(messages: string[]): string {
+  const all = messages.join('\n');
+  const libs = [...new Set([...all.matchAll(/error while loading shared libraries: ([^\s:]+)/g)].map((m) => m[1]))];
+  if (libs.length || /missing dependencies|Host system is missing/i.test(all))
+    return [
+      `The browser is installed but this system is missing libraries it needs${libs.length ? ` (${libs.join(', ')})` : ''}.`,
+      'Install them with: npx playwright install-deps chromium   (needs sudo; on Debian/Ubuntu it runs apt-get)',
+      'Without sudo: apt-get download the packages that hold those files, unpack them with dpkg-deb -x into a folder, and',
+      'point LD_LIBRARY_PATH at the folders holding the .so files. dea doctor shows the result.',
+    ].join('\n');
+  return 'Install Chrome or Edge, or run: npx playwright install chromium';
 }
 
 /** DEA's page observers (WebGL, shaders, rAF, library probes). Installed before any page script runs. */

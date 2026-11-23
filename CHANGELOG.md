@@ -11,6 +11,13 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- `dea framer` puts a still of the rebuild itself (`poster.png`, DEA's render of the editable rebuild, never the site's
+  screenshot) beside `pipeline.json`. The component shows it while loading, on phones without WebGL and after a context
+  loss when no Poster is set, and hides it if the file is missing.
+- The MCP `extract` tool takes `recordOnly`: only the slow reference capture, kept in the cache for the next extract (the
+  tool list stays at 20).
+- When no browser starts because the system is missing libraries Chromium needs, DEA names them and says how to install
+  them (`npx playwright install-deps chromium`, or without sudo: unpack the packages and set `LD_LIBRARY_PATH`).
 - `dea serve --http --profile-client <names...>` (`dea-mcp --http --profile-client a,b`): only the named clients may use
   the DEA browser profile in `DEA_PROFILE` (your own sign-ins). Every other remote client browses with a fresh,
   signed-out browser. Before, every client with a token drove your signed-in profile. The local stdio server is unchanged.

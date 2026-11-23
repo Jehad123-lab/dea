@@ -149,9 +149,11 @@ export async function read(url: string, o: ReadOptions = {}): Promise<ReadRespon
     };
     await cachePut(dir, key, out, at);
     return out;
-  } catch (e) {
-    if (e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError') && !(e instanceof BudgetExceeded))
-      e = new BudgetExceeded('the page', o.timeoutMs ?? 60_000);
+  } catch (caught) {
+    const e =
+      caught instanceof Error && (caught.name === 'TimeoutError' || caught.name === 'AbortError') && !(caught instanceof BudgetExceeded)
+        ? new BudgetExceeded('the page', o.timeoutMs ?? 60_000)
+        : caught;
     if (hit && e instanceof WebBlocked === false && !(e as Error).message.includes('will not read'))
       return asCached(hit, `the live fetch failed (${errNote(e)})`);
     throw e;
