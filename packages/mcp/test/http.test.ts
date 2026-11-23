@@ -128,4 +128,47 @@ describe('dea serve --http (Streamable HTTP, bearer token)', () => {
     expect(await revokeToken('phone', home)).toBe(true);
     expect((await fetch(`${srv.url}/health`, { headers: { authorization: `Bearer ${other}` } })).status).toBe(401);
   });
+
+  it("each client has its own runs folder: list_runs never shows another client's runs", async () => {
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    const { clientRunsDir } = await import('../src/http.ts');
+    // a run that belongs to another client, and one in the shared DEA_HOME (from a plain CLI run on the same machine)
+    const theirs = join(clientRunsDir(home, 'phone2'), '20261124-000000-secret-site-aaaaaaaa');
+    const shared = join(process.env.DEA_HOME as string, 'runs', '20261124-000001-shared-site-bbbbbbbb');
+    for (const d of [theirs, shared]) {
+      await mkdir(d, { recursive: true });
+      await writeFile(
+        join(d, 'run.json'),
+        JSON.stringify({
+          meta: { id: d.split(/[\\/]/).pop(), kind: 'inspect', url: 'https://secret.example/', title: 'Secret', startedAt: new Date().toISOString() },
+        }),
+      );
+    }
+    const mine = join(clientRunsDir(home, 'laptop'), '20261124-000002-mine-cccccccc');
+    await mkdir(mine, { recursive: true });
+    await writeFile(
+      join(mine, 'run.json'),
+      JSON.stringify({
+        meta: {
+          id: '20261124-000002-mine-cccccccc',
+          kind: 'inspect',
+          url: 'https://mine.example/',
+          title: 'Mine',
+          startedAt: new Date().toISOString(),
+        },
+      }),
+    );
+    const client = await connect('/mcp');
+    try {
+      const r = text(await client.callTool({ name: 'list_runs', arguments: { limit: 50 } }));
+      expect(r).toContain('20261124-000002-mine-cccccccc');
+      expect(r).not.toContain('secret-site');
+      expect(r).not.toContain('shared-site');
+      const rep = text(await client.callTool({ name: 'report', arguments: { run: '20261124-000000-secret-site-aaaaaaaa' } }));
+      expect(rep).not.toContain('Secret');
+    } finally {
+      await client.close();
+    }
+    expect(clientRunsDir(home, '../evil')).toBe(join(home, 'clients', '__evil', 'runs'));
+  });
 });

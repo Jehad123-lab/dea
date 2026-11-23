@@ -5,7 +5,7 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer, type IncomingMessage, type Server as NodeServer, type ServerResponse } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { Hub, hubMode, type Mode } from '@dea/core';
+import { Hub, hubMode, type Mode, withRunsRoot } from '@dea/core';
 import {
   createMcpHandler,
   hostHeaderValidationResponse,
@@ -30,6 +30,16 @@ export interface TokenEntry {
 }
 
 /** Where tokens live: $DEA_SERVE_HOME, else ~/.dea (never the project folder, so they are not committed by accident). */
+/** The runs folder of one `dea serve --http` client: <home>/clients/<client>/runs (the name made safe for a folder). */
+export function clientRunsDir(home: string, client: string): string {
+  const safe =
+    client
+      .replace(/[^A-Za-z0-9_.-]+/g, '_')
+      .replace(/^\.+/, '_')
+      .slice(0, 64) || '_';
+  return join(home, 'clients', safe, 'runs');
+}
+
 export function serveHome(): string {
   return process.env.DEA_SERVE_HOME ?? join(homedir(), '.dea');
 }
@@ -213,7 +223,8 @@ export async function serveHttp(o: HttpOptions = {}): Promise<HttpServer> {
           : undefined;
       if (rejected) return await sendResponse(res, rejected);
       const authInfo = { token: 'redacted', clientId: who, scopes: [] as string[] };
-      if (path === '/mcp') return await sendResponse(res, await tools.fetch(request, { authInfo }));
+      // each client has its own runs folder: list_runs, report and "latest" never show another client's runs
+      if (path === '/mcp') return await withRunsRoot(clientRunsDir(home, who), async () => sendResponse(res, await tools.fetch(request, { authInfo })));
       if (path === '/hub') return await sendResponse(res, await gateway.fetch(request, { authInfo }));
       if (path === '/' || path === '/health') return json(res, 200, { name: 'dea', version: '0.2.0', client: who, endpoints: { tools: '/mcp', hub: '/hub' } });
       return json(res, 404, { error: 'not_found', endpoints: ['/mcp', '/hub'] });
