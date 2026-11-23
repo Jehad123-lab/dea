@@ -11,6 +11,9 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- `dea serve --http --profile-client <names...>` (`dea-mcp --http --profile-client a,b`): only the named clients may use
+  the DEA browser profile in `DEA_PROFILE` (your own sign-ins). Every other remote client browses with a fresh,
+  signed-out browser. Before, every client with a token drove your signed-in profile. The local stdio server is unchanged.
 - `dea serve --http`: each token (client) has its own runs folder, `<home>/clients/<client>/runs`. `list_runs`, `report`
   and "latest" never show another client's runs, or runs made by the CLI on the same machine. Background investigations
   started by a client resume in that client's folder (`DEA_RUNS_DIR`). `withRunsRoot()` in core.

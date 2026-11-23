@@ -171,4 +171,12 @@ describe('dea serve --http (Streamable HTTP, bearer token)', () => {
     }
     expect(clientRunsDir(home, '../evil')).toBe(join(home, 'clients', '__evil', 'runs'));
   });
+
+  it("only a client the owner named may use the owner's browser profile (DEA_PROFILE)", async () => {
+    const { profileAllowed } = await import('../src/http.ts');
+    expect(profileAllowed('laptop', undefined)).toBe(false);
+    expect(profileAllowed('laptop', [])).toBe(false);
+    expect(profileAllowed('phone', ['laptop'])).toBe(false);
+    expect(profileAllowed('laptop', ['laptop'])).toBe(true);
+  });
 });

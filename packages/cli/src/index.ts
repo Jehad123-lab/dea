@@ -865,14 +865,26 @@ program
   .option('--client <name>', 'who the token is for: DEA Hub uses this client’s permissions and history', 'remote')
   .option('--new-token', 'make a new token for this client (the old one stops working)')
   .option('--allowed-host <names...>', 'Host header names to accept when not on 127.0.0.1 (e.g. dea.example.com)')
-  .action((f: { http?: boolean; host: string; port: string; client: string; newToken?: boolean; allowedHost?: string[] }) =>
+  .option(
+    '--profile-client <names...>',
+    'clients that may use your DEA browser profile (DEA_PROFILE: your own sign-ins); every other client gets a fresh, signed-out browser',
+  )
+  .action((f: { http?: boolean; host: string; port: string; client: string; newToken?: boolean; allowedHost?: string[]; profileClient?: string[] }) =>
     run(async () => {
       if (!f.http) {
         await import('../../mcp/src/stdio.ts');
         return;
       }
       const { startHttp } = await import('../../mcp/src/http.ts');
-      await startHttp({ host: f.host, port: Number(f.port), client: f.client, newToken: f.newToken, prog: 'dea', allowedHosts: f.allowedHost });
+      await startHttp({
+        host: f.host,
+        port: Number(f.port),
+        client: f.client,
+        newToken: f.newToken,
+        prog: 'dea',
+        allowedHosts: f.allowedHost,
+        profileClients: f.profileClient,
+      });
       await new Promise(() => {}); // until Ctrl+C
     }),
   );

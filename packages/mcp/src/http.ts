@@ -40,6 +40,11 @@ export function clientRunsDir(home: string, client: string): string {
   return join(home, 'clients', safe, 'runs');
 }
 
+/** May this client's hands tools open the owner's DEA browser profile? Only when the owner named it. */
+export function profileAllowed(client: string, profileClients?: string[]): boolean {
+  return Boolean(profileClients?.includes(client));
+}
+
 export function serveHome(): string {
   return process.env.DEA_SERVE_HOME ?? join(homedir(), '.dea');
 }
@@ -106,6 +111,11 @@ export interface HttpOptions {
   hubHome?: string;
   /** extra Host header names to accept when bound to a non-loopback address */
   allowedHosts?: string[];
+  /**
+   * Clients (token names) whose hands tools may open the DEA browser profile in DEA_PROFILE: the owner's own sign-ins.
+   * Nobody else gets it: a remote client browses with a fresh, signed-out browser.
+   */
+  profileClients?: string[];
   /** the permission mode for Hub calls (default: DEA_MODE, policy.json, else supervised). Over HTTP nobody can be asked, so supervised refuses changes. */
   hubMode?: Mode;
   log?: (line: string) => void;
@@ -195,7 +205,12 @@ export async function serveHttp(o: HttpOptions = {}): Promise<HttpServer> {
   };
   const clientOf = (ctx: { authInfo?: { clientId?: string } }) => ctx.authInfo?.clientId ?? 'remote';
   const onerror = (e: Error) => log(`dea serve: ${e.message}`);
-  const tools: McpHttpHandler = createMcpHandler((ctx) => createServer({ state: stateFor(clientOf(ctx)) }), { onerror });
+  const tools: McpHttpHandler = createMcpHandler(
+    (ctx) => createServer({ state: stateFor(clientOf(ctx)), allowProfile: profileAllowed(clientOf(ctx), o.profileClients) }),
+    { onerror },
+  );
+  if (process.env.DEA_PROFILE && !o.profileClients?.length)
+    log(`dea serve: DEA_PROFILE (${process.env.DEA_PROFILE}) is not used over HTTP; name the clients that may use it with --profile-client`);
   const gateway: McpHttpHandler = createMcpHandler((ctx) => createGateway(clientOf(ctx), hub, { closeHub: false }), { onerror });
 
   const server = createHttpServer(async (req, res) => {
@@ -271,10 +286,23 @@ export async function serveHttpFromArgs(argv: string[], prog: string): Promise<H
     client: flag('--client'),
     newToken: argv.includes('--new-token'),
     prog,
+    // --profile-client a,b: the clients that may use DEA_PROFILE (the owner's sign-ins)
+    profileClients: flag('--profile-client')
+      ?.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   });
 }
 
-export async function startHttp(o: { host?: string; port?: number; client?: string; newToken?: boolean; prog: string; allowedHosts?: string[] }) {
+export async function startHttp(o: {
+  host?: string;
+  port?: number;
+  client?: string;
+  newToken?: boolean;
+  prog: string;
+  allowedHosts?: string[];
+  profileClients?: string[];
+}) {
   const client = o.client ?? 'remote';
   const home = serveHome();
   const say = (s: string) => process.stderr.write(`${s}\n`);
@@ -284,7 +312,7 @@ export async function startHttp(o: { host?: string; port?: number; client?: stri
   const host = o.host ?? '127.0.0.1';
   if (!LOOPBACK.has(host))
     say(`WARNING: listening on ${host}, not just this computer. Anyone who can reach this port and has a token can use DEA. Put it behind HTTPS.`);
-  const s = await serveHttp({ host, port: o.port, home, allowedHosts: o.allowedHosts });
+  const s = await serveHttp({ host, port: o.port, home, allowedHosts: o.allowedHosts, profileClients: o.profileClients });
   say(`DEA is serving over HTTP (Streamable HTTP, MCP)
   DEA tools  ${s.url}/mcp
   DEA Hub    ${s.url}/hub   (apps and permissions of client "${client}"; change with: dea hub allow ${client} <app> <level>)`);
