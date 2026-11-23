@@ -60,12 +60,12 @@ export class ContentCache {
     return join(this.dir, ns, key.slice(0, 2), key);
   }
 
-  /** the folder of a fresh entry, or null (missing or older than the age limit) */
+  /** the folder of a fresh entry, or null (missing or older than the age limit; an immutable entry has no age limit) */
   async get(ns: string, key: string): Promise<string | null> {
     const d = this.entry(ns, key);
     try {
-      const m = JSON.parse(await readFile(join(d, 'meta.json'), 'utf8')) as { at: number };
-      if (Date.now() - m.at > this.ttlMs) return null;
+      const m = JSON.parse(await readFile(join(d, 'meta.json'), 'utf8')) as { at: number; immutable?: boolean };
+      if (!m.immutable && Date.now() - m.at > this.ttlMs) return null;
       const now = new Date();
       await utimes(join(d, 'meta.json'), now, now).catch(() => {}); // last use, for the size cap
       return d;
@@ -146,7 +146,8 @@ export class ContentCache {
     for (const [k, v] of Object.entries(res.headers())) if (KEEP_HEADERS.test(k)) headers[k] = v;
     const noStore = /no-store/i.test(res.headers()['cache-control'] ?? '');
     if (res.status() === 200 && !noStore && body.byteLength <= MAX_FILE) {
-      await this.put('http', key, { url, status: 200, headers }, { body }).catch(() => {});
+      // a pinned CDN file (three@0.170.0, ...) never changes: kept past the age limit, so a later run works offline
+      await this.put('http', key, { url, status: 200, headers, ...(isImmutableUrl(url) ? { immutable: true } : {}) }, { body }).catch(() => {});
     }
     await route.fulfill({ status: res.status(), headers, body }).catch(() => {});
   }
@@ -161,8 +162,8 @@ export class ContentCache {
           const dir = join(this.dir, ns, p, k);
           try {
             const s = await stat(join(dir, 'meta.json'));
-            const m = JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8')) as { at: number; bytes?: number };
-            all.push({ dir, bytes: m.bytes ?? 0, used: s.mtimeMs, at: m.at });
+            const m = JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8')) as { at: number; bytes?: number; immutable?: boolean };
+            all.push({ dir, bytes: m.bytes ?? 0, used: s.mtimeMs, at: m.immutable ? Number.POSITIVE_INFINITY : m.at });
           } catch {
             // an entry left half-written by a crash
             await rm(dir, { recursive: true, force: true }).catch(() => {});
@@ -172,7 +173,8 @@ export class ContentCache {
     let total = all.reduce((s, e) => s + e.bytes, 0);
     let removed = 0;
     for (const e of all) {
-      if (total <= this.maxBytes && Date.now() - e.at <= this.ttlMs) continue;
+      // immutable entries (at = Infinity) never expire by age; they still leave, least recently used first, over the size cap
+      if (total <= this.maxBytes && (e.at === Number.POSITIVE_INFINITY || Date.now() - e.at <= this.ttlMs)) continue;
       await rm(e.dir, { recursive: true, force: true }).catch(() => {});
       total -= e.bytes;
       removed++;
@@ -183,6 +185,24 @@ export class ContentCache {
   async clear(): Promise<void> {
     await rm(this.dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * A URL whose bytes can never change: an exact package version on a CDN that serves published npm files
+ * (cdn.jsdelivr.net/npm/three@0.170.0/..., esm.sh/three@0.170.0, unpkg.com/three@0.170.0/...). Ranges and tags
+ * (three@0.170, three@latest, three@^0.170.0) can move, so they are not immutable.
+ */
+export function isImmutableUrl(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:') return false;
+  const path = u.hostname === 'cdn.jsdelivr.net' ? u.pathname.replace(/^\/npm\//, '/') : ['esm.sh', 'unpkg.com'].includes(u.hostname) ? u.pathname : null;
+  if (path == null || (u.hostname === 'cdn.jsdelivr.net' && !u.pathname.startsWith('/npm/'))) return false;
+  return /^\/(@[\w.-]+\/)?[\w.-]+@\d+\.\d+\.\d+(-[\w.]+)?(\/|$)/.test(path);
 }
 
 const current = new AsyncLocalStorage<ContentCache | null>();

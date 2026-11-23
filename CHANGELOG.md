@@ -11,6 +11,12 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- `dea serve --http`: each token (client) has its own runs folder, `<home>/clients/<client>/runs`. `list_runs`, `report`
+  and "latest" never show another client's runs, or runs made by the CLI on the same machine. Background investigations
+  started by a client resume in that client's folder (`DEA_RUNS_DIR`). `withRunsRoot()` in core.
+- Preview scoring works offline after one online run: the preview pages go through DEA's content cache, and a pinned CDN
+  file (an exact version on jsDelivr, esm.sh or unpkg, such as `three@0.170.0`) is kept past the cache's age limit
+  because its bytes can never change. `isImmutableUrl()` in core.
 - `test/safety.e2e.test.ts` (runs with `DEA_E2E=1`): Round 11's safety rules proved in a real browser. A click whose script
   sends a POST is stopped and asks, and sends only after the OK; a read-only click is not stopped; a logout link asks,
   typed or clicked; Enter in a form field asks.

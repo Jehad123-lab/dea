@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import { appendFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -10,8 +11,19 @@ export function deaHome(): string {
   return resolve(process.env.DEA_HOME ?? '.dea');
 }
 
+const runsOverride = new AsyncLocalStorage<string>();
+
+/**
+ * Run `fn` with its own runs folder: every run it writes, lists or resolves ("latest" included) lives there.
+ * `dea serve --http` gives each token (client) one, so one client never sees another's runs.
+ */
+export function withRunsRoot<T>(dir: string, fn: () => T): T {
+  return runsOverride.run(resolve(dir), fn);
+}
+
+/** Where runs live: the folder set by withRunsRoot, else DEA_RUNS_DIR (a background child of such a call), else DEA_HOME/runs. */
 export function runsDir(): string {
-  return join(deaHome(), 'runs');
+  return runsOverride.getStore() ?? (process.env.DEA_RUNS_DIR ? resolve(process.env.DEA_RUNS_DIR) : join(deaHome(), 'runs'));
 }
 
 function slugHost(url: string): string {

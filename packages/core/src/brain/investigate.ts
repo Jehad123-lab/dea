@@ -90,7 +90,8 @@ export async function investigateInBackground(
   const child = spawn(o.launcher[0], [...o.launcher.slice(1), 'investigate', '--resume', cp.runId, ...(o.browser ? ['--browser', o.browser] : [])], {
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env, DEA_HOME: process.env.DEA_HOME ?? deaHome() },
+    // the child resumes in the same runs folder (a dea serve client's own folder, when this runs inside one)
+    env: { ...process.env, DEA_HOME: process.env.DEA_HOME ?? deaHome(), DEA_RUNS_DIR: join(dir, '..') },
     windowsHide: true,
   });
   child.unref();

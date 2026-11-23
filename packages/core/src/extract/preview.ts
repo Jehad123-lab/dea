@@ -1107,7 +1107,11 @@ export async function renderPreview(
   params: Params,
   viewport: { width: number; height: number },
 ): Promise<{ png: string; error?: string }> {
-  const page = await browser.newPage({ viewport });
+  // through the content cache: three.js and the other pinned CDN files the preview imports are kept, so scoring works
+  // offline once they were fetched (before, a run without internet scored a rebuild that was never drawn)
+  const context = await browser.newContext({ viewport });
+  await currentCache()?.attach(context);
+  const page = await context.newPage();
   try {
     await page.goto(`${base}/preview/index.html#${encodeURIComponent(JSON.stringify(params))}`, { waitUntil: 'load', timeout: 30_000 });
     // a first compile of many programs on a software GPU can take a while; the wait ends as soon as the page is ready
@@ -1116,7 +1120,7 @@ export async function renderPreview(
     const png = `data:image/png;base64,${(await safeScreenshot(page)).toString('base64')}`;
     return { png, error: error ?? undefined };
   } finally {
-    await page.close();
+    await context.close();
   }
 }
 
@@ -1128,7 +1132,9 @@ export async function kitInteraction(
   viewport: { width: number; height: number },
   extra: Params = {},
 ): Promise<{ frames: Buffer[]; states: Array<StepState | null>; error?: string }> {
-  const page = await browser.newPage({ viewport });
+  const context = await browser.newContext({ viewport });
+  await currentCache()?.attach(context);
+  const page = await context.newPage();
   try {
     // the recorder only watches here: it reads which uniforms and uploads change during each step
     await page.addInitScript(REPLAY_CAPTURE_SCRIPT);
@@ -1141,7 +1147,7 @@ export async function kitInteraction(
     const { frames, states } = await runInteractionWithState(page);
     return { frames, states, error: error ?? undefined };
   } finally {
-    await page.close();
+    await context.close();
   }
 }
 
