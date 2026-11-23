@@ -369,9 +369,7 @@ export class HandsSession {
     };
     this.log.push(entry);
     await appendFile(this.writer.path('actions.jsonl'), `${redactText(JSON.stringify(entry))}\n`);
-    await this.writer.progress(
-      `${action} ${decision}${ok ? '' : decision === 'allow' ? ' (failed)' : ''}: ${reason}${error ? ` — ${error}` : ''}`,
-    );
+    await this.writer.progress(`${action} ${decision}${ok ? '' : decision === 'allow' ? ' (failed)' : ''}: ${reason}${error ? ` — ${error}` : ''}`);
     await this.writeRun();
     return {
       ok,

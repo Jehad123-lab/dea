@@ -632,7 +632,9 @@ export function createServer(opts: ServerOptions = {}): McpServer {
         confirm: z
           .string()
           .optional()
-          .describe('goto only: the one-time token from a NEEDS THE USER’S OK answer about a link that changes something (logout, delete, unsubscribe), after the user said yes'),
+          .describe(
+            'goto only: the one-time token from a NEEDS THE USER’S OK answer about a link that changes something (logout, delete, unsubscribe), after the user said yes',
+          ),
         target: target.optional().describe('for hover, or scroll-into-view'),
         by: z.number().optional().describe('scroll by pixels (positive = down, default 800)'),
         to: z.enum(['top', 'bottom']).optional().describe('scroll to the top or bottom'),
