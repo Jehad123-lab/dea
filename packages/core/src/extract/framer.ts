@@ -151,15 +151,27 @@ export default function ${name}(props) {
   const rbRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [failed, setFailed] = useState(false)
+  // why it is blank, shown only in the Framer editor (a visitor sees the poster or nothing, never an error box)
+  const [why, setWhy] = useState("")
+  const inCanvas = RenderTarget.current() === RenderTarget.canvas
 
   useEffect(() => {
-    if (!source || !canvas.current) return
+    if (!source) {
+      setWhy("Set Source to the URL of the hosted framer/site folder + /rebuild/")
+      return
+    }
+    if (!canvas.current) return
     let alive = true
     let io = null
     let ro = null
     let rb = null
     const el = canvas.current
-    const onLost = (e) => { e.preventDefault(); setFailed(true); rb?.stop() }
+    const onLost = (e) => {
+      e.preventDefault()
+      setFailed(true)
+      setWhy("WebGL stopped on this device (context lost); the poster is shown instead")
+      rb?.stop()
+    }
     el.addEventListener("webglcontextlost", onLost)
     const inEditor = RenderTarget.current() !== RenderTarget.preview
     const reduced = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -167,6 +179,7 @@ export default function ${name}(props) {
     const base = source.endsWith("/") ? source : source + "/"
     setFailed(false)
     setReady(false)
+    setWhy("")
     loadPipeline(base)
       .then((data) => {
         if (!alive) return
@@ -185,7 +198,17 @@ export default function ${name}(props) {
         }
         setReady(true)
       })
-      .catch(() => alive && setFailed(true))
+      .catch((e) => {
+        if (!alive) return
+        setFailed(true)
+        const msg = String(e?.message || e)
+        setWhy(
+          /fetch|network|cors|load|json|unexpected token|404/i.test(msg)
+            ? \`Could not load \${base}pipeline.json. Check the URL ends in /rebuild/ and the host sends Access-Control-Allow-Origin (vercel.json or _headers from framer/site).\`
+            : \`The rebuild did not start: \${msg.slice(0, 160)}\`,
+        )
+        if (typeof console !== "undefined") console.warn("[dea]", msg)
+      })
     return () => {
       alive = false
       el.removeEventListener("webglcontextlost", onLost)
@@ -206,6 +229,11 @@ export default function ${name}(props) {
     <div ref={wrap} style={{ position: "relative", overflow: "hidden", ...style }}>
       {poster?.src && (!ready || failed) ? <img src={poster.src} srcSet={poster.srcSet} alt={poster.alt || ""} style={{ ...fill, objectFit: "cover" }} /> : null}
       <canvas ref={canvas} style={{ ...fill, opacity: ready && !failed ? 1 : 0 }} />
+      {why && inCanvas ? (
+        <div role="status" style={{ position: "absolute", left: 12, right: 12, bottom: 12, padding: "10px 12px", borderRadius: 8, background: "rgba(20,20,24,0.88)", color: "#fff", font: "500 12px/1.4 Inter, sans-serif" }}>
+          {why}
+        </div>
+      ) : null}
     </div>
   )
 }

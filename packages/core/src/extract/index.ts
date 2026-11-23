@@ -413,6 +413,65 @@ const easesOf = (nodes: GsapNode[]): string[] => {
  * modules with a minimal scene for React, vanilla or Framer, textures by local path. Then render the rebuild, compare
  * it with the original's first screen, and when it does not match, research and retry (up to 3 rounds).
  */
+/** What `dea record` took: the reference screenshot and the recorded WebGL frames, kept in the cache for the next extract. */
+export interface RecordResult {
+  url: string;
+  /** true when the cache already held this capture (nothing was taken again) */
+  reused: boolean;
+  /** true when the WebGL frames were recorded (an editable rebuild can be made from them) */
+  recorded: boolean;
+  recordingError: string | null;
+  /** when, after load, the reference frame was taken */
+  atMs: number;
+  cacheDir: string;
+  seconds: number;
+}
+
+/**
+ * The reference capture on its own: the slowest step of `dea extract` (the watch until the page settles, the WebGL
+ * recording, the scripted input), split out so a slow machine or a time-limited box can take it in a separate call.
+ * It writes the same cache entry extract reads, so a later `dea extract <url>` with the same capture options
+ * (--section, --reference-ms, --quick, --no-replay, --tape-mb, --browser) reuses it instead of opening the site again.
+ */
+export async function recordReference(url: string, opts: ExtractOptions = {}): Promise<RecordResult> {
+  if (opts.reference) throw new Error('dea record takes the reference itself; --reference (your own screenshot) belongs to dea extract');
+  const cache = opts.noCache ? null : (currentCache() ?? new ContentCache({ dir: opts.cacheDir, maxMb: opts.cacheMaxMb }));
+  if (!cache) throw new Error('dea record keeps what it takes in the cache, so it cannot run with --no-cache');
+  const t0 = Date.now();
+  let reused = false;
+  const say = (s: string) => {
+    if (s.startsWith('reusing the reference')) reused = true;
+    opts.onProgress?.(s);
+  };
+  // the same viewport extractRun gives referenceFor: a different one would be a different cache key
+  const vp = { width: 1440, height: 900 };
+  const r = await withCache(cache, () =>
+    withSharedBrowser(
+      opts.browser ?? 'auto',
+      opts.headless ?? true,
+      async () => {
+        const { browser } = await launchBrowser(opts.browser ?? 'auto', opts.headless ?? true);
+        try {
+          return await referenceFor(browser, url, vp, opts, say);
+        } finally {
+          await releaseBrowser(browser);
+        }
+      },
+      { max: 1 },
+    ),
+  );
+  const rec = r as RefShot & { recording?: unknown; recordingError?: string };
+  return {
+    url,
+    reused,
+    recorded: Boolean(rec.recording),
+    recordingError: rec.recordingError ?? (opts.noReplay ? 'not recorded (--no-replay)' : rec.recording ? null : 'nothing was recorded'),
+    atMs: r.atMs,
+    cacheDir: cache.dir,
+    seconds: Math.round((Date.now() - t0) / 100) / 10,
+  };
+}
+
 export async function extract(url: string, opts: ExtractOptions = {}): Promise<ExtractResult> {
   const outer = currentTimings();
   const tm = outer ?? new Timings(opts.quick ? 'extract --quick' : 'extract', url).start();

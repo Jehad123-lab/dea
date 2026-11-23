@@ -124,3 +124,15 @@ describe('writeFramerExport', () => {
     await expect(writeFramerExport(kit)).rejects.toThrow(/no editable rebuild/);
   });
 });
+
+describe('framer export: why it is blank', () => {
+  it('says what is wrong in the Framer editor only, never to a visitor', () => {
+    const { code } = framerComponent(pipeline(), { name: 'Hero' });
+    expect(code).toContain('Set Source to the URL of the hosted framer/site folder');
+    expect(code).toContain('Access-Control-Allow-Origin');
+    expect(code).toContain('context lost');
+    // the message is drawn only when the component is on the Framer canvas (the editor)
+    expect(code).toContain('RenderTarget.current() === RenderTarget.canvas');
+    expect(code).toMatch(/why && inCanvas \?/);
+  });
+});

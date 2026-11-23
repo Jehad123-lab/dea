@@ -174,7 +174,16 @@ export {
   type Target,
   tokenFiles,
 } from './extract/generate.ts';
-export { type ExtractOptions, type ExtractResult, extract, extractGaps, filterTree, observedFrom } from './extract/index.ts';
+export {
+  type ExtractOptions,
+  type ExtractResult,
+  extract,
+  extractGaps,
+  filterTree,
+  observedFrom,
+  type RecordResult,
+  recordReference,
+} from './extract/index.ts';
 export {
   type KitManifest,
   kitDir,

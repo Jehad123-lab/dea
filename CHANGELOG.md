@@ -11,6 +11,12 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- `dea record <url>`: only the slow part of `dea extract` (the reference screenshot and the site's recorded WebGL frames),
+  kept in the cache. A later `dea extract <url>` with the same capture options reuses it instead of opening the site
+  again, so a slow machine or a time-limited box can do extract in parts (record, then the stages, then extract `--from`).
+- The Framer component says why it is blank, in the Framer editor only: no Source set, the Source could not be loaded
+  (wrong URL, a 404 page, or missing CORS headers), or WebGL stopped on the device. Visitors still see the poster or
+  nothing, never an error box.
 - `dea framer <run>`: the editable rebuild as one Framer code component (three.js from esm.sh, property controls for
   Source, Poster, Animate, Follow input, Max DPR and up to 12 shader values; DPR capped at 1.5, runs only on screen,
   still in the editor, with reduced motion or `?static`; poster on load and on WebGL loss), plus `framer/site/` to host

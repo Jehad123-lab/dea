@@ -39,6 +39,7 @@ import {
   type RunDoc,
   readRun,
   readUrl,
+  recordReference,
   renderReport,
   renderTimings,
   researchAnswer,
@@ -735,6 +736,45 @@ common(
     if (flags.json) return void process.stdout.write(`${JSON.stringify({ ...r.doc, env: undefined }, null, 2)}\n`);
     process.stdout.write(`\n${r.summary}\n\nReport: ${relative(process.cwd(), r.dir).startsWith('..') ? r.dir : relative(process.cwd(), r.dir)}/trace.md\n`);
   }),
+);
+
+common(
+  program
+    .command('record')
+    .description(
+      "take only the slow part of dea extract: the reference screenshot and the site's recorded WebGL frames, kept in the cache; a later dea extract <url> with the same capture options reuses it instead of opening the site again (for slow machines or time-limited boxes)",
+    )
+    .argument('<url>', 'site to record')
+    .option('--section <selector>', 'the same --section you will give dea extract')
+    .option('--reference-ms <ms>', 'watch the original this long (default: until the page settles, up to 45 s); give extract the same value')
+    .option('--quick', 'rough and fast: 1 recorded frame (give extract --quick too)')
+    .option('--no-replay', 'only the screenshot, no WebGL recording (no editable rebuild)')
+    .option('--tape-mb <mb>', 'what the scroll tape may add to the recording (default 64); give extract the same value')
+    .option('--cache-dir <dir>', 'where the content cache lives (default <home>/cache)')
+    .option('--cache-max-mb <mb>', 'size cap of the content cache', '1024'),
+).action(
+  (
+    url: string,
+    flags: CommonFlags & { section?: string; referenceMs?: string; quick?: boolean; replay: boolean; tapeMb?: string; cacheDir?: string; cacheMaxMb: string },
+  ) =>
+    run(async () => {
+      const r = await recordReference(url, {
+        ...options(flags),
+        section: flags.section,
+        referenceMs: flags.referenceMs != null ? Number(flags.referenceMs) : undefined,
+        quick: flags.quick,
+        noReplay: !flags.replay,
+        tapeMb: Number(flags.tapeMb) || undefined,
+        cacheDir: flags.cacheDir,
+        cacheMaxMb: Number(flags.cacheMaxMb) || 1024,
+        onProgress: flags.json ? undefined : (s: string) => process.stderr.write(`  · ${s}\n`),
+      });
+      if (flags.json) return void process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
+      const what = r.recorded ? 'reference screenshot + recorded WebGL frames' : `reference screenshot only (${r.recordingError})`;
+      process.stdout.write(
+        `\n${r.reused ? 'Already in the cache' : 'Recorded'}: ${what}, frame at ${Math.round(r.atMs)} ms, ${r.seconds} s\nCache: ${r.cacheDir}\nNext: dea extract ${url}${flags.section ? ` --section "${flags.section}"` : ''}${flags.referenceMs ? ` --reference-ms ${flags.referenceMs}` : ''}${flags.quick ? ' --quick' : ''}${flags.replay ? '' : ' --no-replay'}${flags.tapeMb ? ` --tape-mb ${flags.tapeMb}` : ''} reuses it\n`,
+      );
+    }),
 );
 
 program
