@@ -22,6 +22,7 @@ import {
   inspectSite,
   investigateInBackground,
   investigationStatus,
+  kitDir,
   libraryAdd,
   libraryHome,
   libraryList,
@@ -55,12 +56,13 @@ import {
   withCache,
   withSharedBrowser,
   withTimings,
+  writeFramerExport,
 } from '@dea/core';
 import { Command, Option } from 'commander';
 import { launchers, registerHub } from './hub.ts';
 import { registerSession } from './session.ts';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 interface CommonFlags {
   browser: BrowserChoice;
@@ -931,6 +933,31 @@ program
       if (flags.json) return void process.stdout.write(`${JSON.stringify(runs, null, 2)}\n`);
       if (!runs.length) return void process.stdout.write('No runs yet. Try: dea inspect https://threejs.org/examples/webgl_animation_keyframes.html\n');
       for (const r of runs) process.stdout.write(`${r.id}  ${r.kind.padEnd(7)}  ${r.title || r.url}\n`);
+    }),
+  );
+
+program
+  .command('framer')
+  .description("turn an extract's editable rebuild into one Framer code component, plus a folder to host its files")
+  .argument('<run>', 'extract run id, run folder, or a kit folder (dea-kit.json)')
+  .option('-n, --name <name>', 'component name (default: from the site)')
+  .option('--url <url>', 'where the site folder will be hosted, + /rebuild/ (default for the Source control)')
+  .option('--three <revision>', 'three.js revision to load from esm.sh, e.g. 170', '170')
+  .option('--allow-site-files', 'export a kit made without --own-assets (private tests only)')
+  .option('--json', 'print JSON')
+  .action((ref: string, flags: { name?: string; url?: string; three: string; allowSiteFiles?: boolean; json?: boolean }) =>
+    run(async () => {
+      const r = await writeFramerExport(await kitDir(ref), {
+        name: flags.name,
+        url: flags.url,
+        threeRevision: flags.three,
+        allowSiteFiles: flags.allowSiteFiles,
+      });
+      if (flags.json) return void process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
+      process.stdout.write(
+        `Framer component ${r.name}: ${r.file}\nHost this folder (e.g. npx vercel deploy "${r.site}" --prod), then set Source to <url>/rebuild/.\nControls: Source, Poster, Animate, Follow input, Max DPR${r.controls.length ? `, ${r.controls.map((c) => c.uniform).join(', ')}` : ''}\n`,
+      );
+      if (r.siteFiles) process.stderr.write("Warning: the hosted files include the site's own recorded geometry and textures. Keep it private.\n");
     }),
   );
 

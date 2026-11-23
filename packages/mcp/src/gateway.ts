@@ -6,7 +6,7 @@ import { Server } from '@modelcontextprotocol/server';
  * named "<app>__<tool>". The client talks only to DEA; DEA holds the logins and logs every call.
  */
 export function createGateway(client: string, hub = new Hub(), o: { closeHub?: boolean } = {}): Server {
-  const server = new Server({ name: 'dea-hub', version: '0.1.0' }, { capabilities: { tools: { listChanged: true } }, instructions: GATEWAY_NOTE(client) });
+  const server = new Server({ name: 'dea-hub', version: '0.2.0' }, { capabilities: { tools: { listChanged: true } }, instructions: GATEWAY_NOTE(client) });
 
   server.setRequestHandler('tools/list', async () => {
     const { tools, errors } = await hub.toolsFor(client);

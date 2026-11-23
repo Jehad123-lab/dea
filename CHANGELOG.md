@@ -3,7 +3,38 @@
 All notable changes to DEA. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project uses [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - unreleased
+## [0.2.0] - unreleased
+
+The first version published to npm. 0.1.0 was never published: npm will not take `dea-cli@0.1.0`, because an unrelated
+package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a version number. Everything listed under
+0.1.0 below ships in 0.2.0.
+
+### Added
+
+- `dea framer <run>`: the editable rebuild as one Framer code component (three.js from esm.sh, property controls for
+  Source, Poster, Animate, Follow input, Max DPR and up to 12 shader values; DPR capped at 1.5, runs only on screen,
+  still in the editor, with reduced motion or `?static`; poster on load and on WebGL loss), plus `framer/site/` to host
+  with CORS headers for Vercel and Netlify. Refuses a kit carrying the site's files unless `--allow-site-files`.
+- `dea prune`: remove runs older than N days (30), keeping the newest 5 and any folder with a `KEEP` file; a dry run
+  unless `--yes`.
+- The MCP `submit` tool can approve any waiting interact action (`action` + the same arguments + the token); `select`
+  and `fill` take a confirm token in the session, daemon and CLI.
+- `dea-kit.json` records `ownAssets`; `dea library add` warns when a kit carries the site's recorded files.
+
+### Safety
+
+- A plain click, select, key press or fill that tries to send data (POST, PUT, PATCH, DELETE) is stopped before it
+  leaves the browser and asks first; tracking beacons pass.
+- Enter in a form field is judged as a submit, with or without a target.
+- Opening a link that logs out, deletes, unsubscribes or cancels asks first (supervised, delegated) or is refused
+  (restricted).
+
+### Changed
+
+- Versions are 0.2.0 everywhere: the three packages, the CLI, the MCP server, the Hub, the HTTP health answer and
+  `server.json`.
+
+## [0.1.0] - never published
 
 The first release: decode a website with evidence, use what comes out, and let AI agents do the same.
 

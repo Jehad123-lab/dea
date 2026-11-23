@@ -1,6 +1,6 @@
 {
   "name": "dea-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DEA MCP server: decode any website's stack, design, code and APIs with evidence, plus DEA Hub. stdio or Streamable HTTP with a bearer token.",
   "author": "Jehad Uddin",
   "license": "MIT",

@@ -36,7 +36,7 @@ if (argv[0] === 'investigate' && flag('--resume')) {
      --port <n>  --host <addr>  --client <name>  --new-token
   dea-mcp --version`);
 } else if (argv.includes('--version') || argv.includes('-v')) {
-  console.error('0.1.0');
+  console.error('0.2.0');
 } else {
   serveStdio(() => createServer(), { onerror: (e) => console.error(`dea-mcp: ${e.message}`) });
   console.error(`dea MCP server running on stdio (runs saved in ${process.env.DEA_HOME})`);

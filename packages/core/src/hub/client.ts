@@ -11,7 +11,7 @@ import {
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { hubHome, type SecretStore, type ServerDef } from './store.ts';
 
-export const HUB_VERSION = '0.1.0';
+export const HUB_VERSION = '0.2.0';
 /** The fixed loopback port DEA registers as its OAuth redirect (servers compare it exactly). DEA_HUB_PORT moves it. */
 export const DEFAULT_CALLBACK_PORT = 33418;
 
