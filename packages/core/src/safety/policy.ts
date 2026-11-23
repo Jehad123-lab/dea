@@ -61,6 +61,24 @@ export function isMutatingRequest(req: { method: string; resourceType: string; u
   return !ANALYTICS_HOSTS.test(host);
 }
 
+/** Paths and queries that change something just by being opened: logout, delete, unsubscribe and the like. */
+const RISKY_LINK =
+  /\/(log-?out|sign-?out|delete|remove|destroy|unsubscribe|deactivate|cancel-?(subscription|account|order))(\/|$)|[?&](action|do|op)=(delete|remove|destroy|logout|signout|unsubscribe|cancel)\b/i;
+
+/**
+ * Opening this URL may change something on the site (a GET with a side effect). A plain goto is a look; one of these
+ * is treated like a submit and asks first.
+ */
+export function riskyUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (!/^https?:$/.test(u.protocol)) return false;
+    return RISKY_LINK.test(`${u.pathname}${u.search}`);
+  } catch {
+    return false;
+  }
+}
+
 /** A field DEA never types into: passwords, one-time codes, card numbers. Secrets do not pass through DEA. */
 export function isSecretField(f: { type?: string; name?: string; autocomplete?: string; id?: string; label?: string }): boolean {
   if (f.type && /^password$/i.test(f.type)) return true;

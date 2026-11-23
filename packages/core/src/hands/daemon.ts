@@ -27,7 +27,7 @@ export const SESSION_METHODS = {
   snapshot: [],
   screenshot: ['fullPage'],
   tabs: [],
-  goto: ['url'],
+  goto: ['url', 'confirm', 'confirmed'],
   back: [],
   forward: [],
   reload: [],
@@ -57,7 +57,7 @@ export async function dispatch(s: HandsSession, method: string, a: Record<string
     case 'tabs':
       return s.tabs();
     case 'goto':
-      return s.goto(String(a.url));
+      return s.goto(String(a.url), { confirm: a.confirm, confirmed: a.confirmed === true });
     case 'back':
       return s.back();
     case 'forward':

@@ -16,6 +16,7 @@ import {
   isSecretField,
   looksLikeSubmit,
   type Policy,
+  riskyUrl,
   sensitiveForm,
 } from '../safety/policy.ts';
 import { finishHar } from '../see/network.ts';
@@ -465,11 +466,13 @@ export class HandsSession {
   // ---------------------------------------------------------------------------------------------
   // moving around (always allowed, except to a domain the policy blocks)
 
-  async goto(url: string): Promise<ActionResult> {
+  async goto(url: string, opts: { confirm?: string; confirmed?: boolean } = {}): Promise<ActionResult> {
     const target = normalizeUrl(url);
+    // a link that logs out, deletes or unsubscribes changes the site just by being opened: it asks like a submit
+    const risky = riskyUrl(target);
     return this.act(
-      'goto',
-      'navigate',
+      risky ? 'goto+risky' : 'goto',
+      risky ? 'submit' : 'navigate',
       { url: target },
       async () => {
         const res = await this.page.goto(target, { waitUntil: 'domcontentloaded', timeout: this.opts.timeoutMs ?? 45_000 });
@@ -477,7 +480,7 @@ export class HandsSession {
         await this.page.waitForTimeout(800);
         return { status: res?.status() ?? null };
       },
-      { url: target },
+      { url: target, confirmToken: opts.confirm, confirmed: opts.confirmed },
     );
   }
 
@@ -752,7 +755,7 @@ export class HandsSession {
   /** run.json for the session: meta plus every action, so `dea report` and list_runs see it like any run. */
   async writeRun(): Promise<void> {
     const page = this.pages[this.current];
-    const first = this.log.find((a) => a.action === 'goto')?.args.url as string | undefined;
+    const first = this.log.find((a) => a.action === 'goto' || a.action === 'goto+risky')?.args.url as string | undefined;
     await this.writer.json('run.json', {
       meta: {
         schema: 'dea.run/1',
