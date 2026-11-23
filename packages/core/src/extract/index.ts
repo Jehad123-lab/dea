@@ -413,6 +413,72 @@ const easesOf = (nodes: GsapNode[]): string[] => {
  * modules with a minimal scene for React, vanilla or Framer, textures by local path. Then render the rebuild, compare
  * it with the original's first screen, and when it does not match, research and retry (up to 3 rounds).
  */
+/** Why the editable rebuild did not run, in words that say what to do (three.js comes from a CDN in the preview). */
+export function rebuildErrorText(err: string): string {
+  if (/dynamically imported module|Failed to fetch|NetworkError|cdn\.jsdelivr|esm\.sh/i.test(err))
+    return `three.js could not be loaded from the CDN (no internet on this machine?), so the rebuild was never drawn. Run again with internet to score it. (${err.slice(0, 140)})`;
+  return err.slice(0, 200);
+}
+
+/** What `dea record` took: the reference screenshot and the recorded WebGL frames, kept in the cache for the next extract. */
+export interface RecordResult {
+  url: string;
+  /** true when the cache already held this capture (nothing was taken again) */
+  reused: boolean;
+  /** true when the WebGL frames were recorded (an editable rebuild can be made from them) */
+  recorded: boolean;
+  recordingError: string | null;
+  /** when, after load, the reference frame was taken */
+  atMs: number;
+  cacheDir: string;
+  seconds: number;
+}
+
+/**
+ * The reference capture on its own: the slowest step of `dea extract` (the watch until the page settles, the WebGL
+ * recording, the scripted input), split out so a slow machine or a time-limited box can take it in a separate call.
+ * It writes the same cache entry extract reads, so a later `dea extract <url>` with the same capture options
+ * (--section, --reference-ms, --quick, --no-replay, --tape-mb, --browser) reuses it instead of opening the site again.
+ */
+export async function recordReference(url: string, opts: ExtractOptions = {}): Promise<RecordResult> {
+  if (opts.reference) throw new Error('dea record takes the reference itself; --reference (your own screenshot) belongs to dea extract');
+  const cache = opts.noCache ? null : (currentCache() ?? new ContentCache({ dir: opts.cacheDir, maxMb: opts.cacheMaxMb }));
+  if (!cache) throw new Error('dea record keeps what it takes in the cache, so it cannot run with --no-cache');
+  const t0 = Date.now();
+  let reused = false;
+  const say = (s: string) => {
+    if (s.startsWith('reusing the reference')) reused = true;
+    opts.onProgress?.(s);
+  };
+  // the same viewport extractRun gives referenceFor: a different one would be a different cache key
+  const vp = { width: 1440, height: 900 };
+  const r = await withCache(cache, () =>
+    withSharedBrowser(
+      opts.browser ?? 'auto',
+      opts.headless ?? true,
+      async () => {
+        const { browser } = await launchBrowser(opts.browser ?? 'auto', opts.headless ?? true);
+        try {
+          return await referenceFor(browser, url, vp, opts, say);
+        } finally {
+          await releaseBrowser(browser);
+        }
+      },
+      { max: 1 },
+    ),
+  );
+  const rec = r as RefShot & { recording?: unknown; recordingError?: string };
+  return {
+    url,
+    reused,
+    recorded: Boolean(rec.recording),
+    recordingError: rec.recordingError ?? (opts.noReplay ? 'not recorded (--no-replay)' : rec.recording ? null : 'nothing was recorded'),
+    atMs: r.atMs,
+    cacheDir: cache.dir,
+    seconds: Math.round((Date.now() - t0) / 100) / 10,
+  };
+}
+
 export async function extract(url: string, opts: ExtractOptions = {}): Promise<ExtractResult> {
   const outer = currentTimings();
   const tm = outer ?? new Timings(opts.quick ? 'extract --quick' : 'extract', url).start();
@@ -1120,6 +1186,8 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             say(
               `(b) editable rebuild (three.js from the render graph): canvas ${cB ? pct(cB.score) : 'n/a'}, page ${pct(sB)}; against (a) itself: ${replay.rebuild.vsReplay != null ? pct(replay.rebuild.vsReplay) : 'n/a'}`,
             );
+            // a rebuild that never ran scores like a bad one: say why, so a low number is not read as a bad translation
+            if (lastErr) say(`(b) did not run, so its score says nothing about the rebuild: ${rebuildErrorText(lastErr)}`);
             await put('preview/rebuild.png', Buffer.from(rebuildPng.slice(rebuildPng.indexOf(',') + 1), 'base64'));
             await put(
               'preview/side-by-side-rebuild.png',
@@ -1607,7 +1675,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       ? [
           `(a) capture replay, the recorded frames played back (ground truth, not editable): canvas ${replay.canvas != null ? pct(replay.canvas) : 'n/a'}, page ${replay.page != null ? pct(replay.page) : 'n/a'} · ${replay.passes} passes, ${replay.draws} draws, ${replay.programs} programs, ${(replay.bytes / 1e6).toFixed(1)} MB (render-graph.md)${replay.shipped ? '' : ', scored but not in the kit (--own-assets)'}`,
           replay.rebuild
-            ? `(b) editable rebuild, three.js from the render graph (rebuild.md): canvas ${replay.rebuild.canvas != null ? pct(replay.rebuild.canvas) : 'n/a'}, page ${replay.rebuild.page != null ? pct(replay.rebuild.page) : 'n/a'}${replay.rebuild.vsReplay != null ? `, ${pct(replay.rebuild.vsReplay)} against (a)` : ''} · ${replay.rebuild.stats.materials} RawShaderMaterials, ${replay.rebuild.stats.cameras} cameras, ${replay.rebuild.stats.renderTargets} render targets; recorded bytes still used: ${(replay.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB geometry, ${(replay.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB textures${opts.ownAssets ? ` (--own-assets: images are placeholders, ${replay.rebuild.stats.placeholders} mesh(es) are boxes)` : ''}${replay.rebuild.kept ? ' · what the project runs' : ''}`
+            ? `(b) editable rebuild, three.js from the render graph (rebuild.md): canvas ${replay.rebuild.canvas != null ? pct(replay.rebuild.canvas) : 'n/a'}, page ${replay.rebuild.page != null ? pct(replay.rebuild.page) : 'n/a'}${replay.rebuild.vsReplay != null ? `, ${pct(replay.rebuild.vsReplay)} against (a)` : ''} · ${replay.rebuild.stats.materials} RawShaderMaterials, ${replay.rebuild.stats.cameras} cameras, ${replay.rebuild.stats.renderTargets} render targets; recorded bytes still used: ${(replay.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB geometry, ${(replay.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB textures${opts.ownAssets ? ` (--own-assets: images are placeholders, ${replay.rebuild.stats.placeholders} mesh(es) are boxes)` : ''}${replay.rebuild.kept ? ' · what the project runs' : ''}${replay.rebuild.errors.length ? ` · DID NOT RUN: ${rebuildErrorText(replay.rebuild.errors[0])}` : ''}`
             : '(b) editable rebuild: not made',
           ...(replay.scene
             ? [
