@@ -1,0 +1,81 @@
+name: CI
+
+# Blocking checks: no step here depends on a live third-party website, so a red run means DEA broke, not the internet.
+# Real-browser tests against live sites run in live.yml (nightly and on demand).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, typecheck, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Build (dist/, plain node)
+        run: pnpm build
+      - name: Pack both packages and run them from the tarballs (no publish)
+        run: node scripts/pack-smoke.mjs
+
+  windows:
+    name: Windows (unit tests, packaging, Hub, doctor, profile)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    needs: check
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Build and run the packed tarballs
+        run: |
+          pnpm build
+          node scripts/pack-smoke.mjs
+      - name: DEA Hub on Windows (config file, permissions, history)
+        shell: pwsh
+        run: |
+          $env:DEA_HUB_HOME = "$env:RUNNER_TEMP\dea-hub"
+          pnpm -s dea hub list
+          pnpm -s dea mcp install --client vscode --project --hub --dry-run
+      - name: "dea doctor and dea bench in Microsoft Edge - a runner has no graphics card, software WebGL is the expected answer"
+        shell: pwsh
+        run: |
+          pnpm -s dea doctor --browser msedge --json | Out-File -Encoding utf8 doctor.json
+          Get-Content doctor.json
+          pnpm -s dea bench --browser msedge --out bench-out
+          Get-Content bench-out/dea-bench.md
+          $b = Get-Content bench-out/dea-bench.json -Raw | ConvertFrom-Json
+          if ($b.result.gpu.kind -eq 'hardware' -and $null -eq $b.meta.timings) { throw 'a hardware GPU must carry timings' }
+          if ($b.result.gpu.kind -ne 'hardware' -and $null -ne $b.meta.timings) { throw 'software or no WebGL must not carry speed numbers' }
+          if ($b.result.gpu.kind -eq 'software' -and $b.meta.label -ne 'software render, not a speed measure') { throw 'software must be labelled' }
+          if ($env:COMPUTERNAME -and ((Get-Content bench-out/dea-bench.json -Raw) -like "*$env:COMPUTERNAME*")) { throw 'the result names the machine' }
+      - name: "DEA browser profile on Windows - a folder of its own, never the everyday profile"
+        shell: pwsh
+        run: |
+          $env:DEA_PROFILES_HOME = "$env:RUNNER_TEMP\dea-profiles"
+          pnpm -s dea browser profiles
+          pnpm -s test:e2e packages/core/test/round10.e2e.test.ts
