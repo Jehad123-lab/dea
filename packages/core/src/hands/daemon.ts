@@ -39,9 +39,9 @@ export const SESSION_METHODS = {
   closeTab: ['index'],
   click: ['target', 'confirm', 'confirmed'],
   type: ['target', 'text', 'enter', 'confirm', 'confirmed'],
-  select: ['target', 'values'],
+  select: ['target', 'values', 'confirm', 'confirmed'],
   press: ['key', 'target', 'confirm', 'confirmed'],
-  fill: ['fields'],
+  fill: ['fields', 'confirm', 'confirmed'],
   submit: ['target', 'confirm', 'confirmed'],
 } as const;
 
@@ -81,11 +81,11 @@ export async function dispatch(s: HandsSession, method: string, a: Record<string
     case 'type':
       return s.type(String(a.target), String(a.text ?? ''), { enter: a.enter === true, confirm: a.confirm, confirmed: a.confirmed === true });
     case 'select':
-      return s.select(String(a.target), a.values);
+      return s.select(String(a.target), a.values, { confirm: a.confirm, confirmed: a.confirmed === true });
     case 'press':
       return s.press(String(a.key), { target: a.target, confirm: a.confirm, confirmed: a.confirmed === true });
     case 'fill':
-      return s.fill(a.fields ?? {});
+      return s.fill(a.fields ?? {}, { confirm: a.confirm, confirmed: a.confirmed === true });
     case 'submit':
       return s.submit(String(a.target), { confirm: a.confirm, confirmed: a.confirmed === true });
     case 'status':

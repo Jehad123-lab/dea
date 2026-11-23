@@ -33,6 +33,7 @@ import {
   loginSession,
   measureStability,
   planInvestigation,
+  pruneRuns,
   RESULT_SCHEMA,
   type RunDoc,
   readRun,
@@ -620,6 +621,10 @@ library
       const e = await libraryAdd(ref, { name: flags.name, tags: flags.tag });
       if (flags.json) return void process.stdout.write(`${JSON.stringify(e, null, 2)}\n`);
       process.stdout.write(`Saved "${e.name}" (${e.url}, ${e.target}) in ${e.dir}\n`);
+      if (e.ownAssets !== true)
+        process.stderr.write(
+          `Note: this kit carries the site's own recorded files (images, meshes, captured frames). Keep it private, or extract again with --own-assets before you share or publish anything made from it.\n`,
+        );
     }),
   );
 
@@ -926,6 +931,27 @@ program
       if (flags.json) return void process.stdout.write(`${JSON.stringify(runs, null, 2)}\n`);
       if (!runs.length) return void process.stdout.write('No runs yet. Try: dea inspect https://threejs.org/examples/webgl_animation_keyframes.html\n');
       for (const r of runs) process.stdout.write(`${r.id}  ${r.kind.padEnd(7)}  ${r.title || r.url}\n`);
+    }),
+  );
+
+program
+  .command('prune')
+  .description('free disk space: remove saved runs older than N days (shows what it would remove unless --yes)')
+  .option('--older-than <days>', 'remove runs started more than this many days ago', '30')
+  .option('--keep <n>', 'always keep this many newest runs', '5')
+  .option('--yes', 'really remove them (without it nothing is deleted)')
+  .option('--home <dir>', 'where runs are saved')
+  .option('--json', 'print JSON')
+  .action((flags: { olderThan: string; keep: string; yes?: boolean; home?: string; json?: boolean }) =>
+    run(async () => {
+      if (flags.home) process.env.DEA_HOME = flags.home;
+      const r = await pruneRuns({ olderThanDays: Number(flags.olderThan), keep: Number(flags.keep), dryRun: !flags.yes });
+      if (flags.json) return void process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
+      const mb = (b: number) => `${(b / 1_048_576).toFixed(1)} MB`;
+      for (const x of r.removed) process.stdout.write(`${r.dryRun ? 'would remove' : 'removed'}  ${x.id}  ${mb(x.bytes)}\n`);
+      process.stdout.write(
+        `${r.removed.length} run(s), ${mb(r.bytes)} ${r.dryRun ? 'would be freed. Add --yes to remove them' : 'freed'}; ${r.kept} kept (put a file named KEEP in a run folder to keep it).\n`,
+      );
     }),
   );
 

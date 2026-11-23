@@ -210,7 +210,14 @@ export function registerSession(program: Command, wrap: (fn: () => Promise<void>
         .option('--yes', 'say yes to the submit')
         .option('--confirm <token>', 'token from the ask'),
   );
-  simple('select', 'choose option(s) in a <select>', 'select', (target: string, values: string[]) => ({ target, values }), ['<ref>', '<values...>']);
+  simple(
+    'select',
+    'choose option(s) in a <select> (one that tries to send data asks first)',
+    'select',
+    (target: string, values: string[], f: any) => ({ target, values, ...sure(f) }),
+    ['<ref>', '<values...>'],
+    (c) => c.option('--yes', 'say yes if it asks').option('--confirm <token>', 'token from the ask'),
+  );
   simple(
     'press',
     'press a key (Enter in a form field asks first)',
@@ -231,6 +238,7 @@ export function registerSession(program: Command, wrap: (fn: () => Promise<void>
       }
     },
     ['<fields-json>'],
+    (c) => c.option('--yes', 'say yes if it asks').option('--confirm <token>', 'token from the ask'),
   );
   simple(
     'submit',

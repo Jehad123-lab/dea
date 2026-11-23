@@ -138,7 +138,7 @@ export {
   readLedger,
   renderLedgerMd,
 } from './evidence/ledger.ts';
-export { deaHome, isRunId, listRuns, newRunId, type RunSummary, RunWriter, readRun, resolveRun, runsDir } from './evidence/run.ts';
+export { deaHome, isRunId, listRuns, newRunId, type PruneResult, pruneRuns, type RunSummary, RunWriter, readRun, resolveRun, runsDir } from './evidence/run.ts';
 export { isSecretHeader, isSecretParam, redactBody, redactText, redactUrl, stripHar } from './evidence/secrets.ts';
 export {
   driversCode,

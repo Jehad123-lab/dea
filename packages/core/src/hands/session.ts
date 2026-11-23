@@ -634,9 +634,13 @@ export class HandsSession {
     );
   }
 
-  async select(target: string, values: string | string[]): Promise<ActionResult> {
+  async select(target: string, values: string | string[], opts: { confirm?: string; confirmed?: boolean } = {}): Promise<ActionResult> {
     const info = await this.describe(target);
-    return this.act('select', 'interact', { target, values }, async () => this.locate(target).selectOption(values), { target: info });
+    return this.act('select', 'interact', { target, values }, async () => this.locate(target).selectOption(values), {
+      target: info,
+      confirmToken: opts.confirm,
+      confirmed: opts.confirmed,
+    });
   }
 
   async press(key: string, opts: { target?: string; confirm?: string; confirmed?: boolean } = {}): Promise<ActionResult> {
@@ -661,7 +665,7 @@ export class HandsSession {
    * Fill several fields at once and never submit. Text inputs and textareas get the text, checkboxes and radios take
    * true/false ("on"/"off"), selects take an option value or label. Secret fields are refused one by one.
    */
-  async fill(fields: Record<string, string | boolean>): Promise<ActionResult> {
+  async fill(fields: Record<string, string | boolean>, opts: { confirm?: string; confirmed?: boolean } = {}): Promise<ActionResult> {
     const infos: Record<string, ElementInfo> = {};
     for (const t of Object.keys(fields)) infos[t] = await this.describe(t);
     const secret = Object.entries(infos).filter(([, i]) => isSecretField(i));
@@ -691,7 +695,7 @@ export class HandsSession {
         }
         return { filled: done, submitted: false };
       },
-      { secretField: secret.length > 0 },
+      { secretField: secret.length > 0, confirmToken: opts.confirm, confirmed: opts.confirmed },
     );
   }
 

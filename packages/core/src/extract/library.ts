@@ -23,6 +23,8 @@ export interface KitManifest {
   colors: string[];
   fonts: string[];
   techniques: string[];
+  /** true when made with --own-assets: the kit carries none of the site's recorded bytes; absent in older kits */
+  ownAssets?: boolean;
   provenance: string;
 }
 
