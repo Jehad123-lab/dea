@@ -141,6 +141,16 @@ export {
 export { deaHome, isRunId, listRuns, newRunId, type PruneResult, pruneRuns, type RunSummary, RunWriter, readRun, resolveRun, runsDir } from './evidence/run.ts';
 export { isSecretHeader, isSecretParam, redactBody, redactText, redactUrl, stripHar } from './evidence/secrets.ts';
 export {
+  type FramerControl,
+  type FramerExport,
+  type FramerWriteResult,
+  framerComponent,
+  framerControls,
+  framerName,
+  framerRunner,
+  writeFramerExport,
+} from './extract/framer.ts';
+export {
   driversCode,
   guessDriver,
   type HeroLayout,
@@ -285,6 +295,5 @@ export {
   withTimings,
 } from './timings.ts';
 export type { DeaEvent, EventSink, Evidence, Fact, Label, RunMeta } from './types.ts';
-
 export * as web from './web/index.ts';
 export { read as readUrl, research as researchWeb, search as webSearch } from './web/index.ts';
