@@ -12,6 +12,7 @@ import {
   DEFAULT_POLICY,
   domainAllowed,
   type FormInfo,
+  isMutatingRequest,
   isSecretField,
   looksLikeSubmit,
   type Policy,
@@ -123,6 +124,9 @@ export class HandsSession {
   private log: LoggedAction[] = [];
   private closed = false;
   private blockedNavs: string[] = [];
+  /** on while a plain interact action runs: data-changing requests are stopped and the action becomes a question */
+  private guardMutations = false;
+  private blockedMutations: string[] = [];
   info!: BrowserInfo;
 
   private constructor(
@@ -161,6 +165,15 @@ export class HandsSession {
     // The domain rule holds for every way a page can change: typed URLs, links, redirects, scripts, popups.
     await s.context.route('**/*', async (route) => {
       const req = route.request();
+      if (s.guardMutations && isMutatingRequest({ method: req.method(), resourceType: req.resourceType(), url: req.url() })) {
+        let where = req.url();
+        try {
+          const u = new URL(where);
+          where = `${u.host}${u.pathname}`;
+        } catch {}
+        s.blockedMutations.push(`${req.method()} ${where}`);
+        return route.abort('blockedbyclient');
+      }
       if (req.isNavigationRequest() && req.frame() === req.frame().page().mainFrame()) {
         const d = domainAllowed(s.policy, req.url());
         if (!d.ok) {
@@ -287,16 +300,21 @@ export class HandsSession {
       count: this.log.length,
       profile: Boolean(this.opts.profile),
     });
-    let ok = verdict.decision === 'allow';
+    let decision = verdict.decision;
+    let reason = verdict.reason;
+    let ok = decision === 'allow';
     let error: string | undefined;
     let data: unknown;
     let token: string | undefined;
-    if (verdict.decision === 'ask') {
+    if (decision === 'ask') {
       token = randomBytes(4).toString('hex');
       this.pending.set(token, { key, expires: Date.now() + 10 * 60_000 });
     }
-    if (verdict.decision === 'allow') {
+    if (decision === 'allow') {
       this.blockedNavs = [];
+      this.blockedMutations = [];
+      // a plain click, selection or key press must not send data; one that tries is stopped and asked about
+      this.guardMutations = kind === 'interact' && !confirmed;
       try {
         data = await run();
         if (this.blockedNavs.length) {
@@ -307,6 +325,18 @@ export class HandsSession {
         ok = false;
         error = SHORT((e as Error).message.split('\n')[0], 300);
         if (this.blockedNavs.length) error = `Blocked by the policy: ${this.blockedNavs.join('; ')}`;
+      } finally {
+        this.guardMutations = false;
+      }
+      if (this.blockedMutations.length) {
+        const sent = [...new Set(this.blockedMutations)].slice(0, 3).join('; ');
+        ok = false;
+        error = undefined;
+        decision = 'ask';
+        reason = `${action} tried to send data (${sent}), so it was stopped before anything left the browser. It needs your explicit OK (${this.policy.mode} mode)`;
+        token = randomBytes(4).toString('hex');
+        this.pending.set(token, { key, expires: Date.now() + 10 * 60_000 });
+        this.blockedMutations = [];
       }
     }
     const page = this.pages[this.current];
@@ -328,8 +358,8 @@ export class HandsSession {
       ...(extra.target
         ? { target: { tag: extra.target.tag, type: extra.target.type, role: extra.target.role, name: extra.target.name, text: SHORT(extra.target.text, 80) } }
         : {}),
-      decision: verdict.decision,
-      reason: verdict.reason,
+      decision: decision,
+      reason: reason,
       ok,
       ...(error ? { error } : {}),
       urlBefore,
@@ -339,15 +369,15 @@ export class HandsSession {
     this.log.push(entry);
     await appendFile(this.writer.path('actions.jsonl'), `${redactText(JSON.stringify(entry))}\n`);
     await this.writer.progress(
-      `${action} ${verdict.decision}${ok ? '' : verdict.decision === 'allow' ? ' (failed)' : ''}: ${verdict.reason}${error ? ` — ${error}` : ''}`,
+      `${action} ${decision}${ok ? '' : decision === 'allow' ? ' (failed)' : ''}: ${reason}${error ? ` — ${error}` : ''}`,
     );
     await this.writeRun();
     return {
       ok,
-      decision: verdict.decision,
+      decision: decision,
       action,
       kind,
-      reason: error && verdict.decision === 'allow' ? error : verdict.reason,
+      reason: error && decision === 'allow' ? error : reason,
       url: entry.urlAfter,
       title: page ? await page.title().catch(() => '') : '',
       ...(token ? { confirm: token, preview: extra.preview } : {}),
@@ -609,7 +639,8 @@ export class HandsSession {
   }
 
   async press(key: string, opts: { target?: string; confirm?: string; confirmed?: boolean } = {}): Promise<ActionResult> {
-    const info = opts.target ? await this.describe(opts.target) : undefined;
+    // no target: the key goes to whatever has focus, so judge that element (Enter in a form field submits it)
+    const info = opts.target ? await this.describe(opts.target) : await this.describe(':focus').catch(() => undefined);
     const submit = /^enter$/i.test(key) && Boolean(info?.inForm && info.tag !== 'textarea');
     return this.act(
       submit ? 'press+submit' : 'press',
