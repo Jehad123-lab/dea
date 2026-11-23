@@ -413,6 +413,13 @@ const easesOf = (nodes: GsapNode[]): string[] => {
  * modules with a minimal scene for React, vanilla or Framer, textures by local path. Then render the rebuild, compare
  * it with the original's first screen, and when it does not match, research and retry (up to 3 rounds).
  */
+/** Why the editable rebuild did not run, in words that say what to do (three.js comes from a CDN in the preview). */
+export function rebuildErrorText(err: string): string {
+  if (/dynamically imported module|Failed to fetch|NetworkError|cdn\.jsdelivr|esm\.sh/i.test(err))
+    return `three.js could not be loaded from the CDN (no internet on this machine?), so the rebuild was never drawn. Run again with internet to score it. (${err.slice(0, 140)})`;
+  return err.slice(0, 200);
+}
+
 /** What `dea record` took: the reference screenshot and the recorded WebGL frames, kept in the cache for the next extract. */
 export interface RecordResult {
   url: string;
@@ -1179,6 +1186,8 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             say(
               `(b) editable rebuild (three.js from the render graph): canvas ${cB ? pct(cB.score) : 'n/a'}, page ${pct(sB)}; against (a) itself: ${replay.rebuild.vsReplay != null ? pct(replay.rebuild.vsReplay) : 'n/a'}`,
             );
+            // a rebuild that never ran scores like a bad one: say why, so a low number is not read as a bad translation
+            if (lastErr) say(`(b) did not run, so its score says nothing about the rebuild: ${rebuildErrorText(lastErr)}`);
             await put('preview/rebuild.png', Buffer.from(rebuildPng.slice(rebuildPng.indexOf(',') + 1), 'base64'));
             await put(
               'preview/side-by-side-rebuild.png',
@@ -1666,7 +1675,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       ? [
           `(a) capture replay, the recorded frames played back (ground truth, not editable): canvas ${replay.canvas != null ? pct(replay.canvas) : 'n/a'}, page ${replay.page != null ? pct(replay.page) : 'n/a'} · ${replay.passes} passes, ${replay.draws} draws, ${replay.programs} programs, ${(replay.bytes / 1e6).toFixed(1)} MB (render-graph.md)${replay.shipped ? '' : ', scored but not in the kit (--own-assets)'}`,
           replay.rebuild
-            ? `(b) editable rebuild, three.js from the render graph (rebuild.md): canvas ${replay.rebuild.canvas != null ? pct(replay.rebuild.canvas) : 'n/a'}, page ${replay.rebuild.page != null ? pct(replay.rebuild.page) : 'n/a'}${replay.rebuild.vsReplay != null ? `, ${pct(replay.rebuild.vsReplay)} against (a)` : ''} · ${replay.rebuild.stats.materials} RawShaderMaterials, ${replay.rebuild.stats.cameras} cameras, ${replay.rebuild.stats.renderTargets} render targets; recorded bytes still used: ${(replay.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB geometry, ${(replay.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB textures${opts.ownAssets ? ` (--own-assets: images are placeholders, ${replay.rebuild.stats.placeholders} mesh(es) are boxes)` : ''}${replay.rebuild.kept ? ' · what the project runs' : ''}`
+            ? `(b) editable rebuild, three.js from the render graph (rebuild.md): canvas ${replay.rebuild.canvas != null ? pct(replay.rebuild.canvas) : 'n/a'}, page ${replay.rebuild.page != null ? pct(replay.rebuild.page) : 'n/a'}${replay.rebuild.vsReplay != null ? `, ${pct(replay.rebuild.vsReplay)} against (a)` : ''} · ${replay.rebuild.stats.materials} RawShaderMaterials, ${replay.rebuild.stats.cameras} cameras, ${replay.rebuild.stats.renderTargets} render targets; recorded bytes still used: ${(replay.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB geometry, ${(replay.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB textures${opts.ownAssets ? ` (--own-assets: images are placeholders, ${replay.rebuild.stats.placeholders} mesh(es) are boxes)` : ''}${replay.rebuild.kept ? ' · what the project runs' : ''}${replay.rebuild.errors.length ? ` · DID NOT RUN: ${rebuildErrorText(replay.rebuild.errors[0])}` : ''}`
             : '(b) editable rebuild: not made',
           ...(replay.scene
             ? [

@@ -182,6 +182,7 @@ export {
   filterTree,
   observedFrom,
   type RecordResult,
+  rebuildErrorText,
   recordReference,
 } from './extract/index.ts';
 export {
