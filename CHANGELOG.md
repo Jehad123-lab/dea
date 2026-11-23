@@ -11,6 +11,9 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- `test/safety.e2e.test.ts` (runs with `DEA_E2E=1`): Round 11's safety rules proved in a real browser. A click whose script
+  sends a POST is stopped and asks, and sends only after the OK; a read-only click is not stopped; a logout link asks,
+  typed or clicked; Enter in a form field asks.
 - `dea record <url>`: only the slow part of `dea extract` (the reference screenshot and the site's recorded WebGL frames),
   kept in the cache. A later `dea extract <url>` with the same capture options reuses it instead of opening the site
   again, so a slow machine or a time-limited box can do extract in parts (record, then the stages, then extract `--from`).
@@ -26,6 +29,11 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 - The MCP `submit` tool can approve any waiting interact action (`action` + the same arguments + the token); `select`
   and `fill` take a confirm token in the session, daemon and CLI.
 - `dea-kit.json` records `ownAssets`; `dea library add` warns when a kit carries the site's recorded files.
+
+### Fixed
+
+- Clicking a link that logs out, deletes, unsubscribes or cancels now asks first, the same as typing its URL. Before, only
+  `goto` asked, and a click on such a link went through. Found by the new real-browser safety tests.
 
 ### Safety
 
