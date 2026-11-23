@@ -584,9 +584,12 @@ export class HandsSession {
     const info = await this.describe(target);
     const submit = HandsSession.clickIsSubmit(info);
     const isLink = info.tag === 'a' && Boolean(info.href);
+    // a link that logs out, deletes, unsubscribes or cancels changes the site just by being opened: clicking it asks
+    // like typing its URL does (goto), not like a harmless click (found by safety.e2e.test.ts, Round 16)
+    const risky = isLink && !submit && riskyUrl(info.href);
     return this.act(
-      submit ? 'submit' : 'click',
-      submit ? 'submit' : 'interact',
+      submit ? 'submit' : risky ? 'click+risky' : 'click',
+      submit || risky ? 'submit' : 'interact',
       { target },
       async () => {
         await this.locate(target).click({ timeout: 10_000 });
