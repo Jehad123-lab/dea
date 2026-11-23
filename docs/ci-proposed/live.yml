@@ -1,0 +1,61 @@
+name: Live sites
+
+# Real-browser tests against live websites (threejs.org and others). They depend on those sites being up and unchanged,
+# so they run nightly and on demand instead of blocking every push. A failure here is a signal to look, not a broken build.
+
+on:
+  schedule:
+    - cron: "30 21 * * *" # 03:30 in Bangladesh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Real browser smoke test (Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        run: pnpm --filter @dea/core exec playwright install --with-deps chromium
+      - name: dea stack on a three.js example
+        run: |
+          pnpm -s dea stack https://threejs.org/examples/webgl_animation_keyframes.html --browser chromium --json > stack.json
+          cat stack.json
+          grep -q '"name": "three.js"' stack.json
+      - name: Real-browser tests (the MCP tools against a real site, record and replay, hands)
+        run: |
+          set +e
+          pnpm test:e2e 2>&1 | tee e2e.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            grep -E 'FAIL|AssertionError|Error:|Timeout|expected' e2e.log | head -20 | while IFS= read -r line; do echo "::error::${line:0:300}"; done
+          fi
+          exit "$code"
+
+  edge:
+    name: Windows Edge on a live site
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: dea stack in Microsoft Edge (preinstalled on the runner)
+        shell: pwsh
+        run: |
+          pnpm -s dea stack https://threejs.org/examples/webgl_animation_keyframes.html --browser msedge --json | Out-File -Encoding utf8 stack.json
+          Get-Content stack.json
+          if (-not (Select-String -Path stack.json -Pattern '"name": "three.js"' -Quiet)) { throw 'three.js not detected' }

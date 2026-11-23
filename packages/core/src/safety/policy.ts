@@ -38,6 +38,47 @@ export function looksLikeSubmit(target: { role?: string; type?: string; name?: s
   return SUBMIT_WORDS.test(`${target.name ?? ''} ${target.text ?? ''}`);
 }
 
+/** Hosts whose POSTs are tracking beacons, not changes the person would care about. */
+const ANALYTICS_HOSTS =
+  /(^|\.)(google-analytics\.com|analytics\.google\.com|googletagmanager\.com|doubleclick\.net|segment\.(io|com)|sentry\.io|posthog\.com|plausible\.io|hotjar\.(com|io)|clarity\.ms|mixpanel\.com|amplitude\.com|vercel-insights\.com|cloudflareinsights\.com)$/i;
+
+/**
+ * A request that changes something on a server: a non-GET sent by a script or a form, not a tracking beacon.
+ * A click that only "looks" harmless can still send one (a div with a handler, a renamed button), so the hands
+ * stop these during plain interact actions and turn the action into a question.
+ */
+export function isMutatingRequest(req: { method: string; resourceType: string; url: string }): boolean {
+  if (/^(GET|HEAD|OPTIONS)$/i.test(req.method)) return false;
+  if (!/^(fetch|xhr|document|other)$/i.test(req.resourceType)) return false;
+  let host: string;
+  try {
+    const u = new URL(req.url);
+    if (!/^https?:$/.test(u.protocol)) return false;
+    host = u.hostname;
+  } catch {
+    return false;
+  }
+  return !ANALYTICS_HOSTS.test(host);
+}
+
+/** Paths and queries that change something just by being opened: logout, delete, unsubscribe and the like. */
+const RISKY_LINK =
+  /\/(log-?out|sign-?out|delete|remove|destroy|unsubscribe|deactivate|cancel-?(subscription|account|order))(\/|$)|[?&](action|do|op)=(delete|remove|destroy|logout|signout|unsubscribe|cancel)\b/i;
+
+/**
+ * Opening this URL may change something on the site (a GET with a side effect). A plain goto is a look; one of these
+ * is treated like a submit and asks first.
+ */
+export function riskyUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (!/^https?:$/.test(u.protocol)) return false;
+    return RISKY_LINK.test(`${u.pathname}${u.search}`);
+  } catch {
+    return false;
+  }
+}
+
 /** A field DEA never types into: passwords, one-time codes, card numbers. Secrets do not pass through DEA. */
 export function isSecretField(f: { type?: string; name?: string; autocomplete?: string; id?: string; label?: string }): boolean {
   if (f.type && /^password$/i.test(f.type)) return true;

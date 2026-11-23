@@ -150,7 +150,14 @@ export function registerSession(program: Command, wrap: (fn: () => Promise<void>
   };
 
   simple('snapshot', 'the page as a tree with refs (e12) to act on', 'snapshot', () => ({}));
-  simple('goto', 'open a URL in the current tab', 'goto', (url: string) => ({ url }), ['<url>']);
+  simple(
+    'goto',
+    'open a URL in the current tab (a link that logs out, deletes or unsubscribes asks first)',
+    'goto',
+    (url: string, f: any) => ({ url, ...sure(f) }),
+    ['<url>'],
+    (c) => c.option('--yes', 'I know this link changes something and I say yes').option('--confirm <token>', 'the one-time token from the ask'),
+  );
   simple('back', 'go back', 'back', () => ({}));
   simple('forward', 'go forward', 'forward', () => ({}));
   simple('reload', 'reload the page', 'reload', () => ({}));

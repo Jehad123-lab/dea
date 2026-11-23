@@ -587,7 +587,9 @@ export function createServer(opts: ServerOptions = {}): McpServer {
       r.decision === 'deny'
         ? `REFUSED by DEA's policy: ${r.reason}`
         : r.decision === 'ask'
-          ? `NEEDS THE USER'S OK: ${r.reason}. Show the user exactly what would be sent (preview below) and ask them. Only if they say yes, call submit again with the same target and confirm="${r.confirm}".`
+          ? r.action.startsWith('goto')
+            ? `NEEDS THE USER'S OK: ${r.reason}. Tell the user which link would be opened and ask them. Only if they say yes, call browse again with action "goto", the same url and confirm="${r.confirm}".`
+            : `NEEDS THE USER'S OK: ${r.reason}. Show the user exactly what would be sent (preview below) and ask them. Only if they say yes, call submit again with the same target and confirm="${r.confirm}".`
           : r.ok
             ? `Done: ${r.action} on ${r.url}${r.title ? ` ("${r.title}")` : ''}`
             : `Failed: ${r.action}: ${r.error ?? r.reason}`;
@@ -627,6 +629,10 @@ export function createServer(opts: ServerOptions = {}): McpServer {
           'close',
         ]),
         url: z.string().optional().describe('for goto / newTab'),
+        confirm: z
+          .string()
+          .optional()
+          .describe('goto only: the one-time token from a NEEDS THE USER’S OK answer about a link that changes something (logout, delete, unsubscribe), after the user said yes'),
         target: target.optional().describe('for hover, or scroll-into-view'),
         by: z.number().optional().describe('scroll by pixels (positive = down, default 800)'),
         to: z.enum(['top', 'bottom']).optional().describe('scroll to the top or bottom'),
@@ -647,7 +653,11 @@ export function createServer(opts: ServerOptions = {}): McpServer {
           return { content: [text(`Closed. ${r.actions} actions logged in run ${r.runId}. Read it with the report tool.`)] };
         }
         const s = await getHands(a.browser);
-        return answer((await dispatch(s, a.action, a)) as ActionResult);
+        // a confirm is accepted only for goto (a risky link); "confirmed" never comes from the AI
+        const { ...args } = a as Record<string, unknown>;
+        delete args.confirmed;
+        if (a.action !== 'goto') delete args.confirm;
+        return answer((await dispatch(s, a.action, args)) as ActionResult);
       } catch (e) {
         return fail(e);
       }
