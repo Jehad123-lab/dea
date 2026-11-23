@@ -1009,6 +1009,7 @@ program
       process.stdout.write(
         `Framer component ${r.name}: ${r.file}\nHost this folder (e.g. npx vercel deploy "${r.site}" --prod), then set Source to <url>/rebuild/.\nControls: Source, Poster, Animate, Follow input, Max DPR${r.controls.length ? `, ${r.controls.map((c) => c.uniform).join(', ')}` : ''}\n`,
       );
+      if (r.poster) process.stdout.write('Poster: rebuild/poster.png (a still of the rebuild; shown while loading and where WebGL is off)\n');
       if (r.siteFiles) process.stderr.write("Warning: the hosted files include the site's own recorded geometry and textures. Keep it private.\n");
     }),
   );
