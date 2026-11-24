@@ -966,3 +966,116 @@ export function placeholderTextures(doc: CaptureDoc, bin: Uint8Array): number {
   }
   return n;
 }
+
+export interface FitScaled {
+  tex: number;
+  from: [number, number];
+  to: [number, number];
+}
+
+/** Halve an 8-bit image (box filter over 2x2; an odd last row or column is folded into its neighbour). */
+export function halveImage(src: Uint8Array, w: number, h: number, ch: number): { px: Uint8Array; w: number; h: number } {
+  const nw = Math.max(1, w >> 1);
+  const nh = Math.max(1, h >> 1);
+  const out = new Uint8Array(nw * nh * ch);
+  for (let y = 0; y < nh; y++) {
+    const y0 = Math.min(h - 1, y * 2);
+    const y1 = Math.min(h - 1, y * 2 + 1);
+    for (let x = 0; x < nw; x++) {
+      const x0 = Math.min(w - 1, x * 2);
+      const x1 = Math.min(w - 1, x * 2 + 1);
+      for (let c = 0; c < ch; c++) {
+        const sum = src[(y0 * w + x0) * ch + c] + src[(y0 * w + x1) * ch + c] + src[(y1 * w + x0) * ch + c] + src[(y1 * w + x1) * ch + c];
+        out[(y * nw + x) * ch + c] = (sum + 2) >> 2;
+      }
+    }
+  }
+  return { px: out, w: nw, h: nh };
+}
+
+/**
+ * Make a compacted recording fit a byte cap by shrinking its largest images instead of dropping the whole replay.
+ * Only images that are safe to shrink are touched: 2D textures of 8-bit pixels (tightly packed) that no draw, upload or
+ * mipmap call ever writes (so not render targets and not updated later), at least 256 px on the longer side.
+ * - A texture with a full recorded mip chain loses its largest level and the rest move up: the browser's own smaller
+ *   levels are used as they are, so nothing is re-filtered.
+ * - A texture with one stored level is halved with a 2x2 box filter.
+ * Largest first, again and again, until it fits. Returns null when it cannot get under the cap that way. The replay of a
+ * shrunk image is softer, so the caller labels it.
+ */
+export function fitCapture(doc: CaptureDoc, bin: Uint8Array, capBytes: number): { doc: CaptureDoc; bin: Buffer; scaled: FitScaled[] } | null {
+  if (bin.byteLength <= capBytes) return { doc, bin: Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength), scaled: [] };
+  const events: TexEvent[] = [];
+  listDraws(doc, bin, events);
+  const written = new Set<number>();
+  for (const e of events) for (const w of e.writes) written.add(w.tex);
+  const out = structuredClone(doc) as CaptureDoc;
+  type Lv = CaptureDoc['snap']['textures'][number]['levels'][number] & { upType?: number; ch?: number };
+  type Cand = { id: number; T: CaptureDoc['snap']['textures'][number]; mip: boolean; px?: Uint8Array; from: [number, number]; bytes: number };
+  const cands: Cand[] = [];
+  const plain = (L: Lv) => (L.upType ?? 0x1401) === 0x1401 && L.o != null && L.l === L.w * L.h * Number(L.ch ?? 4) && L.face === 0;
+  for (const T of out.snap.textures) {
+    if (T.target !== 0x0de1 || written.has(T.id) || T.comp?.length || !T.levels?.length) continue;
+    const levels = [...T.levels].sort((a, b) => a.level - b.level) as Lv[];
+    if (!levels.every(plain) || Math.max(levels[0].w, levels[0].h) < 256 || levels[0].level !== 0) continue;
+    const chain = levels.every((L, k) => L.level === k && L.w === Math.max(1, levels[0].w >> k) && L.h === Math.max(1, levels[0].h >> k));
+    if (levels.length > 1 && !chain) continue;
+    T.levels = levels;
+    const bytes = levels.reduce((n, L) => n + (L.l as number), 0);
+    const L0 = levels[0];
+    cands.push({
+      id: T.id,
+      T,
+      mip: levels.length > 1,
+      px: levels.length > 1 ? undefined : bin.subarray(L0.o as number, (L0.o as number) + (L0.l as number)),
+      from: [L0.w, L0.h],
+      bytes,
+    });
+  }
+  let size = bin.byteLength;
+  const scaledIds = new Set<number>();
+  while (size > capBytes) {
+    cands.sort((a, b) => b.bytes - a.bytes);
+    const c = cands.find((x) => {
+      const L0 = x.T.levels[0];
+      return Math.max(L0.w, L0.h) >= 256 && (!x.mip || x.T.levels.length > 1);
+    });
+    if (!c) return null;
+    const L0 = c.T.levels[0] as Lv;
+    if (c.mip) {
+      // drop the largest level; the next one becomes level 0
+      size -= L0.l as number;
+      c.bytes -= L0.l as number;
+      c.T.levels = c.T.levels.slice(1).map((L, k) => ({ ...L, level: k }));
+    } else {
+      const r = halveImage(c.px as Uint8Array, L0.w, L0.h, Number(L0.ch ?? 4));
+      size -= (c.px as Uint8Array).byteLength - r.px.byteLength;
+      c.bytes = r.px.byteLength;
+      c.px = r.px;
+      L0.w = r.w;
+      L0.h = r.h;
+    }
+    scaledIds.add(c.id);
+  }
+  // write the re-filtered pixels after the old bytes and point the levels at them; compaction then drops every byte no
+  // longer referenced (the removed mip levels and the full-size originals)
+  let off = bin.byteLength;
+  const parts: Uint8Array[] = [bin];
+  for (const c of cands) {
+    if (!scaledIds.has(c.id) || c.mip) continue;
+    const pad = (8 - (off % 8)) % 8;
+    if (pad) {
+      parts.push(new Uint8Array(pad));
+      off += pad;
+    }
+    const L0 = c.T.levels[0] as Lv;
+    L0.o = off;
+    L0.l = (c.px as Uint8Array).byteLength;
+    parts.push(c.px as Uint8Array);
+    off += (c.px as Uint8Array).byteLength;
+  }
+  const joined = Buffer.concat(parts.map((p) => Buffer.from(p.buffer, p.byteOffset, p.byteLength)));
+  const re = compactCapture(out, new Uint8Array(joined.buffer, joined.byteOffset, joined.byteLength), { drop: new Set() });
+  const scaled = cands.filter((c) => scaledIds.has(c.id)).map((c) => ({ tex: c.id, from: c.from, to: [c.T.levels[0].w, c.T.levels[0].h] as [number, number] }));
+  return re.bin.byteLength <= capBytes ? { doc: re.doc, bin: re.bin, scaled } : null;
+}

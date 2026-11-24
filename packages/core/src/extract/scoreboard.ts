@@ -51,7 +51,8 @@ export interface RunScores {
   error: string | null;
 }
 
-export type RowStatus = 'holds' | 'regressed' | 'no target' | 'no score' | 'failed';
+/** 'below target (quick)': a --quick run missed a target set for full runs; shown, never a regression */
+export type RowStatus = 'holds' | 'regressed' | 'below target (quick)' | 'no target' | 'no score' | 'failed';
 
 export interface ScoreboardRow {
   name: string;
@@ -103,11 +104,30 @@ export function judgeSite(site: ScoreboardSite, scores: RunScores | null, tolera
     if (score == null || score < target - tolerance) misses.push({ metric, target, score });
   }
   const any = [scores.page, scores.canvas, scores.rebuildPage, scores.rebuildCanvas].some((x) => x != null);
-  const status: RowStatus = misses.length ? 'regressed' : !Object.keys(targets).length ? (any ? 'no target' : 'no score') : 'holds';
+  const status: RowStatus = misses.length
+    ? scores.quick
+      ? 'below target (quick)'
+      : 'regressed'
+    : !Object.keys(targets).length
+      ? any
+        ? 'no target'
+        : 'no score'
+      : 'holds';
   return { name, url: site.url, status, scores, targets, misses };
 }
 
 const pct = (x: number | null | undefined): string => (x == null ? 'n/a' : `${Math.round(x * 1000) / 10}%`);
+/** Two numbers that differ but round to the same text get enough digits to show the difference. */
+export function pctPair(score: number | null, target: number): [string, string] {
+  if (score == null) return ['n/a', pct(target)];
+  for (let d = 1; d <= 6; d++) {
+    const f = (x: number) => `${(x * 100).toFixed(d).replace(/\.?0+$/, '')}%`;
+    if (f(score) !== f(target)) return [f(score), f(target)];
+  }
+  // too close to show in digits (float noise): say how far, so a miss never reads as equal
+  const gap = Math.abs(target - score);
+  return [`${pct(target)} ${score < target ? 'minus' : 'plus'} ${gap.toExponential(1)}`, pct(target)];
+}
 const cell = (score: number | null, target: number | undefined): string => (target == null ? pct(score) : `${pct(score)} (target ${pct(target)})`);
 
 export function scoreboardMd(rows: ScoreboardRow[], failures: Record<string, string> = {}): string {
@@ -131,7 +151,11 @@ export function scoreboardMd(rows: ScoreboardRow[], failures: Record<string, str
   out.push('');
   if (bad.length) {
     out.push(`## Regressions (${bad.length})`, '');
-    for (const r of bad) for (const m of r.misses) out.push(`- ${r.name}: ${m.metric} ${pct(m.score)}, target ${pct(m.target)}`);
+    for (const r of bad)
+      for (const m of r.misses) {
+        const [sc, tg] = pctPair(m.score, m.target);
+        out.push(`- ${r.name}: ${m.metric} ${sc}, target ${tg}`);
+      }
     out.push('');
   }
   if (failed.length) {
@@ -139,7 +163,17 @@ export function scoreboardMd(rows: ScoreboardRow[], failures: Record<string, str
     for (const r of failed) out.push(`- ${r.name}: ${failures[r.url] ?? 'no run'}`);
     out.push('');
   }
-  if (!bad.length && !failed.length) out.push('Every target holds.', '');
+  const quickMiss = rows.filter((r) => r.status === 'below target (quick)');
+  if (quickMiss.length) {
+    out.push(`## Below target in --quick runs (${quickMiss.length}, not regressions: targets are for full runs)`, '');
+    for (const r of quickMiss)
+      for (const m of r.misses) {
+        const [sc, tg] = pctPair(m.score, m.target);
+        out.push(`- ${r.name}: ${m.metric} ${sc}, target ${tg}`);
+      }
+    out.push('');
+  }
+  if (!bad.length && !failed.length) out.push(quickMiss.length ? 'No regressions in full runs.' : 'Every target holds.', '');
   return `${out.join('\n')}`;
 }
 
