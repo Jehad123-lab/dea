@@ -8,6 +8,7 @@ import {
   ContentCache,
   canonicalJson,
   canvasLine,
+  deaHome,
   decodeAssets,
   decodeCode,
   decodeDesign,
@@ -977,10 +978,15 @@ program
   .command('runs')
   .description('list saved runs, newest first')
   .option('--home <dir>', 'where runs are saved')
+  .option('--client <name>', 'the runs of one dea serve --http client (kept in <home>/clients/<name>/runs)')
   .option('--json', 'print JSON')
-  .action((flags: { home?: string; json?: boolean }) =>
+  .action((flags: { home?: string; client?: string; json?: boolean }) =>
     run(async () => {
       if (flags.home) process.env.DEA_HOME = flags.home;
+      if (flags.client) {
+        const { clientRunsDir } = await import('../../mcp/src/http.ts');
+        process.env.DEA_RUNS_DIR = clientRunsDir(process.env.DEA_HOME ?? deaHome(), flags.client);
+      }
       const runs = await listRuns();
       if (flags.json) return void process.stdout.write(`${JSON.stringify(runs, null, 2)}\n`);
       if (!runs.length) return void process.stdout.write('No runs yet. Try: dea inspect https://threejs.org/examples/webgl_animation_keyframes.html\n');

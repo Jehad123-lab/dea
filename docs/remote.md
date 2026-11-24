@@ -43,6 +43,31 @@ Without the package installed globally: `npx -y dea-mcp --http` does the same (c
 - `--host 0.0.0.0` exposes DEA to your network. DEA prints a warning. Put it behind HTTPS (a reverse proxy) and use
   `--allowed-host your.domain` so only that name is accepted.
 
+## One client, one set of runs and sign-ins
+
+- **Runs are kept apart per client.** Each token's client writes its runs to `~/.dea/clients/<client>/runs`, so one AI
+  app cannot list, read or overwrite another app's runs, and two clients working at the same time never share a folder.
+  `dea runs` on your own machine still shows `~/.dea/runs` (the stdio and CLI runs).
+- **Your browser sign-ins (`DEA_PROFILE`) are off over HTTP** unless you name the clients that may use them:
+
+  ```bash
+  DEA_PROFILE=work dea serve --http --profile-client cursor        # only "cursor" browses signed in
+  dea serve --http --profile-client cursor claude                  # more than one
+  ```
+
+  Every other client gets a fresh, signed-out browser. Without `--profile-client`, DEA prints that the profile is not
+  used, so a token that leaks never browses as you.
+- **Hub approvals belong to one client.** An approval is tied to the client, the app, the tool and the exact arguments,
+  works once and ends after ten minutes, so an approval given to one client never lets another client do the same thing.
+
+## Slow machines: record first, extract later
+
+`extract` has a `recordOnly` option. It does only the slow part (the reference screenshot and the site's recorded WebGL
+frames), keeps it in the cache and returns. Call `extract` again with the same `url` (and the same `section` and
+`referenceMs`, if you gave them) and without `recordOnly`: it reuses the recording instead of opening the site again.
+This splits one long request into two short ones, useful when an AI app or a proxy cuts requests after a minute or two.
+On the command line the same thing is `dea record <url>`, then `dea extract <url>`.
+
 ## Point an AI app at it
 
 Replace `TOKEN` with your token.
