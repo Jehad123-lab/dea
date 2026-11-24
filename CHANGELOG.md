@@ -11,6 +11,18 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Extract: a canvas score now measures the canvas, not what is painted over it. The recorder copies the canvas in the
+  same task as the site's own last recorded frame (`grabCanvasFrame`, `CAP.canvasPng()`), because a canvas without
+  `preserveDrawingBuffer` holds nothing once that task ends and a screenshot taken later can lose the picture or show a
+  loading screen's overlay instead. The copy goes to the kit as `preview/canvas-original.png` and replaces the screenshot
+  as the reference side of the canvas score when the screenshot's canvas region carries less than half the canvas's light
+  (`canvasCoveredByPage`). jehaduddin.vercel.app, whose loading screen paints an overlay over a very dark full-screen
+  WebGL layer: (a) capture replay canvas 58.9% -> 94.7%, (b) editable rebuild canvas 62.8% -> 84.6% (94.7% without
+  --own-assets). Where the screenshot does show the canvas, the score reads the same pixels as before.
+- Browsers close on the way out. Every browser DEA starts is tracked, and SIGINT, SIGTERM, SIGHUP, an uncaught error, the
+  `--budget` hard stop and the post-result watchdog close them before the process leaves; a browser whose `close()` does
+  not return within the deadline has its processes (read over CDP `SystemInfo.getProcessInfo`) killed, so no Chromium is
+  left behind (`packages/core/src/browser/lifecycle.ts`; `dea extract ... | Ctrl-C` exits 130 with nothing running).
 - Extract: the reference watch no longer waits on an animated loading screen. Past its hard cap only a rising loader
   counter buys more time (up to 7 minutes, full runs only); quick runs stop at the hard cap. lusion.co on a 2-vCPU box
   sat in this step for 13+ minutes before; a quick run now leaves it in under a minute.

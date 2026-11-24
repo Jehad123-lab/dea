@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canvasLine, canvasScore, correlation, histogram, type Luma, ssim } from '../src/extract/score.ts';
+import { canvasCoveredByPage, canvasLine, canvasScore, correlation, histogram, type Luma, meanLuma, ssim } from '../src/extract/score.ts';
 
 const make = (w: number, h: number, f: (x: number, y: number) => number, hide?: (x: number, y: number) => boolean): Luma => {
   const l = new Float64Array(w * h);
@@ -72,5 +72,39 @@ describe('canvas-only score', () => {
     const a = make(64, 48, glow);
     expect(canvasLine(canvasScore(a, a))).toMatch(/^canvas 100% \(SSIM 100%, edges 100%, tones 100%\)$/);
     expect(canvasLine(null)).toMatch(/no canvas/);
+  });
+
+  it('reads the mean of the compared pixels, ignoring the ones under text', () => {
+    const a = make(
+      8,
+      8,
+      () => 10,
+      (x) => x === 0,
+    );
+    const b = make(
+      8,
+      8,
+      () => 30,
+      (x) => x === 0,
+    );
+    expect(meanLuma(a)).toBeCloseTo(10, 6);
+    expect(meanLuma(b)).toBeCloseTo(30, 6);
+  });
+
+  it('scores the canvas itself when the page paints over it, and the screenshot otherwise', () => {
+    // the loading screen's black backdrop: the canvas region of the screenshot is empty while the canvas copies the scene
+    const covered = make(64, 48, () => 0);
+    const scene = make(64, 48, glow);
+    expect(canvasCoveredByPage(covered, scene)).toBe(true);
+    // a normal frame: the screenshot shows what the canvas drew (a slightly different frame is not a cover)
+    const shot = make(64, 48, (x, y) => glow(x + 1, y) * 0.9);
+    expect(canvasCoveredByPage(shot, scene)).toBe(false);
+    // both dark: nothing to gain from the copy
+    expect(
+      canvasCoveredByPage(
+        covered,
+        make(64, 48, () => 0.5),
+      ),
+    ).toBe(false);
   });
 });

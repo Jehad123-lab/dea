@@ -31,6 +31,8 @@ export interface CanvasScore {
   region: { x: number; y: number; w: number; h: number };
   /** pixels compared at the fine scale */
   size: { w: number; h: number };
+  /** which side of the site's picture was scored: its screenshot, or the canvas DEA copied at the recorded frame */
+  reference?: 'screenshot' | 'canvas';
 }
 
 export interface Luma {
@@ -224,18 +226,46 @@ export interface Box {
   h: number;
 }
 
-/** A region of a screenshot as luminance at `width` pixels wide, with the given boxes (page pixels) hidden. */
-export async function regionLuma(page: Page, png: string, region: Box, hide: Box[], viewportWidth: number, width = 320): Promise<Luma> {
+/** The mean luminance of the compared (unmasked) pixels. */
+export function meanLuma(x: Luma): number {
+  let s = 0;
+  let n = 0;
+  for (let i = 0; i < x.l.length; i++)
+    if (!x.mask[i]) {
+      s += x.l[i];
+      n++;
+    }
+  return n ? s / n : 0;
+}
+
+/**
+ * Does the page paint something over the canvas? A loading screen or an overlay above the canvas leaves the canvas region
+ * of the reference screenshot much darker than the canvas DEA copied at the recorded frame (backgrounds are opaque, and
+ * the site's own DOM is read through a canvas that draws a dark scene). Then the screenshot is not the canvas, and the
+ * replay or the rebuild can only be scored against the copy.
+ */
+export function canvasCoveredByPage(shot: Luma, captured: Luma): boolean {
+  const s = meanLuma(shot);
+  const c = meanLuma(captured);
+  // the cover takes most of the light away (a loader's black backdrop leaves nothing); a different frame does not
+  return c >= 1.5 && (s < c * 0.5 || c - s > 12);
+}
+
+/**
+ * A region of a screenshot as luminance at `width` pixels wide, with the given boxes (page pixels) hidden. `span` is the
+ * page-pixel width the image covers: the viewport for a screenshot, the canvas box for a copy of the canvas itself.
+ */
+export async function regionLuma(page: Page, png: string, region: Box, hide: Box[], viewportWidth: number, width = 320, span = viewportWidth): Promise<Luma> {
   await page.evaluate(NAME_SHIM);
   const r = (await page.evaluate(
-    async ([src, region, hide, vw, W]) => {
+    async ([src, region, hide, _vw, W, span]) => {
       const im = new Image();
       await new Promise((res, rej) => {
         im.onload = res;
         im.onerror = () => rej(new Error('image did not load'));
         im.src = src;
       });
-      const k = im.width / vw; // screenshot pixels per page pixel
+      const k = im.width / span; // image pixels per page pixel
       const H = Math.max(8, Math.round((W * region.h) / Math.max(1, region.w)));
       const c = document.createElement('canvas');
       c.width = W;
@@ -258,14 +288,16 @@ export async function regionLuma(page: Page, png: string, region: Box, hide: Box
       }
       return { w: W, h: H, l, mask };
     },
-    [png, region, hide, viewportWidth, width] as const,
+    [png, region, hide, viewportWidth, width, span] as const,
   )) as { w: number; h: number; l: number[]; mask: number[] };
   return { w: r.w, h: r.h, l: Float64Array.from(r.l), mask: Uint8Array.from(r.mask) };
 }
 
 /**
  * The canvas-only score of a rebuild against the original: the canvas region of both screenshots, text boxes hidden.
- * With no canvas on the page there is nothing to score (null).
+ * With no canvas on the page there is nothing to score (null). `canvasRef` is the canvas DEA copied at the recorded
+ * frame; when the reference screenshot does not show the canvas (a loading screen or an overlay is over it), that copy
+ * is scored instead, so the number still measures the picture rather than the cover.
  */
 export async function compareCanvas(
   page: Page,
@@ -274,6 +306,7 @@ export async function compareCanvas(
   canvas: Box | null | undefined,
   text: Box[],
   viewport: { width: number; height: number },
+  canvasRef?: string | null,
 ): Promise<CanvasScore | null> {
   if (!canvas || canvas.w < 16 || canvas.h < 16) return null;
   const region = {
@@ -283,9 +316,17 @@ export async function compareCanvas(
     h: Math.min(viewport.height, canvas.y + canvas.h) - Math.max(0, canvas.y),
   };
   if (region.w < 16 || region.h < 16) return null;
-  const a = await regionLuma(page, original, region, text, viewport.width);
   const b = await regionLuma(page, rebuild, region, [], viewport.width);
-  return canvasScore(a, b, region);
+  let a = await regionLuma(page, original, region, text, viewport.width);
+  let reference: 'screenshot' | 'canvas' = 'screenshot';
+  if (canvasRef) {
+    const cap = await regionLuma(page, canvasRef, region, text, viewport.width, 320, region.w);
+    if (canvasCoveredByPage(a, cap)) {
+      a = cap;
+      reference = 'canvas';
+    }
+  }
+  return { ...canvasScore(a, b, region), reference };
 }
 
 const p = (x: number) => `${Math.round(x * 1000) / 10}%`;

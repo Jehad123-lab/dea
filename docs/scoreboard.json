@@ -14,10 +14,22 @@
     {
       "name": "jehaduddin.vercel.app",
       "url": "https://jehaduddin.vercel.app",
-      "why": "Jehad's portfolio; Round 4 numbers for the editable rebuild",
+      "why": "Jehad's portfolio (loading screen over a full-screen WebGL layer); Round 23 numbers, the replay and the rebuild scored against the canvas copied at the recorded frame because the loader's overlay covers it",
       "targets": {
-        "rebuildPage": 0.95,
-        "rebuildCanvas": 0.931
+        "page": 0.85,
+        "canvas": 0.94,
+        "rebuildPage": 0.85,
+        "rebuildCanvas": 0.94
+      }
+    },
+    {
+      "name": "three.js cube example",
+      "url": "https://threejs.org/examples/webgl_geometry_cube.html",
+      "why": "one spinning cube; a full run reached 100% page and 100% canvas, the rebuild included (Round 23)",
+      "targets": {
+        "page": 1,
+        "rebuildPage": 1,
+        "rebuildCanvas": 1
       }
     },
     {

@@ -669,13 +669,37 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
 
   const raf0 = window.requestAnimationFrame;
   const held = [];
+  // The canvas as it is drawn in the last recorded frame, copied in the same task as the site's own draw calls: a canvas
+  // without preserveDrawingBuffer holds nothing once that task ends, and a screenshot taken later (after the frames are
+  // held, while the kit is built) would show an empty canvas or whatever the site paints next — so DEA keeps the frame
+  // itself and compares the replay with it.
+  let frameCopy = null;
+  const grabFrame = () => {
+    const I = CAP.target;
+    if (!I || !I.rec || I.rec.frame !== CAP.opts.frames - 1) return;
+    const c = I.gl && I.gl.canvas;
+    if (!c || !c.width || !c.height) return;
+    try {
+      if (!frameCopy || frameCopy.width !== c.width || frameCopy.height !== c.height) {
+        frameCopy = document.createElement('canvas');
+        frameCopy.width = c.width; frameCopy.height = c.height;
+      }
+      const g = frameCopy.getContext('2d');
+      g.clearRect(0, 0, frameCopy.width, frameCopy.height);
+      g.drawImage(c, 0, 0);
+    } catch (e) { err('canvas copy: ' + e); }
+  };
   window.requestAnimationFrame = function (cb) {
     return raf0.call(window, function (ts) {
       if (ts !== lastTs) { lastTs = ts; try { boundary(); } catch (e) { err('boundary: ' + e); } }
       if (CAP.hold) { held.push(cb); return; }
-      return cb.apply(this, arguments);
+      const r = cb.apply(this, arguments);
+      try { grabFrame(); } catch (e) { err('grab: ' + e); }
+      return r;
     });
   };
+  CAP.canvasPng = () => (frameCopy ? frameCopy.toDataURL('image/png') : null);
+  CAP.canvasSize = () => (frameCopy ? { w: frameCopy.width, h: frameCopy.height } : null);
   CAP.binSize = () => bin.size;
   CAP.nframes = () => (CAP.target && CAP.target.rec ? CAP.target.rec.frames.length : 0);
   CAP.cont = (n, hold) => { if (CAP.state !== 'done') return false; CAP.opts.hold = hold !== false; CAP.contPending = n; CAP.hold = false; const h = held.splice(0); for (const cb of h) raf0.call(window, cb); return true; };
@@ -824,6 +848,23 @@ export const REPLAY_CAPTURE_SCRIPT = String.raw`(() => {
 export interface Recording {
   doc: CaptureDoc;
   bin: Buffer;
+  /** the canvas as the last recorded frame drew it, as a data URL (a canvas without preserveDrawingBuffer holds nothing after its task) */
+  canvasPng?: string;
+}
+
+/**
+ * The canvas as the last recorded frame drew it. The recorder copies it in the same task as the site's own draw calls
+ * (a canvas without `preserveDrawingBuffer` holds nothing once that task ends), so this is the picture the recorded
+ * frame put on screen, even when something is painted over the canvas later.
+ */
+export async function grabCanvasFrame(page: Page): Promise<string | null> {
+  type Cap = { canvasPng?: () => string | null };
+  return page
+    .evaluate(() => {
+      const cap = (window as unknown as { __DEA_CAP__?: Cap }).__DEA_CAP__;
+      return cap?.canvasPng ? cap.canvasPng() : null;
+    })
+    .catch(() => null);
 }
 
 /**

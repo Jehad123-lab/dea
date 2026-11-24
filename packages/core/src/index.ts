@@ -41,6 +41,18 @@ export {
   softwareWarning,
 } from './browser/gpu.ts';
 export {
+  browserPids,
+  type CleanupOptions,
+  closeTrackedBrowsers,
+  forgetBrowser,
+  installBrowserCleanup,
+  killPid,
+  shuttingDown,
+  signalExitCode,
+  trackBrowser,
+  trackedBrowsers,
+} from './browser/lifecycle.ts';
+export {
   type BrowserChoice,
   browserInfo,
   installObservers,

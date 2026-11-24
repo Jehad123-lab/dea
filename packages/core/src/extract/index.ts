@@ -153,6 +153,8 @@ export interface ReplayInfo {
   canvas: number | null;
   page: number | null;
   kept: boolean;
+  /** which side the canvas scores used: the reference screenshot, or the canvas copied at the recorded frame when the page paints over it */
+  canvasRef?: 'screenshot' | 'canvas';
   roles: string[];
   scene: { meshes: number; camera: boolean; canvas: number | null; page: number | null } | null;
   errors: string[];
@@ -295,7 +297,11 @@ async function referenceFor(
       const png = `data:image/png;base64,${(await readFile(join(d, 'ref.png'))).toString('base64')}`;
       const layout = JSON.parse(await readFile(join(d, 'layout.json'), 'utf8'));
       const recording = existsSync(join(d, 'capture.bin'))
-        ? { doc: JSON.parse(await readFile(join(d, 'capture.json'), 'utf8')) as CaptureDoc, bin: await readFile(join(d, 'capture.bin')) }
+        ? {
+            doc: JSON.parse(await readFile(join(d, 'capture.json'), 'utf8')) as CaptureDoc,
+            bin: await readFile(join(d, 'capture.bin')),
+            ...(existsSync(join(d, 'canvas.png')) ? { canvasPng: `data:image/png;base64,${(await readFile(join(d, 'canvas.png'))).toString('base64')}` } : {}),
+          }
         : null;
       const probe = existsSync(join(d, 'probe.json')) ? (JSON.parse(await readFile(join(d, 'probe.json'), 'utf8')) as ProbeData) : null;
       const interaction: Buffer[] = [];
@@ -330,6 +336,7 @@ async function referenceFor(
     if (r.recording) {
       files['capture.json'] = JSON.stringify(r.recording.doc);
       files['capture.bin'] = r.recording.bin;
+      if (r.recording.canvasPng) files['canvas.png'] = Buffer.from(r.recording.canvasPng.slice(r.recording.canvasPng.indexOf(',') + 1), 'base64');
     }
     if (r.probe) files['probe.json'] = JSON.stringify(r.probe);
     for (const [i, b] of (r.interaction ?? []).entries()) files[`interaction-${i}.png`] = b;
@@ -813,6 +820,9 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       await put('preview/original.png', Buffer.from(original.slice(original.indexOf(',') + 1), 'base64'));
       // the site's own frames, recorded right before that screenshot: the render graph, the replay, the 3D scene
       const recording = 'recording' in ref ? ref.recording : null;
+      // the canvas as the recorded frame drew it: scored instead of the screenshot when the page paints something over it
+      const canvasRef = recording?.canvasPng ?? null;
+      if (canvasRef && !opts.ownAssets) await put('preview/canvas-original.png', Buffer.from(canvasRef.slice(canvasRef.indexOf(',') + 1), 'base64'));
       replayError = 'recordingError' in ref ? (ref.recordingError ?? null) : opts.reference ? 'a reference image was given, so nothing was recorded' : null;
       let recDoc: CaptureDoc | null = null;
       let scrollFit: ScrollTapeFit | null = null;
@@ -1157,20 +1167,25 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
         const canvasBox =
           (layout ?? layoutCandidates[0] ?? null)?.canvas ??
           (recDoc ? { x: recDoc.canvas.x, y: recDoc.canvas.y, w: recDoc.canvas.cssW, h: recDoc.canvas.cssH } : null);
-        const canvasStart = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
+        const canvasStart = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp, canvasRef);
+        if (canvasStart?.reference === 'canvas')
+          say(
+            'the reference screenshot does not show the canvas (a loading screen or an overlay is painted over it), so the canvas DEA copied at the recorded frame is what the replay and the rebuild are scored against',
+          );
         let best = start;
         // the replay of the site's own frames, and the recovered 3D scene: kept when the canvas gets closer
         let replayKept = false;
         const doneRR = mark('score the replay and the rebuild', doneScore);
         if (recDoc && replay) {
           const sR = await render({ ...params, program: '__replay' });
-          const cR = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
+          const cR = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp, canvasRef);
           const replayPng = lastPng;
           replay.page = sR;
           replay.canvas = cR?.score ?? null;
+          if (cR?.reference) replay.canvasRef = cR.reference;
           if (replay.scene && hasScene) {
             const sS = await render({ ...params, program: '__scene' });
-            const cS = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
+            const cS = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp, canvasRef);
             replay.scene.page = sS;
             replay.scene.canvas = cS?.score ?? null;
             await put('preview/scene.png', Buffer.from(lastPng.slice(lastPng.indexOf(',') + 1), 'base64'));
@@ -1189,7 +1204,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           let sB = 0;
           if (replay.rebuild && rebuildDoc) {
             sB = await render({ ...params, program: '__rebuild' });
-            cB = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
+            cB = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp, canvasRef);
             replay.rebuild.page = sB;
             replay.rebuild.canvas = cB?.score ?? null;
             replay.rebuild.errors = lastErr ? [lastErr] : [];
@@ -1348,7 +1363,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           await rm(join(out, 'standins'), { recursive: true, force: true });
           files.splice(files.indexOf('standins/particles.js'), 1);
         }
-        const canvasFinal = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp);
+        const canvasFinal = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp, canvasRef);
         await put('preview/final.png', Buffer.from(lastPng.slice(lastPng.indexOf(',') + 1), 'base64'));
         await put(
           'preview/side-by-side.png',
@@ -2004,6 +2019,11 @@ function renderExtractMd(o: {
       r.canvas != null
         ? `- (a) alone: canvas ${pct(r.canvas)}, page ${pct(r.page ?? 0)}. ${r.kept ? '✔ The project runs it (the editable rebuild scored lower).' : 'The project does not run it: it is the reference.'}`
         : '- The replay was not scored.',
+      ...(r.canvasRef === 'canvas'
+        ? [
+            '- ✔ The reference screenshot does not show the canvas (a loading screen or an overlay is painted over it), so (a) and (b) are scored against the canvas DEA copied at the recorded frame: `preview/canvas-original.png`.',
+          ]
+        : []),
       ...(r.scene
         ? [
             `- ✔ \`public/scene/scene.glb\` + \`scene/scene.js\`: ${r.scene.meshes} mesh(es) read back from the GPU buffers with their model matrices${r.scene.camera ? ' and the camera (from the view and projection uniforms)' : ''}; see \`scene/scene.md\`.${r.scene.canvas != null ? ` Rendered with a plain material it scores canvas ${pct(r.scene.canvas)}: the placement is the site's, the look is in the replay.` : ''}`,

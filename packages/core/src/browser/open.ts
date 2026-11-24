@@ -3,6 +3,7 @@ import { currentCache } from '../cache.ts';
 import { timed } from '../timings.ts';
 import type { BrowserInfo } from '../types.ts';
 import { INIT_SCRIPT, NAME_SHIM } from './init.ts';
+import { forgetBrowser, trackBrowser } from './lifecycle.ts';
 import { assertNotBotWall } from './wall.ts';
 
 export type BrowserChoice = 'auto' | 'chromium' | 'chrome' | 'msedge';
@@ -68,7 +69,12 @@ export async function withSharedBrowser<T>(choice: BrowserChoice, headless: bool
     return await fn();
   } finally {
     shared = outer;
-    await Promise.all(pool.map((b) => b.browser.close().catch(() => {})));
+    await Promise.all(
+      pool.map(async (b) => {
+        await b.browser.close().catch(() => {});
+        forgetBrowser(b.browser);
+      }),
+    );
   }
 }
 
@@ -94,7 +100,10 @@ export async function releaseBrowser(browser: Browser | null | undefined): Promi
   if (!browser) return;
   const p = shared?.pool.find((b) => b.browser === browser);
   if (p) p.users = Math.max(0, p.users - 1);
-  else await browser.close().catch(() => {});
+  else {
+    await browser.close().catch(() => {});
+    forgetBrowser(browser);
+  }
 }
 
 /** Start a browser, or borrow one from the shared pool when a command keeps one open (see withSharedBrowser). */
@@ -129,6 +138,7 @@ async function startBrowser(choice: BrowserChoice, headless: boolean): Promise<{
         args: ARGS,
         ...(channel === 'chromium' ? {} : { channel }),
       });
+      trackBrowser(browser);
       return { browser, channel };
     } catch (e) {
       const msg = (e as Error).message;
