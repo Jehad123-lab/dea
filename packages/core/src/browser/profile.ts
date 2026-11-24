@@ -4,6 +4,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { type BrowserContext, chromium } from 'playwright';
+import { forgetBrowser, trackBrowser } from './lifecycle.ts';
 import type { BrowserChoice } from './open.ts';
 
 /**
@@ -279,13 +280,17 @@ export async function launchProfile(o: {
         ...(o.recordHar ? { recordHar: o.recordHar } : {}),
       });
       await writeMarker(dir, { lastUsedAt: new Date().toISOString() });
+      // a login window or a session left open by Ctrl-C is a browser too: the signal handlers close it
+      const browser = context.browser();
+      if (browser) trackBrowser(browser);
       return {
         context,
         channel,
-        version: context.browser()?.version() ?? 'unknown',
+        version: browser?.version() ?? 'unknown',
         dir,
         close: async () => {
           await context.close().catch(() => {});
+          if (browser) forgetBrowser(browser);
         },
       };
     } catch (e) {
