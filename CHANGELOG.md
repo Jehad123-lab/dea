@@ -11,6 +11,10 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- `pnpm check:release` (`scripts/check-release.mjs`): checks that every version string, `server.json` and the newest
+  CHANGELOG heading agree; `--release` also asks for a dated heading.
+- `dea doctor`: when the browser will not start, it says how to fix it (the missing system libraries and how to install
+  them, or how to install a browser).
 - `dea runs --client <name>`: list the runs of one `dea serve --http` client (kept in `<home>/clients/<name>/runs`).
 - Docs: `docs/remote.md` explains per-client runs, `--profile-client`, per-client Hub approvals, and the `recordOnly` /
   `dea record` split for slow machines; the CLI README lists `dea record`, `dea framer` and `--profile-client`.

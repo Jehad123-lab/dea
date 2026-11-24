@@ -93,6 +93,26 @@ describe('the bench report', () => {
     expect(md).toContain('WARNING');
     expect(md).toContain('not a speed measure');
   });
+  it('the doctor says how to fix a browser that will not start', () => {
+    const md = doctorMd({
+      schema: 'dea.doctor/1',
+      checks: [
+        {
+          id: 'browser',
+          title: 'browser',
+          status: 'no',
+          note: 'browserType.launch: Target page, context or browser has been closed',
+          fix: 'The browser is installed but this system is missing libraries it needs (libnss3.so).\nInstall them with: npx playwright install-deps chromium',
+        },
+      ],
+      gpu: null,
+      machine,
+      warnings: [],
+    });
+    expect(md).toContain('NO      browser:');
+    expect(md).toContain('          The browser is installed but this system is missing libraries it needs (libnss3.so).');
+    expect(md).toContain('          Install them with: npx playwright install-deps chromium');
+  });
 });
 
 describe('where the scroll tape stops after its first stops', () => {
