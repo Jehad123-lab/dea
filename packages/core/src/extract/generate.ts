@@ -877,7 +877,7 @@ export function pageModeOf(l: HeroLayout): { combined: HeroLayout; page: PageLay
 /** A layout whose scroll keyframes keep only the canvas: the page layer places every other element itself. */
 const canvasScrollOnly = (l: HeroLayout): HeroLayout => ({
   ...l,
-  scroll: l.scroll && l.scroll.items.canvas ? { ...l.scroll, items: { canvas: l.scroll.items.canvas } } : null,
+  scroll: l.scroll?.items.canvas ? { ...l.scroll, items: { canvas: l.scroll.items.canvas } } : null,
 });
 
 /**

@@ -29,6 +29,7 @@ import {
   readLedger,
   readRun,
   readUrl,
+  recordReference,
   renderReport,
   researchAnswer,
   researchWeb,
@@ -236,11 +237,26 @@ export function createServer(opts: ServerOptions = {}): McpServer {
           .describe('How long to watch the original before the reference screenshot (ms, default 45000; slow loaders need more).'),
         diff: z.boolean().optional().describe('Run the visual diff and research loop (default true).'),
         verifyBuild: z.boolean().optional().describe('Run npm install and npm run build in the generated project and report the result.'),
+        recordOnly: z
+          .boolean()
+          .optional()
+          .describe(
+            "Only the slow first step: take the reference screenshot and record the site's WebGL frames into DEA's cache, then stop. A later extract of the same url with the same section and referenceMs reuses it. Use when extract runs out of time on a slow machine.",
+          ),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    async ({ url, browser, to, section, ownAssets, referenceMs, diff, verifyBuild }) => {
+    async ({ url, browser, to, section, ownAssets, referenceMs, diff, verifyBuild, recordOnly }) => {
       try {
+        if (recordOnly) {
+          const r = await recordReference(url, { browser, section, referenceMs });
+          const what = r.recorded ? 'the reference screenshot and the recorded WebGL frames' : `the reference screenshot only (${r.recordingError})`;
+          return structured('extract', { url, recordOnly: r }, {}, [
+            text(
+              `${r.reused ? 'Already in the cache' : 'Recorded'}: ${what}, frame at ${Math.round(r.atMs)} ms, ${r.seconds} s. Next: call extract again with the same url${section ? `, section "${section}"` : ''}${referenceMs ? `, referenceMs ${referenceMs}` : ''} and without recordOnly; it reuses this.`,
+            ),
+          ]);
+        }
         const r = await extract(url, { browser, to, section, ownAssets, referenceMs, noDiff: diff === false, verifyBuild });
         const ledger = (await readLedger(join(r.dir, 'extract'))) ?? (await readLedger(r.dir));
         const a = ledger ? ledgerAnswer(queryLedger(ledger, { detail: 'full' })) : { result: { error: 'no evidence ledger was written' }, meta: {} };

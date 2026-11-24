@@ -89,6 +89,7 @@ export async function readWallEvidence(page: Page, response: Response | null): P
   } catch {}
   const dom = await page
     .evaluate(() => {
+      // biome-ignore lint/performance/useDomNodeTextContent: innerText on purpose: the text a person sees (no hidden nodes, no scripts)
       const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
       const markers: string[] = [];
       for (const el of Array.from(document.querySelectorAll('[id],[class]')).slice(0, 4000)) {

@@ -139,7 +139,7 @@ export async function consumeApproval(
 ): Promise<ApprovalRecord | null> {
   const id = approvalIdOf(req.client, req.app, req.tool, req.args);
   const r = await readApproval(id, home);
-  if (!r || r.status !== 'approved' || Date.parse(r.expires) <= now || r.argsHash !== argsHashOf(req.args)) return null;
+  if (r?.status !== 'approved' || Date.parse(r.expires) <= now || r.argsHash !== argsHashOf(req.args)) return null;
   const used: ApprovalRecord = { ...r, status: 'used' };
   await write(used, home);
   return used;

@@ -2,6 +2,7 @@
 // runner (three.js from esm.sh) and loads the kit's rebuild files from a URL you host; the files cannot live in
 // Framer. Shader uniforms that read as numbers or colours become property controls.
 
+import { existsSync } from 'node:fs';
 import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import type { PipelineDoc, UniformValue } from '../replay/rebuild.ts';
@@ -154,6 +155,9 @@ export default function ${name}(props) {
   // why it is blank, shown only in the Framer editor (a visitor sees the poster or nothing, never an error box)
   const [why, setWhy] = useState("")
   const inCanvas = RenderTarget.current() === RenderTarget.canvas
+  // the Poster control wins; else the rebuild's own still that dea framer put beside pipeline.json (hidden if missing)
+  const [posterGone, setPosterGone] = useState(false)
+  const posterSrc = poster?.src || (source ? (source.endsWith("/") ? source : source + "/") + "poster.png" : "")
 
   useEffect(() => {
     if (!source) {
@@ -227,7 +231,7 @@ export default function ${name}(props) {
   const fill = { position: "absolute", inset: 0, width: "100%", height: "100%", display: "block" }
   return (
     <div ref={wrap} style={{ position: "relative", overflow: "hidden", ...style }}>
-      {poster?.src && (!ready || failed) ? <img src={poster.src} srcSet={poster.srcSet} alt={poster.alt || ""} style={{ ...fill, objectFit: "cover" }} /> : null}
+      {posterSrc && !posterGone && (!ready || failed) ? <img src={posterSrc} srcSet={poster?.src ? poster.srcSet : undefined} onError={() => setPosterGone(true)} alt={poster?.alt || ""} style={{ ...fill, objectFit: "cover" }} /> : null}
       <canvas ref={canvas} style={{ ...fill, opacity: ready && !failed ? 1 : 0 }} />
       {why && inCanvas ? (
         <div role="status" style={{ position: "absolute", left: 12, right: 12, bottom: 12, padding: "10px 12px", borderRadius: 8, background: "rgba(20,20,24,0.88)", color: "#fff", font: "500 12px/1.4 Inter, sans-serif" }}>
@@ -273,6 +277,8 @@ export interface FramerWriteResult {
   controls: FramerControl[];
   /** true when the hosted files include the site's recorded bytes (kit made without --own-assets) */
   siteFiles: boolean;
+  /** framer/site/rebuild/poster.png was written (the rebuild's own still) */
+  poster: boolean;
 }
 
 /**
@@ -310,10 +316,18 @@ export async function writeFramerExport(
     await cp(join(kit, 'public', data), join(site, data));
   }
   for (const [f, body] of Object.entries(FRAMER_HOST_FILES)) await writeFile(join(site, f), body);
+  // a still of the rebuild itself (DEA's render of the editable rebuild, never the site's screenshot): the component
+  // shows it while loading, on phones without WebGL and after a context loss, when no Poster is set
+  const still = join(kit, 'preview', 'rebuild.png');
+  let poster = false;
+  if (existsSync(still)) {
+    await cp(still, join(site, 'rebuild', 'poster.png'));
+    poster = true;
+  }
   const file = join(dir, `${out.name}.tsx`);
   await writeFile(file, out.code);
   await writeFile(join(dir, 'README.md'), framerReadme(out, manifest.url, siteFiles));
-  return { file, site, name: out.name, controls: out.controls, siteFiles };
+  return { file, site, name: out.name, controls: out.controls, siteFiles, poster };
 }
 
 export function framerReadme(out: FramerExport, url: string, siteFiles: boolean): string {

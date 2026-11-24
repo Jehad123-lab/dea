@@ -48,6 +48,7 @@ export async function renderHtml(url: string, o: RenderOptions = {}): Promise<Re
     // scripts that build the page after the network goes quiet: wait until the text stops growing (at most ~3 s)
     let last = -1;
     for (let i = 0; i < 10; i++) {
+      // biome-ignore lint/performance/useDomNodeTextContent: innerText on purpose: visible text only, which is what grows as the page renders
       const n = await page.evaluate(() => document.body?.innerText.length ?? 0).catch(() => 0);
       if (n === last && n > 0) break;
       last = n;
