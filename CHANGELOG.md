@@ -11,6 +11,9 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- `dea hub approvals --client <name>`: only the changes one AI client asked for.
+- `record.e2e.test.ts`: `dea record` in a real browser against a local page; the second call comes from the cache and
+  does not load the page again. The proposed CI runs it with the safety tests.
 - `pnpm check:release` (`scripts/check-release.mjs`): checks that every version string, `server.json` and the newest
   CHANGELOG heading agree; `--release` also asks for a dated heading.
 - `dea doctor`: when the browser will not start, it says how to fix it (the missing system libraries and how to install

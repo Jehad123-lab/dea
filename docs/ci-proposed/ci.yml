@@ -33,8 +33,8 @@ jobs:
       - run: pnpm test
       - name: Install Chromium (for the safety tests below)
         run: pnpm --filter @dea/core exec playwright install --with-deps chromium
-      - name: Safety rules in a real browser (a local test server only, no live sites, so it can block)
-        run: pnpm -s test:e2e packages/core/test/safety.e2e.test.ts
+      - name: Safety rules and dea record in a real browser (a local test server only, no live sites, so it can block)
+        run: pnpm -s test:e2e safety.e2e record.e2e
       - name: Build (dist/, plain node)
         run: pnpm build
       - name: Pack both packages and run them from the tarballs (no publish)
