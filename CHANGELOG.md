@@ -11,6 +11,10 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- `dea runs --client <name>`: list the runs of one `dea serve --http` client (kept in `<home>/clients/<name>/runs`).
+- Docs: `docs/remote.md` explains per-client runs, `--profile-client`, per-client Hub approvals, and the `recordOnly` /
+  `dea record` split for slow machines; the CLI README lists `dea record`, `dea framer` and `--profile-client`.
+
 - `dea framer` puts a still of the rebuild itself (`poster.png`, DEA's render of the editable rebuild, never the site's
   screenshot) beside `pipeline.json`. The component shows it while loading, on phones without WebGL and after a context
   loss when no Poster is set, and hides it if the file is missing.
