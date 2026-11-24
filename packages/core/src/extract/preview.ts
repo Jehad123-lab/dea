@@ -873,10 +873,7 @@ export async function referenceShot(
     // past the hard cap only a rising loader counter buys more time: an animated loader keeps changing the picture forever on a
     // slow CPU (lusion.co on a 2-vCPU box sat here for 13+ minutes); quick mode (1 frame) never goes past its hard cap
     const longCap = frames < 2 ? hardCap : 420_000;
-    while (
-      Date.now() - t0 < ms ||
-      (loader && (Date.now() - t0 < hardCap || (Date.now() - pctAt < 45_000 && Date.now() - t0 < longCap)))
-    ) {
+    while (Date.now() - t0 < ms || (loader && (Date.now() - t0 < hardCap || (Date.now() - pctAt < 45_000 && Date.now() - t0 < longCap)))) {
       if (smart && !loader && best.score > 0 && quiet >= 4 && Date.now() - t0 >= 8000) {
         currentTimings()?.note(`settled after ${Math.round((Date.now() - t0) / 1000)} s (cap ${Math.round(ms / 1000)} s)`);
         break;
