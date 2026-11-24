@@ -18,7 +18,8 @@
     "test": "vitest run",
     "test:e2e": "vitest run --mode e2e",
     "build": "pnpm --filter dea-cli --filter dea-mcp run build",
-    "pack:smoke": "pnpm build && node scripts/pack-smoke.mjs"
+    "pack:smoke": "pnpm build && node scripts/pack-smoke.mjs",
+    "check:release": "node scripts/check-release.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.4",

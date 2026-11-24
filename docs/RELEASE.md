@@ -8,7 +8,8 @@ private and bundled into both, so it is never published.
 1. `main` is green: lint, typecheck, unit tests, build and pack-smoke.
 2. The version is the same everywhere. Check with:
    ```
-   grep -rn "0\.2\.0" packages/*/package.json packages/*/src server.json scripts/pack-smoke.mjs
+   pnpm check:release              # every version string, server.json and the CHANGELOG heading
+   pnpm check:release --release    # the same, and the CHANGELOG heading must carry today's date
    ```
    (`packages/cli/src/index.ts`, `packages/mcp/src/{server,stdio,http,gateway}.ts`, `packages/core/src/hub/client.ts`,
    the three `package.json` files, `server.json` twice, `scripts/pack-smoke.mjs`.)

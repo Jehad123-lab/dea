@@ -1,7 +1,7 @@
 import { statfs } from 'node:fs/promises';
 import { arch, cpus, platform, release, totalmem } from 'node:os';
 import type { Browser } from 'playwright';
-import { type BrowserChoice, launchBrowser, releaseBrowser } from './open.ts';
+import { type BrowserChoice, browserStartHint, launchBrowser, releaseBrowser } from './open.ts';
 
 /**
  * Is WebGL drawing on a graphics card, or in software on the CPU? Read from the browser itself: the renderer string a page can
@@ -185,6 +185,8 @@ export interface DoctorCheck {
   title: string;
   status: 'ok' | 'limited' | 'no';
   note: string;
+  /** what to do about it, when DEA knows (printed under the line) */
+  fix?: string;
 }
 
 export interface DoctorReport {
@@ -229,7 +231,14 @@ export async function doctor(o: { browser?: BrowserChoice; headless?: boolean; h
       });
     }
   } catch (e) {
-    checks.push({ id: 'browser', title: 'browser', status: 'no', note: (e as Error).message.split('\n').slice(0, 2).join(' ').slice(0, 300) });
+    const message = (e as Error).message;
+    checks.push({
+      id: 'browser',
+      title: 'browser',
+      status: 'no',
+      note: message.split('\n').slice(0, 2).join(' ').slice(0, 300),
+      fix: browserStartHint([message]),
+    });
   }
   try {
     const s = await statfs(o.home ?? process.cwd());
@@ -249,7 +258,10 @@ export async function doctor(o: { browser?: BrowserChoice; headless?: boolean; h
 export function doctorMd(r: DoctorReport): string {
   const mark = (s: DoctorCheck['status']) => (s === 'ok' ? 'ok     ' : s === 'limited' ? 'limited' : 'NO     ');
   const out: string[] = ['DEA doctor', ''];
-  for (const c of r.checks) out.push(`  ${mark(c.status)} ${c.title}: ${c.note}`);
+  for (const c of r.checks) {
+    out.push(`  ${mark(c.status)} ${c.title}: ${c.note}`);
+    if (c.fix) for (const line of c.fix.split('\n')) out.push(`          ${line}`);
+  }
   const m = r.machine;
   out.push('', `  machine: ${m.os} ${m.osRelease} ${m.arch}, ${m.cpuCount} × ${m.cpuModel}, ${m.memoryGb} GB`);
   if (r.gpu?.report?.devices.length)
