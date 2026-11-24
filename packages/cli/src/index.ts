@@ -8,6 +8,7 @@ import {
   ContentCache,
   canonicalJson,
   canvasLine,
+  closeTrackedBrowsers,
   deaHome,
   decodeAssets,
   decodeCode,
@@ -21,6 +22,7 @@ import {
   type InspectOptions,
   type InspectResult,
   inspectSite,
+  installBrowserCleanup,
   investigateInBackground,
   investigationStatus,
   judgeSite,
@@ -55,6 +57,7 @@ import {
   type StepKind,
   scoreboardMd,
   scoreFiles,
+  shuttingDown,
   stabilityMd,
   stackSite,
   startBudget,
@@ -133,6 +136,8 @@ async function run(fn: () => Promise<void>): Promise<void> {
       if (pt.print) process.stderr.write(`\n${renderTimings(doc)}\n`);
     }
   } catch (e) {
+    // a stage that fails because the command is being stopped (Ctrl-C, a signal) is not an error of its own
+    if (shuttingDown()) return;
     process.stderr.write(`dea: ${(e as Error).message}\n`);
     process.exitCode = 1;
   }
@@ -144,8 +149,11 @@ async function run(fn: () => Promise<void>): Promise<void> {
  */
 function exitSoon(ms = 5000): void {
   setTimeout(() => {
-    process.stderr.write('dea: a browser handle was still open after the result was written; exiting\n');
-    process.exit(process.exitCode ?? 0);
+    // a crashed browser would otherwise keep the process, and its Chromium children, alive
+    void closeTrackedBrowsers(2000).then(() => {
+      process.stderr.write('dea: a browser handle was still open after the result was written; exiting\n');
+      process.exit(process.exitCode ?? 0);
+    });
   }, ms).unref();
 }
 
@@ -386,7 +394,8 @@ common(
                 hardStop = setTimeout(
                   () => {
                     process.stderr.write(`\nStopped: ${u} used its run-time budget of ${budgetMin} min plus 5 min (set --budget 0 to remove the limit).\n`);
-                    process.exit(124);
+                    // close the browsers before leaving: an exit here would leave Chromium processes behind
+                    void closeTrackedBrowsers(3000).then(() => process.exit(124));
                   },
                   (budgetMin + 5) * 60_000,
                 );
@@ -1231,5 +1240,9 @@ browserCmd
 
 registerSession(program, run);
 registerHub(program, run);
+
+// Ctrl-C, a killed terminal or a failing stage closes DEA's browsers (and kills Chromium if a close hangs), so no
+// browser process outlives the command that started it
+installBrowserCleanup();
 
 await program.parseAsync();

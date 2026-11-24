@@ -9,6 +9,7 @@ import { thumbOfImage } from '../browser/settle.ts';
 import { assertNotBotWall } from '../browser/wall.ts';
 import { currentCache } from '../cache.ts';
 import {
+  grabCanvasFrame,
   pressListeners,
   pullRecording,
   REPLAY_CAPTURE_SCRIPT,
@@ -933,6 +934,8 @@ export async function referenceShot(
       if (section) await page.evaluate(`document.querySelector(${JSON.stringify(section)})?.scrollIntoView({ block: 'start' })`).catch(() => {});
       const r = await timed('record WebGL frames', () => recordFrames(page, { frames }));
       if (r.ok) {
+        // the canvas at the recorded frame, before the tape records more: the score compares the replay with this
+        const canvasPng = await timed('copy the canvas at the recorded frame', () => grabCanvasFrame(page).catch(() => null));
         await page.waitForTimeout(400);
         const buf = await page.screenshot({ type: 'png' }).catch(() => null);
         const nowLoader = (await page.evaluate(LOADER_VISIBLE).catch(() => false)) as boolean;
@@ -1023,7 +1026,7 @@ export async function referenceShot(
             atMs,
             loader: nowLoader,
             layout: (l ?? layout) as never,
-            recording,
+            recording: canvasPng ? { ...recording, canvasPng } : recording,
             interaction,
             interactionState,
             layoutScroll,
