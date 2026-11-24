@@ -946,7 +946,7 @@ CI runs lint, typecheck and tests on every push, then a real-browser smoke test.
 | 7 | **Code and API decoder** — `Debugger` scripts, source maps, webcrack, GSAP/shader/listener maps, HAR → OpenAPI, retire.js | ✅ |
 | 8 | **Hub** — DEA as MCP client and gateway: connect apps once, per-app × per-client access, history, kill switch, alerts; `dea mcp install` | ✅ (local, stdio) |
 | 11 | **Use what you decode** — `extract` (tokens, motion, hero layout, shader modules, pipeline, build check, visual diff, research, stand-ins), `trace` (live WebGL debug with breakpoints), the asset chain, `library` | ✅ |
-| 10 | **Launch kit** — example runs (`examples/`), CONTRIBUTING, SECURITY, CHANGELOG, issue and PR templates | ✅ (demo video still to do) |
+| 10 | **Launch kit** — example runs (`examples/`), CONTRIBUTING, SECURITY, CHANGELOG, issue and PR templates | ✅ (demo video recorded: dea-v0.2.0-demo.mp4) |
 | 9 | **Remote server** — Streamable HTTP with a bearer token (`dea serve --http`) | ✅ (local); OAuth sign-in later |
 | 4 | **Publish `dea-cli` and `dea-mcp` 0.1** — build and pack already verified in CI; npm publish and the MCP Registry entry need the owner's npm login | Next |
 | 12 | **`dea run` through Hub** — run decoders as Hub tools for any connected client | Next |

@@ -13,7 +13,7 @@ import {
   unneededTextures,
 } from '../src/replay/graph.ts';
 import { REPLAY_PLAYER } from '../src/replay/player.ts';
-import { normalMatrixOf, rebuildMd, rebuildPipeline } from '../src/replay/rebuild.ts';
+import { normalMatrixOf, proxyMesh, rebuildMd, rebuildPipeline } from '../src/replay/rebuild.ts';
 import { REBUILD_RUNNER } from '../src/replay/runner.ts';
 import { invert, mul, perspectiveOf, recoverScene, sceneGlb, sceneMd } from '../src/replay/scene.ts';
 
@@ -341,5 +341,47 @@ describe('replay: editable rebuild', () => {
     expect(mesh.placeholder).toEqual({ min: [0, 2, 0], max: [6, 2, 6] });
     expect(r.stats.placeholders).toBe(2);
     expect(b.subarray(o, o + n * 12).every((x) => x === 0)).toBe(true);
+  });
+});
+
+describe('replay: --own-assets mesh stand-in', () => {
+  it('proxyMesh keeps the outline of a detailed mesh with far fewer triangles', () => {
+    // a 64x64 grid of quads on a sphere: 8192 triangles of detail
+    const n = 64;
+    const P: number[][] = [];
+    for (let i = 0; i <= n; i++)
+      for (let j = 0; j <= n; j++) {
+        const th = (i / n) * Math.PI;
+        const ph = (j / n) * Math.PI * 2;
+        P.push([Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph)]);
+      }
+    const tris: number[] = [];
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) {
+        const a = i * (n + 1) + j;
+        tris.push(a, a + n + 1, a + 1, a + 1, a + n + 1, a + n + 2);
+      }
+    const px = proxyMesh(tris, (v) => P[v], [-1, -1, -1], [1, 1, 1]);
+    expect(px).not.toBeNull();
+    const out = px as { pos: number[]; idx: number[] };
+    expect(out.idx.length / 3).toBeLessThan(tris.length / 3 / 4);
+    expect(out.idx.length / 3).toBeGreaterThan(100);
+    // every stand-in vertex stays near the sphere's surface (an average of nearby surface points)
+    for (let i = 0; i < out.pos.length; i += 3) {
+      const r = Math.hypot(out.pos[i], out.pos[i + 1], out.pos[i + 2]);
+      expect(r).toBeGreaterThan(0.8);
+      expect(r).toBeLessThan(1.01);
+    }
+    // no triangle refers to a vertex that does not exist
+    expect(Math.max(...out.idx)).toBeLessThan(out.pos.length / 3);
+  });
+
+  it('proxyMesh returns null when too little is left (a box is drawn instead)', () => {
+    const P = [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+    ];
+    expect(proxyMesh([0, 1, 2], (v) => P[v], [0, 0, 0], [1, 1, 0])).toBeNull();
   });
 });

@@ -6,7 +6,7 @@
 //
 // Labels: the structure (passes, targets, programs, state, uniform values, cameras, matrices) is read from the
 // recording (Verified). Vertex buffers and texture pixels are the recorded bytes, named "recorded" in pipeline.json
-// wherever they are used; with --own-assets the site's images become placeholders and large meshes become boxes.
+// wherever they are used; with --own-assets the site's images become placeholders and large meshes become coarse stand-ins (proxyMesh) or boxes.
 
 import { type Arg, type CaptureDoc, type Cmd, numbers, type VaoAttr } from './graph.ts';
 import { invert, mul } from './scene.ts';
@@ -60,6 +60,8 @@ export interface DrawStep {
   uniforms: Record<string, UniformValue>;
   /** with --own-assets: a box of this size stands in for the mesh */
   placeholder?: { min: number[]; max: number[] };
+  /** with --own-assets: a coarse stand-in of the mesh's shape (vertex clustering, see proxyMesh), drawn instead of the box */
+  proxy?: { pos: number[]; idx: number[] };
   /** a mesh of the recovered scene (scene.glb) drawn here */
   sceneNode?: string;
 }
@@ -174,6 +176,8 @@ export interface RebuildStats {
   recordedTextures: number;
   recordedTextureBytes: number;
   placeholders: number;
+  /** of those, how many are drawn as a coarse stand-in of their shape rather than a box */
+  proxies: number;
   skipped: Record<string, number>;
 }
 
@@ -338,6 +342,87 @@ const slug = (s: string) =>
     .replace(/^-|-$/g, '')
     .slice(0, 40) || 'program';
 
+/** cells per side of the bounding box when a mesh is clustered into its coarse stand-in */
+export const PROXY_GRID = 16;
+
+/** The vertex ids of each triangle of a TRIANGLES draw (indexed or not), read from the recording; null if unreadable. */
+function triangleIds(doc: CaptureDoc, bin: Uint8Array, step: DrawStep): Uint32Array | null {
+  const n = step.count - (step.count % 3);
+  if (n < 3) return null;
+  const out = new Uint32Array(n);
+  if (!step.index) {
+    for (let i = 0; i < n; i++) out[i] = step.first + i;
+    return out;
+  }
+  const B = doc.snap.buffers.find((b) => b.id === step.index?.buf);
+  const size = step.index.type === 0x1405 ? 4 : step.index.type === 0x1403 ? 2 : step.index.type === 0x1401 ? 1 : 0;
+  if (!B || !size || step.index.offset + n * size > B.l) return null;
+  const dv = new DataView(bin.buffer, bin.byteOffset + B.o + step.index.offset, n * size);
+  for (let i = 0; i < n; i++) out[i] = size === 4 ? dv.getUint32(i * 4, true) : size === 2 ? dv.getUint16(i * 2, true) : dv.getUint8(i);
+  return out;
+}
+
+/**
+ * A coarse stand-in for a mesh (vertex clustering): its bounding box is cut into at most `grid` cells per side, every
+ * vertex moves to the average of its cell, and triangles that collapse are dropped. What is left keeps the outline and
+ * the big volumes (what the visual score sees) and loses the detail, the UVs and the original vertex order: about as
+ * much as a 16x16x16 voxel sketch. Null when too little is left to be better than a box.
+ */
+export function proxyMesh(
+  tris: ArrayLike<number>,
+  posOf: (v: number) => number[],
+  min: number[],
+  max: number[],
+  grid = PROXY_GRID,
+): { pos: number[]; idx: number[] } | null {
+  const ext = [0, 1, 2].map((k) => Math.max(max[k] - min[k], 1e-9));
+  const big = Math.max(...ext);
+  const cells = ext.map((e) => Math.max(1, Math.round((grid * e) / big)));
+  const cellOf = new Map<number, number>();
+  const sums: number[][] = [];
+  const vertCell = new Map<number, number>();
+  const cluster = (v: number): number => {
+    const known = vertCell.get(v);
+    if (known != null) return known;
+    const p = posOf(v);
+    let key = 0;
+    for (let k = 0; k < 3; k++) {
+      const c = Math.min(cells[k] - 1, Math.max(0, Math.floor(((p[k] - min[k]) / ext[k]) * cells[k])));
+      key = key * (grid + 1) + c;
+    }
+    let id = cellOf.get(key);
+    if (id == null) {
+      id = sums.length;
+      cellOf.set(key, id);
+      sums.push([0, 0, 0, 0]);
+    }
+    const s = sums[id];
+    s[0] += p[0];
+    s[1] += p[1];
+    s[2] += p[2];
+    s[3]++;
+    vertCell.set(v, id);
+    return id;
+  };
+  const idx: number[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i + 2 < tris.length; i += 3) {
+    const a = cluster(tris[i]);
+    const b = cluster(tris[i + 1]);
+    const c = cluster(tris[i + 2]);
+    if (a === b || b === c || a === c) continue;
+    // the same triangle twice (either winding) only once
+    const key = [a, b, c].sort((x, y) => x - y).join(',');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    idx.push(a, b, c);
+  }
+  if (idx.length < 12) return null;
+  const pos: number[] = [];
+  for (const s of sums) for (let k = 0; k < 3; k++) pos.push(Math.round((s[k] / s[3]) * 1e4) / 1e4);
+  return { pos, idx };
+}
+
 /**
  * Turn a recording into the editable pipeline: pipeline.json + one GLSL file per shader. The binary is the recording's
  * own (`data`), so nothing is copied; with `ownAssets`, large mesh buffers are zeroed in `bin` (pass a copy) and drawn as
@@ -363,6 +448,7 @@ export function rebuildPipeline(
     recordedTextures: 0,
     recordedTextureBytes: 0,
     placeholders: 0,
+    proxies: 0,
     skipped: {},
   };
   const skip = (n: string) => {
@@ -1001,7 +1087,7 @@ export function rebuildPipeline(
     f.cmds.forEach(onCmd);
   });
 
-  // with --own-assets: meshes become boxes and their buffers are not shipped
+  // with --own-assets: meshes become coarse stand-ins (or boxes) and their buffers are not shipped
   if (opts.ownAssets) {
     for (const { step, pos } of meshDraws) {
       const B = doc.snap.buffers.find((b) => b.id === pos.buf);
@@ -1024,6 +1110,21 @@ export function rebuildPipeline(
       if (!Number.isFinite(min[0])) continue;
       step.placeholder = { min, max };
       stats.placeholders++;
+      // a coarse stand-in of the shape instead of the box (indexed or plain triangle lists only)
+      if (step.mode === 4) {
+        const tris = triangleIds(doc, bin, step);
+        if (tris) {
+          const at = (v: number, k: number) => {
+            const o = pos.off + v * stride + k * 4;
+            return o + 4 <= B.l ? dv.getFloat32(o, true) : 0;
+          };
+          const px = proxyMesh(tris, (v) => [at(v, 0), at(v, 1), Math.min(3, pos.size) > 2 ? at(v, 2) : 0], min, max);
+          if (px) {
+            step.proxy = px;
+            stats.proxies++;
+          }
+        }
+      }
     }
     for (const { step } of meshDraws) {
       if (!step.placeholder) continue;
@@ -1159,7 +1260,9 @@ export function rebuildMd(p: PipelineDoc, stats: RebuildStats, score: { canvas: 
   L.push(`- recorded: ${stats.recordedBuffers} vertex/index buffers, ${mb(stats.recordedBufferBytes)} (the geometry of each draw)`);
   L.push(`- recorded: ${stats.recordedTextures} textures, ${mb(stats.recordedTextureBytes)} (image pixels and the starting state of simulation targets)`);
   if (ownAssets)
-    L.push(`- --own-assets: the site's images are checker placeholders and ${stats.placeholders} large mesh(es) are boxes; their bytes are not in the kit`);
+    L.push(
+      `- --own-assets: the site's images are checker placeholders and ${stats.placeholders} large mesh(es) are stand-ins (${stats.proxies} a coarse shape of at most ${PROXY_GRID} cells per side, the rest boxes); their bytes are not in the kit`,
+    );
   else L.push("- these bytes are the site's: for study and prototyping; swap them for your own (`--own-assets`) before you ship");
   L.push('');
   const skipped = Object.entries(stats.skipped);

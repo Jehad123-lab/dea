@@ -429,7 +429,16 @@ export function createRebuild(canvas, data, options = {}) {
     if (step._obj && !step.attrs.some((a) => (attrCache.get([a.buf, a.type, a.size, a.norm, a.stride, a.off, a.div, a.int].join(',')) || {}).stale)) return step._obj;
     let geo;
     let mode = step.mode;
-    if (step.placeholder) {
+    if (step.proxy) {
+      // --own-assets: the coarse stand-in of the shape (rebuild.ts proxyMesh); UVs are zero, normals from the faces
+      geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(step.proxy.pos), 3));
+      const nv = step.proxy.pos.length / 3;
+      geo.setIndex(new THREE.BufferAttribute(nv > 65535 ? new Uint32Array(step.proxy.idx) : new Uint16Array(step.proxy.idx), 1));
+      geo.computeVertexNormals();
+      geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(nv * 2), 2));
+      mode = 4;
+    } else if (step.placeholder) {
       const mn = step.placeholder.min;
       const mx = step.placeholder.max;
       geo = new THREE.BoxGeometry(mx[0] - mn[0] || 1e-3, mx[1] - mn[1] || 1e-3, mx[2] - mn[2] || 1e-3);
