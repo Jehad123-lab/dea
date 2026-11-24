@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { pctPair } from '../src/extract/scoreboard.ts';
 import { judgeSite, parseScoreboardFile, readRunScores, scoreboardMd } from '../src/index.ts';
 
 let dir: string;
@@ -62,6 +63,22 @@ describe('scoreboard', () => {
     expect(md).toContain('- A: page 50%, target 90%');
     expect(md).toContain('- B: timed out');
     expect(md).not.toContain('Every target holds');
+  });
+  it('a quick run below a full-run target is shown, not counted as a regression', async () => {
+    const s = await run({ url: 'https://a.test', quick: true, diff: { final: 0.9 } });
+    const row = judgeSite({ url: 'https://a.test', name: 'A', targets: { page: 0.95 } }, s);
+    expect(row.status).toBe('below target (quick)');
+    const md = scoreboardMd([row]);
+    expect(md).toContain('Below target in --quick runs (1');
+    expect(md).toContain('No regressions in full runs.');
+    expect(md).not.toContain('## Regressions');
+  });
+  it('a miss too small to see at one decimal gets enough digits to show it', async () => {
+    expect(pctPair(0.9999999999999999, 1)[0]).not.toBe(pctPair(0.9999999999999999, 1)[1]);
+    expect(pctPair(0.5, 0.9)).toEqual(['50%', '90%']);
+    const s = await run({ url: 'https://a.test', diff: { final: 0.9999999999999999 } });
+    const md = scoreboardMd([judgeSite({ url: 'https://a.test', name: 'A', targets: { page: 1 } }, s, 0)]);
+    expect(md).toContain('- A: page 100% minus 1.1e-16, target 100%');
   });
   it('checks the sites file', () => {
     expect(parseScoreboardFile('{"sites":[{"url":"https://a.test","targets":{"page":0.9}}]}').sites).toHaveLength(1);

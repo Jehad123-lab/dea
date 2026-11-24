@@ -40,6 +40,7 @@ import {
   pruneRuns,
   RESULT_SCHEMA,
   type RunDoc,
+  type RunScores,
   readRun,
   readRunScores,
   readUrl,
@@ -135,6 +136,17 @@ async function run(fn: () => Promise<void>): Promise<void> {
     process.stderr.write(`dea: ${(e as Error).message}\n`);
     process.exitCode = 1;
   }
+}
+
+/**
+ * For one-shot commands that drive a browser: once the result is written, leave within a few seconds even when a crashed
+ * browser left a handle open. The timer is unref'd, so a process that ends on its own is not delayed by it.
+ */
+function exitSoon(ms = 5000): void {
+  setTimeout(() => {
+    process.stderr.write('dea: a browser handle was still open after the result was written; exiting\n');
+    process.exit(process.exitCode ?? 0);
+  }, ms).unref();
 }
 
 const program = new Command('dea')
@@ -1003,52 +1015,79 @@ common(
   program
     .command('scoreboard')
     .description("DEA's reference-site scoreboard: the scores reached on known sites against the targets in a sites file; exits 1 when a target is missed")
-    .argument('[runs...]', 'extract run ids to score (default: the newest saved extract run of each site in the sites file)')
+    .argument('[runs...]', 'extract run ids to score (default: the newest saved full extract run of each site in the sites file)')
     .option('--sites <file>', 'the sites file (JSON: { tolerance, sites: [{ url, name, targets: { page, canvas, rebuildPage, rebuildCanvas }, options }] })')
     .option('--extract', 'extract every site in the sites file now instead of reading saved runs (slow: minutes per site)')
     .option('--tolerance <points>', 'how far below a target still holds, in points (default: the file, else 1)')
     .option('--out <file>', 'also write the markdown here')
-    .option('--quick', 'with --extract: rough and fast (1 frame); targets are for full runs, so expect misses'),
-).action((runs: string[], flags: CommonFlags & { sites?: string; extract?: boolean; tolerance?: string; out?: string; quick?: boolean }) =>
+    .option('--quick', 'with --extract: rough and fast (1 frame); a quick run below a target is shown, never counted as a regression')
+    .option('--full-only', 'ignore saved --quick runs (by default the newest full run of a site is used, and a quick one only when there is none)'),
+).action((runs: string[], flags: CommonFlags & { sites?: string; extract?: boolean; tolerance?: string; out?: string; quick?: boolean; fullOnly?: boolean }) =>
   run(async () => {
+    if (flags.extract && !flags.sites) throw new Error('--extract needs --sites <file>: the list of sites to extract');
     const file = flags.sites ? parseScoreboardFile(await readFile(flags.sites, 'utf8')) : null;
     if (!file && !runs.length) throw new Error('Give a sites file (--sites docs/scoreboard.json) or run ids.');
-    if (flags.extract && !file) throw new Error('--extract needs --sites');
     const tolerance = flags.tolerance != null ? Number(flags.tolerance) / 100 : (file?.tolerance ?? 0.01);
     const rows: ScoreboardRow[] = [];
     const failures: Record<string, string> = {};
+    const took: Array<{ site: string; seconds: number }> = [];
+    const t0 = Date.now();
     const norm = (u: string) => u.replace(/\/+$/, '');
-    if (runs.length) {
-      for (const ref of runs) {
-        const scores = await readRunScores(await resolveRun(ref));
-        const site = file?.sites.find((x) => norm(x.url) === norm(scores.url)) ?? { url: scores.url };
-        rows.push(judgeSite(site, scores, tolerance));
-      }
-    } else if (file) {
-      const saved = flags.extract ? [] : (await listRuns(undefined, 10_000)).filter((r) => r.kind === 'extract');
-      for (const site of file.sites) {
-        try {
-          let dir: string | undefined;
-          if (flags.extract) {
-            const r = await extract(site.url, { ...options(flags), quick: flags.quick, ...(site.options ?? {}) });
-            dir = r.dir;
-          } else dir = saved.find((r) => norm(r.url) === norm(site.url))?.dir;
-          if (!dir) {
-            failures[site.url] = 'no saved extract run (run dea extract on it, or use --extract)';
+    try {
+      if (runs.length) {
+        for (const ref of runs) {
+          const scores = await readRunScores(await resolveRun(ref));
+          const site = file?.sites.find((x) => norm(x.url) === norm(scores.url)) ?? { url: scores.url };
+          rows.push(judgeSite(site, scores, tolerance));
+        }
+      } else if (file) {
+        const saved = flags.extract ? [] : (await listRuns(undefined, 10_000)).filter((r) => r.kind === 'extract');
+        for (const site of file.sites) {
+          const ts = Date.now();
+          try {
+            let scores: RunScores | null = null;
+            let why = 'no saved extract run (run dea extract on it, or use --extract)';
+            if (flags.extract) {
+              const r = await extract(site.url, { ...options(flags), quick: flags.quick, ...(site.options ?? {}) });
+              scores = await readRunScores(r.dir);
+            } else {
+              // the newest full run; a quick run only when the site has no full one (never with --full-only)
+              let quick: RunScores | null = null;
+              for (const r of saved.filter((x) => norm(x.url) === norm(site.url))) {
+                const sc = await readRunScores(r.dir).catch(() => null);
+                if (!sc) continue;
+                if (!sc.quick) {
+                  scores = sc;
+                  break;
+                }
+                quick ??= sc;
+              }
+              if (!scores && quick) {
+                if (flags.fullOnly) why = 'only --quick runs are saved (--full-only skips them)';
+                else scores = quick;
+              }
+            }
+            if (!scores) failures[site.url] = why;
+            rows.push(judgeSite(site, scores, tolerance));
+          } catch (e) {
+            failures[site.url] = (e as Error).message.split('\n')[0].slice(0, 200);
             rows.push(judgeSite(site, null, tolerance));
-            continue;
           }
-          rows.push(judgeSite(site, await readRunScores(dir), tolerance));
-        } catch (e) {
-          failures[site.url] = (e as Error).message.split('\n')[0].slice(0, 200);
-          rows.push(judgeSite(site, null, tolerance));
+          took.push({ site: site.name ?? site.url, seconds: Math.round((Date.now() - ts) / 100) / 10 });
         }
       }
+      const md = scoreboardMd(rows, failures);
+      if (flags.out) await writeFile(flags.out, `${md}\n`);
+      process.stdout.write(flags.json ? `${JSON.stringify({ tolerance, rows, failures, took }, null, 2)}\n` : `${md}\n`);
+      if (flags.timings)
+        process.stderr.write(
+          `\nscoreboard timings (total ${Math.round((Date.now() - t0) / 100) / 10} s)\n${took.map((x) => `  ${x.seconds.toFixed(1).padStart(7)} s  ${x.site}`).join('\n')}\n`,
+        );
+      if (rows.some((r) => r.status === 'regressed' || r.status === 'failed')) process.exitCode = 1;
+    } finally {
+      // a crashed browser can leave handles open: once the board is written, do not hang (CI fails fast instead of timing out)
+      exitSoon();
     }
-    const md = scoreboardMd(rows, failures);
-    if (flags.out) await writeFile(flags.out, `${md}\n`);
-    process.stdout.write(flags.json ? `${JSON.stringify({ tolerance, rows, failures }, null, 2)}\n` : `${md}\n`);
-    if (rows.some((r) => r.status === 'regressed' || r.status === 'failed')) process.exitCode = 1;
   }),
 );
 

@@ -17,7 +17,7 @@ import { type Gap, renderGaps } from '../gaps.ts';
 import { decodeMotion, type GsapNode, gsapModule, type MotionDoc } from '../motion/index.ts';
 import { pool } from '../pool.ts';
 import { REPLAY_CAPTURE_SCRIPT } from '../replay/capture.ts';
-import { animateEntries, buildGraph, type CaptureDoc, compactCapture, placeholderTextures, renderGraphMd } from '../replay/graph.ts';
+import { animateEntries, buildGraph, type CaptureDoc, compactCapture, fitCapture, placeholderTextures, renderGraphMd } from '../replay/graph.ts';
 import { fitInputs, type InputMap, inferInputs, inputsSummary, type ProbeData, type ProbeReport } from '../replay/inputs.ts';
 import { REPLAY_PLAYER } from '../replay/player.ts';
 import { type RebuildStats, rebuildMd, rebuildPipeline } from '../replay/rebuild.ts';
@@ -766,6 +766,8 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   let diff: ExtractResult['diff'] = null;
   let replay: ReplayInfo | null = null;
   let replayError: string | null = null;
+  /** set when the recording was over the cap and its read-only images were halved to fit */
+  let replayFitNote: string | null = null;
   let probeReport: ProbeReport | null = null;
   let interaction: InteractionResult | null = null;
   let pageStops: PageStopsResult | null = null;
@@ -842,8 +844,20 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
         const c = compactCapture(recording.doc, new Uint8Array(recording.bin.buffer, recording.bin.byteOffset, recording.bin.byteLength));
         // a recording with a scroll tape carries the scenes down the whole page (the tape's own budget is 64 MB), so its default cap is larger
         const capMb = opts.maxCaptureMb ?? (recording.doc.scroll ? 128 : 64);
+        // over the cap: shrink the largest read-only images until it fits, rather than losing the whole replay
+        let fitNote: string | null = null;
         if (c.bin.length > capMb * 1e6) {
-          replayError = `the recording is ${(c.bin.length / 1e6).toFixed(1)} MB after compaction, over the ${capMb} MB cap (--max-capture-mb ${Math.ceil(c.bin.length / 1e6)} keeps it)`;
+          const fit = fitCapture(c.doc, new Uint8Array(c.bin.buffer, c.bin.byteOffset, c.bin.byteLength), capMb * 1e6);
+          if (fit?.scaled.length) {
+            fitNote = `the recording was ${(c.bin.length / 1e6).toFixed(1)} MB, over the ${capMb} MB cap: ${fit.scaled.length} read-only image${fit.scaled.length === 1 ? '' : 's'} halved to fit (${fit.scaled.map((x) => `${x.from[0]}x${x.from[1]} -> ${x.to[0]}x${x.to[1]}`).join(', ')}; --max-capture-mb ${Math.ceil(c.bin.length / 1e6)} keeps them full size)`;
+            say(`recording shrunk: ${fitNote}`);
+            c.doc = fit.doc;
+            c.bin = fit.bin;
+            replayFitNote = fitNote;
+          }
+        }
+        if (c.bin.length > capMb * 1e6) {
+          replayError = `the recording is ${(c.bin.length / 1e6).toFixed(1)} MB after compaction, over the ${capMb} MB cap, and halving its read-only images did not bring it under (--max-capture-mb ${Math.ceil(c.bin.length / 1e6)} keeps it)`;
           say(`recording dropped: ${replayError}`);
         } else {
           recDoc = c.doc;
@@ -1694,6 +1708,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             : []),
         ]
       : [`replay: not recorded${replayError ? ` (${replayError})` : ''}`]),
+    ...(replayFitNote ? [`replay shrunk to fit: ${replayFitNote}`] : []),
     ...(interaction
       ? [
           `interaction (scripted pointer + scroll, where the picture changed, site vs kit): replay ${interaction.replay?.response != null ? pct(interaction.replay.response) : 'n/a'}, rebuild ${interaction.rebuild?.response != null ? pct(interaction.rebuild.response) : 'n/a'} (preview/interaction.jpg)`,

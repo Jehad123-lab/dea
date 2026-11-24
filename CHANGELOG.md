@@ -11,6 +11,15 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Extract: a recording over the size cap is shrunk to fit instead of dropped. Read-only 8-bit 2D images lose their
+  largest mip level (the browser's own smaller levels move up, nothing re-filtered) or are halved with a box filter,
+  largest first (`fitCapture`). The three.js keyframes example (114.3 MB, one 4096x4096 mipmapped texture) now keeps its
+  capture replay: canvas 100%, page 98.8%, where before it had none.
+- `dea scoreboard`: the newest full run of a site is used, and a quick one only when there is none (`--full-only` skips
+  quick runs); a quick run below a full-run target is shown as "below target (quick)", not counted as a regression;
+  a miss too small to show at one decimal is printed with enough digits (or as "100% minus 1.1e-16"); `--timings` prints
+  the time per site; `--extract` without `--sites` says so; the command exits within 5 s of writing the board even when a
+  crashed browser left a handle open.
 - `dea scoreboard`: DEA's reference-site scoreboard. Reads the newest saved extract run of each site in a sites file
   (`docs/scoreboard.json`: lusion.co, jehaduddin.vercel.app, a three.js example, igloo.inc, framer.com), or extracts them
   all with `--extract`, and compares the kept page and canvas scores and the editable rebuild's own scores with their
