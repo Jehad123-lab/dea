@@ -11,6 +11,9 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Extract: the reference watch no longer waits on an animated loading screen. Past its hard cap only a rising loader
+  counter buys more time (up to 7 minutes, full runs only); quick runs stop at the hard cap. lusion.co on a 2-vCPU box
+  sat in this step for 13+ minutes before; a quick run now leaves it in under a minute.
 - Extract: a recording over the size cap is shrunk to fit instead of dropped. Read-only 8-bit 2D images lose their
   largest mip level (the browser's own smaller levels move up, nothing re-filtered) or are halved with a box filter,
   largest first (`fitCapture`). The three.js keyframes example (114.3 MB, one 4096x4096 mipmapped texture) now keeps its

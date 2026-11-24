@@ -865,11 +865,15 @@ export async function referenceShot(
     let loader = false;
     const watchStart = currentTimings()?.now() ?? 0;
     let quiet = 0;
-    // ...and keeps buying it for as long as the loader shows it is working (a rising counter, or a picture that keeps changing), up to 7 minutes
-    let progressAt = Date.now();
+    // ...and keeps buying it for as long as the loader's counter keeps rising, up to 7 minutes (full mode only)
+    // when the loader's own counter last went up (the only progress that buys time past the hard cap)
+    let pctAt = Date.now();
     let lastPct: number | null = null;
     let lastScore = -1;
-    while (Date.now() - t0 < ms || (loader && (Date.now() - t0 < hardCap || (Date.now() - progressAt < 45_000 && Date.now() - t0 < 420_000)))) {
+    // past the hard cap only a rising loader counter buys more time: an animated loader keeps changing the picture forever on a
+    // slow CPU (lusion.co on a 2-vCPU box sat here for 13+ minutes); quick mode (1 frame) never goes past its hard cap
+    const longCap = frames < 2 ? hardCap : 420_000;
+    while (Date.now() - t0 < ms || (loader && (Date.now() - t0 < hardCap || (Date.now() - pctAt < 45_000 && Date.now() - t0 < longCap)))) {
       if (smart && !loader && best.score > 0 && quiet >= 4 && Date.now() - t0 >= 8000) {
         currentTimings()?.note(`settled after ${Math.round((Date.now() - t0) / 1000)} s (cap ${Math.round(ms / 1000)} s)`);
         break;
@@ -905,7 +909,8 @@ export async function referenceShot(
       loader = (await page.evaluate(LOADER_VISIBLE).catch(() => false)) as boolean;
       if (loader) {
         const pct = (await page.evaluate(LOADER_PROGRESS).catch(() => null)) as number | null;
-        if ((pct !== null && (lastPct === null || pct > lastPct)) || (lastScore >= 0 && Math.abs(score - lastScore) > 1.5)) progressAt = Date.now();
+        const rising = pct !== null && (lastPct === null || pct > lastPct);
+        if (rising) pctAt = Date.now();
         if (pct !== null) lastPct = pct;
         lastScore = score;
       } else if (lastScore >= 0 && lastPct !== null)
