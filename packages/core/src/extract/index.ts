@@ -1625,6 +1625,16 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       files,
       shaders: mods.map((m) => ({ name: m.name, file: m.file, fullscreen: m.fullscreen, uniforms: m.uniforms, textures: m.textures })),
       diff,
+      // the two WebGL results scored on their own, for dea scoreboard: (a) the capture replay, (b) the editable rebuild
+      replay: replay
+        ? {
+            canvas: replay.canvas,
+            page: replay.page,
+            kept: replay.kept,
+            rebuild: replay.rebuild ? { canvas: replay.rebuild.canvas, page: replay.rebuild.page, kept: replay.rebuild.kept } : null,
+          }
+        : null,
+      quick: Boolean(quick),
       build,
       techniques,
       gaps,

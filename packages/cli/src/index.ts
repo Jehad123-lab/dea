@@ -23,6 +23,7 @@ import {
   inspectSite,
   investigateInBackground,
   investigationStatus,
+  judgeSite,
   kitDir,
   libraryAdd,
   libraryHome,
@@ -34,11 +35,13 @@ import {
   listRuns,
   loginSession,
   measureStability,
+  parseScoreboardFile,
   planInvestigation,
   pruneRuns,
   RESULT_SCHEMA,
   type RunDoc,
   readRun,
+  readRunScores,
   readUrl,
   recordReference,
   renderReport,
@@ -47,7 +50,9 @@ import {
   researchWeb,
   resolveRun,
   runInvestigation,
+  type ScoreboardRow,
   type StepKind,
+  scoreboardMd,
   scoreFiles,
   stabilityMd,
   stackSite,
@@ -993,6 +998,59 @@ program
       for (const r of runs) process.stdout.write(`${r.id}  ${r.kind.padEnd(7)}  ${r.title || r.url}\n`);
     }),
   );
+
+common(
+  program
+    .command('scoreboard')
+    .description("DEA's reference-site scoreboard: the scores reached on known sites against the targets in a sites file; exits 1 when a target is missed")
+    .argument('[runs...]', 'extract run ids to score (default: the newest saved extract run of each site in the sites file)')
+    .option('--sites <file>', 'the sites file (JSON: { tolerance, sites: [{ url, name, targets: { page, canvas, rebuildPage, rebuildCanvas }, options }] })')
+    .option('--extract', 'extract every site in the sites file now instead of reading saved runs (slow: minutes per site)')
+    .option('--tolerance <points>', 'how far below a target still holds, in points (default: the file, else 1)')
+    .option('--out <file>', 'also write the markdown here')
+    .option('--quick', 'with --extract: rough and fast (1 frame); targets are for full runs, so expect misses'),
+).action((runs: string[], flags: CommonFlags & { sites?: string; extract?: boolean; tolerance?: string; out?: string; quick?: boolean }) =>
+  run(async () => {
+    const file = flags.sites ? parseScoreboardFile(await readFile(flags.sites, 'utf8')) : null;
+    if (!file && !runs.length) throw new Error('Give a sites file (--sites docs/scoreboard.json) or run ids.');
+    if (flags.extract && !file) throw new Error('--extract needs --sites');
+    const tolerance = flags.tolerance != null ? Number(flags.tolerance) / 100 : (file?.tolerance ?? 0.01);
+    const rows: ScoreboardRow[] = [];
+    const failures: Record<string, string> = {};
+    const norm = (u: string) => u.replace(/\/+$/, '');
+    if (runs.length) {
+      for (const ref of runs) {
+        const scores = await readRunScores(await resolveRun(ref));
+        const site = file?.sites.find((x) => norm(x.url) === norm(scores.url)) ?? { url: scores.url };
+        rows.push(judgeSite(site, scores, tolerance));
+      }
+    } else if (file) {
+      const saved = flags.extract ? [] : (await listRuns(undefined, 10_000)).filter((r) => r.kind === 'extract');
+      for (const site of file.sites) {
+        try {
+          let dir: string | undefined;
+          if (flags.extract) {
+            const r = await extract(site.url, { ...options(flags), quick: flags.quick, ...(site.options ?? {}) });
+            dir = r.dir;
+          } else dir = saved.find((r) => norm(r.url) === norm(site.url))?.dir;
+          if (!dir) {
+            failures[site.url] = 'no saved extract run (run dea extract on it, or use --extract)';
+            rows.push(judgeSite(site, null, tolerance));
+            continue;
+          }
+          rows.push(judgeSite(site, await readRunScores(dir), tolerance));
+        } catch (e) {
+          failures[site.url] = (e as Error).message.split('\n')[0].slice(0, 200);
+          rows.push(judgeSite(site, null, tolerance));
+        }
+      }
+    }
+    const md = scoreboardMd(rows, failures);
+    if (flags.out) await writeFile(flags.out, `${md}\n`);
+    process.stdout.write(flags.json ? `${JSON.stringify({ tolerance, rows, failures }, null, 2)}\n` : `${md}\n`);
+    if (rows.some((r) => r.status === 'regressed' || r.status === 'failed')) process.exitCode = 1;
+  }),
+);
 
 program
   .command('framer')

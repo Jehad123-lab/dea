@@ -11,6 +11,12 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- `dea scoreboard`: DEA's reference-site scoreboard. Reads the newest saved extract run of each site in a sites file
+  (`docs/scoreboard.json`: lusion.co, jehaduddin.vercel.app, a three.js example, igloo.inc, framer.com), or extracts them
+  all with `--extract`, and compares the kept page and canvas scores and the editable rebuild's own scores with their
+  targets. Writes markdown (`--out`) or JSON, and exits 1 when a target is missed or a site did not run. `extract.json` now
+  records the capture replay's and the editable rebuild's own scores, so the board can show both.
+- `live.yml` (proposed): a nightly scoreboard job that writes the board to the run page and keeps it as an artifact.
 - `dea hub approvals --client <name>`: only the changes one AI client asked for.
 - `record.e2e.test.ts`: `dea record` in a real browser against a local page; the second call comes from the cache and
   does not load the page again. The proposed CI runs it with the safety tests.

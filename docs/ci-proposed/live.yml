@@ -41,6 +41,32 @@ jobs:
           fi
           exit "$code"
 
+  scoreboard:
+    name: Reference-site scoreboard (dea scoreboard --extract)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        run: pnpm --filter @dea/core exec playwright install --with-deps chromium
+      - name: Extract every reference site and check its targets
+        run: pnpm -s dea scoreboard --sites docs/scoreboard.json --extract --browser chromium --out scoreboard.md
+      - name: Show the scoreboard on the run page
+        if: always()
+        run: test -f scoreboard.md && cat scoreboard.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scoreboard
+          path: scoreboard.md
+          if-no-files-found: ignore
+
   edge:
     name: Windows Edge on a live site
     runs-on: windows-latest
