@@ -518,10 +518,13 @@ export function registerHub(program: Command, run: (fn: () => Promise<void>) => 
   hub
     .command('approvals')
     .description('changes an AI asked for that are waiting for your OK (supervised mode, when the AI app cannot show you the question itself)')
-    .action(() =>
+    .option('--client <name>', 'only what this AI client asked for')
+    .action((f: { client?: string }) =>
       run(async () => {
-        const list = (await listApprovals(hubHome())).filter((r) => r.status === 'pending' && Date.parse(r.expires) > Date.now());
-        if (!list.length) return void out('Nothing is waiting for your OK.');
+        const list = (await listApprovals(hubHome())).filter(
+          (r) => r.status === 'pending' && Date.parse(r.expires) > Date.now() && (!f.client || r.client === f.client),
+        );
+        if (!list.length) return void out(f.client ? `Nothing from ${f.client} is waiting for your OK.` : 'Nothing is waiting for your OK.');
         for (const r of list)
           out(`${r.id}  ${r.client} wants ${r.tool} on ${r.app}: ${r.where}   (until ${r.expires})\n    dea hub approve ${r.id}   or   dea hub deny ${r.id}`);
       }),
