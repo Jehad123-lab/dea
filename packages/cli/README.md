@@ -19,6 +19,7 @@ dea extract https://example.com --to react --verify-build
 dea trace https://example.com --break uniform:uTime
 dea record https://example.com   # slow part only (screenshot + WebGL frames), reused by the next extract
 dea framer <run>                 # a Framer code component of the rebuild, with a poster still
+dea scoreboard --sites docs/scoreboard.json   # scores on the reference sites against their targets
 dea library search particles
 dea investigate https://gsap.com --goal "fonts, colours and animation tech"
 dea serve --http          # MCP over Streamable HTTP on 127.0.0.1:7341, bearer token required

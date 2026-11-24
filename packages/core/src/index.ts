@@ -230,6 +230,17 @@ export {
   type Technique,
 } from './extract/research.ts';
 export { type CanvasScore, canvasLine, canvasScore, type ScoreFilesResult, scoreFiles } from './extract/score.ts';
+export {
+  judgeSite,
+  parseScoreboardFile,
+  type RunScores,
+  readRunScores,
+  type ScoreboardFile,
+  type ScoreboardRow,
+  type ScoreboardSite,
+  type ScoreTargets,
+  scoreboardMd,
+} from './extract/scoreboard.ts';
 export { measureStability, type StabilityOptions, type StabilityResult, stabilityMd } from './extract/stability.ts';
 export { COVERS, type Gap, type ProbeStep, renderGaps } from './gaps.ts';
 export { dispatch, SESSION_METHODS, SessionClient, type SessionInfo, type SessionMethod, serveSession, sessionFile } from './hands/daemon.ts';

@@ -1,0 +1,39 @@
+{
+  "schema": "dea.scoreboard/1",
+  "tolerance": 0.01,
+  "sites": [
+    {
+      "name": "lusion.co",
+      "url": "https://lusion.co",
+      "why": "award-winning WebGL studio site; Round 4 numbers",
+      "targets": {
+        "page": 0.998,
+        "canvas": 0.997
+      }
+    },
+    {
+      "name": "jehaduddin.vercel.app",
+      "url": "https://jehaduddin.vercel.app",
+      "why": "Jehad's portfolio; Round 4 numbers for the editable rebuild",
+      "targets": {
+        "rebuildPage": 0.95,
+        "rebuildCanvas": 0.931
+      }
+    },
+    {
+      "name": "three.js keyframes example",
+      "url": "https://threejs.org/examples/webgl_animation_keyframes.html",
+      "why": "plain three.js scene with a skinned model; measure only until a first full run sets the target"
+    },
+    {
+      "name": "igloo.inc",
+      "url": "https://www.igloo.inc",
+      "why": "heavy WebGL with scroll; measure only until a first full run sets the target"
+    },
+    {
+      "name": "framer.com",
+      "url": "https://www.framer.com",
+      "why": "a Framer-built site (the template business); measure only until a first full run sets the target"
+    }
+  ]
+}
