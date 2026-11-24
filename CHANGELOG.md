@@ -11,6 +11,11 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Extract `--own-assets`: a large mesh is drawn as a coarse stand-in of its own shape instead of a box (`proxyMesh`,
+  vertex clustering to at most 16 cells per side of its bounding box; collapsed triangles dropped, no UVs, normals from
+  the faces). The kit still carries none of the mesh's buffers, only that sketch. A box is kept when too little is left.
+  jehaduddin.vercel.app (`--quick`, same capture, same machine): editable rebuild canvas 62.4% with boxes, 87.6% with
+  stand-ins (91.1% against the capture replay). Image placeholders were measured too and made no difference there.
 - Extract: a canvas score now measures the canvas, not what is painted over it. The recorder copies the canvas in the
   same task as the site's own last recorded frame (`grabCanvasFrame`, `CAP.canvasPng()`), because a canvas without
   `preserveDrawingBuffer` holds nothing once that task ends and a screenshot taken later can lose the picture or show a

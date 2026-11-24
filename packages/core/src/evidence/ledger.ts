@@ -247,7 +247,7 @@ export function buildFindings(i: LedgerInput): Finding[] {
         limitations: [
           'one frame: the same caveat as the replay',
           ...(rb.errors.length ? [`${rb.errors.length} rebuild error(s): ${rb.errors[0].slice(0, 120)}`] : []),
-          ...(i.ownAssets ? ['--own-assets: images are placeholders and big meshes are boxes, so this score is lower by design'] : []),
+          ...(i.ownAssets ? ['--own-assets: images are placeholders and big meshes are coarse stand-ins (or boxes), so this score is lower by design'] : []),
         ],
         data: { canvas: rb.canvas, page: rb.page, vsReplay: rb.vsReplay ?? null },
       });
