@@ -36,6 +36,8 @@ export interface Session {
   info: BrowserInfo;
   response: Response | null;
   warnings: string[];
+  /** Round 33: the page's renderer crashed (software WebGL running out of memory); later calls on the page fail */
+  readonly crashed?: boolean;
   close(): Promise<void>;
 }
 
@@ -200,6 +202,13 @@ export async function openSite(url: string, opts: OpenOptions = {}): Promise<Ses
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
   page.setDefaultTimeout(opts.timeoutMs ?? 45_000);
+  // Round 33: a renderer crash shows up later as "Target page, context or browser has been closed" on an unrelated call;
+  // record it when it happens so the report and the retry can say what actually went wrong
+  let crashed = false;
+  page.on('crash', () => {
+    crashed = true;
+    warnings.push("The page's renderer crashed (likely out of memory with software WebGL); DEA kept what it had read before.");
+  });
   if (opts.beforeGoto) await opts.beforeGoto(page, cdp);
 
   let response: Response | null = null;
@@ -239,6 +248,9 @@ export async function openSite(url: string, opts: OpenOptions = {}): Promise<Ses
     info,
     response,
     warnings,
+    get crashed() {
+      return crashed;
+    },
     async close() {
       if (closed) return;
       closed = true;

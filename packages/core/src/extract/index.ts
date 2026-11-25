@@ -376,6 +376,9 @@ async function referenceFor(
   return r;
 }
 
+/** Round 33: stages handed in with --from in this run (for the cache line) */
+const givenStages: string[] = [];
+
 /** set when a pointer tape fitted something that follows the pointer (read by the inputs line) */
 let tapeDriven: { drag: boolean; n: number } | null = null;
 
@@ -516,7 +519,7 @@ export async function extract(url: string, opts: ExtractOptions = {}): Promise<E
     const kept = await cache.prune().catch(() => null);
     r.cache = { ...cache.stats, dir: cache.dir, sizeBytes: kept?.bytes ?? null, capBytes: cache.maxBytes };
     tm.notes.push(
-      `cache: ${cache.stats.hits} files served (${fmtMb(cache.stats.bytesServed)}), ${cache.stats.misses} fetched, ${cache.stats.reused.length} stage(s) reused; ${kept ? fmtMb(kept.bytes) : '?'} of ${fmtMb(cache.maxBytes)} in ${cache.dir}`,
+      `cache: ${cache.stats.hits} files served (${fmtMb(cache.stats.bytesServed)}), ${cache.stats.misses} fetched, ${cache.stats.reused.length + givenStages.length} stage(s) reused${givenStages.length ? ` (${givenStages.length} from --from)` : ''}; ${kept ? fmtMb(kept.bytes) : '?'} of ${fmtMb(cache.maxBytes)} in ${cache.dir}`,
     );
   } else tm.notes.push('cache: off (--no-cache)');
   if (!outer) {
@@ -537,6 +540,9 @@ function mark(name: string, under?: Mark): Mark {
 }
 
 async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractResult> {
+  // Round 33: run.json's startedAt is the start of the run (it was stamped while writing, 149 ms before finishedAt)
+  const runStartedAt = new Date().toISOString();
+  givenStages.length = 0;
   const target = opts.to ?? 'react';
   const say = (s: string) => opts.onProgress?.(s);
   setDragStep(false);
@@ -565,7 +571,12 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   const dirOf = async (id?: string) => (id ? resolveRun(id) : null);
   const stage = async (name: string, fromId: string | undefined, run: () => Promise<string | null>): Promise<string | null> => {
     const given = await dirOf(fromId);
-    if (given) return given;
+    if (given) {
+      // Round 33: a stage handed in with --from is reused too (the cache line said "0 stage(s) reused")
+      givenStages.push(`${name} (--from ${fromId})`);
+      currentTimings()?.record(name, currentTimings()?.now() ?? 0, 0, `from --from ${fromId}`);
+      return given;
+    }
     const key = cacheKey('stage', STAGE_CACHE_VERSION, name, url, opts.browser ?? 'auto', opts.headless ?? true);
     const hit = cache ? await cache.meta<{ dir: string; made: string }>('stage', key) : null;
     if (hit && existsSync(hit.dir)) {
@@ -578,7 +589,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     const dir = await timed(name, () =>
       run().catch((e) => {
         if (!/crashed|Target closed|has been closed|disposed/i.test(String(e))) throw e;
-        say(`${name}: the page crashed (${String(e).slice(0, 80)}); trying once more`);
+        say(`${name}: the page or its browser connection went away (${String(e).split('\n')[0].slice(0, 100)}), often a renderer crash on software WebGL; trying once more`);
         return run();
       }),
     );
@@ -1703,7 +1714,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
         url,
         finalUrl: url,
         title,
-        startedAt: extractedAt,
+        startedAt: runStartedAt,
         finishedAt: new Date().toISOString(),
         files: { ...w.files, run: 'run.json' },
       },
@@ -1718,6 +1729,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     ...(cache?.stats.reused.length
       ? [`reused from the cache: ${cache.stats.reused.map((r) => `${r.what} (${r.at})`).join(', ')} · --no-cache observes everything again`]
       : []),
+    ...(givenStages.length ? [`handed in: ${givenStages.join(', ')}`] : []),
     `Extracted ${url} for ${target}: ${files.length} files in ${out}`,
     `tokens: tokens.css, tailwind.preset.js, tokens.json · motion: ${mdoc?.gsap?.tree.length ?? 0} GSAP timelines/tweens, ${mdoc?.gsap?.scrollTriggers.length ?? 0} ScrollTriggers, ${motion?.css?.keyframes.length ?? 0} keyframes · shaders: ${mods.map((m) => m.name).join(', ') || 'none'}`,
     ...(driven.length ? [`uniform drivers from the live trace: ${driven.slice(0, 6).join('; ')}`] : []),

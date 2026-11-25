@@ -11,6 +11,9 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 33: a page renderer crash is recorded when it happens (`page.on('crash')` in `openSite`, `session.crashed`, a warning in the
+  run) instead of surfacing later as "Target page, context or browser has been closed" on an unrelated call.
+
 - Round 32: the page environment is reported (timings "page environment: ...", extract.md "Page environment:", extract.json
   `diff.referenceEnv`, kept in the capture cache): the GPU name and CPU masks DEA applied, WebGL contexts the page lost
   (`webglcontextlost`, time and canvas size), and an html class naming a fallback mode (static, fallback, no-webgl, lite, reduced,
@@ -71,6 +74,13 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
   `too few triangles left after clustering`), listed in rebuild.md as "boxes, by reason".
 
 ### Changed
+
+- Round 33: the design decode survives a closed CDP session: Chrome's stylesheet and platform-font read retries on a fresh
+  session and otherwise goes on with computed styles, with a warning (a PR #24 run lost its design stage ~65 s in and retried).
+  The stage retry message names the likely cause.
+- Round 33: the GPU name in "Page environment" is cut at a word (up to 110 characters), never mid-id ("(Subzero) (0").
+- Round 33: the cache line counts stages handed in with `--from` ("N stage(s) reused (M from --from)") and the summary lists them.
+- Round 33: run.json `startedAt` is the start of the extract run (it was stamped while writing, 149 ms before `finishedAt`).
 
 - Round 32: "the loading screen finished after N s" is logged on any loader-to-no-loader change, with the last counter value only
   when one was read (PR #24's run had no counter reading and no line).

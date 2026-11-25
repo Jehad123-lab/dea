@@ -61,7 +61,22 @@ async function buildDesign(session: Session, writer: RunWriter, watch: Animation
   watch.phase.name = 'idle';
   const styles = await sampleStyles(page);
   say('asking Chrome which fonts drew the text');
-  const domCss = await readDomAndCss(cdp);
+  // Round 33: the CDP session can be closed under DEA (a renderer crash on software WebGL, ~65 s into a design decode on
+  // jehaduddin.vercel.app) while the page still answers: try a fresh session, then go on without sheet texts and platform fonts
+  const domCss = await readDomAndCss(cdp).catch(async (e) => {
+    if (!page.isClosed() && !session.crashed) {
+      const fresh = await page
+        .context()
+        .newCDPSession(page)
+        .catch(() => null);
+      if (fresh) {
+        const r = await readDomAndCss(fresh).catch(() => null);
+        if (r) return r;
+      }
+    }
+    session.warnings.push(`Chrome's stylesheet and font answers were not available (${String(e).split('\n')[0].slice(0, 100)}); fonts and CSS come from computed styles only.`);
+    return { sheets: [], platformFonts: {} };
+  });
   const css = readCss(domCss.sheets);
   say('reading three.js scenes');
   const three = await readThree(page).catch(() => ({ renderers: [], scenes: [] }));
