@@ -99,3 +99,25 @@ export function keepWatching(s: WatchState): boolean {
   // a visible loader is still working even when its picture holds still (a stuck counter), so only stillness without one stops
   return s.bestFlat && (s.loader || s.changedAge < FLAT_STILL_MS) && s.elapsed < Math.max(s.ms, s.hardCap) + extra;
 }
+
+/** Round 29: a failed look through the loader is tried again after this long (at most PEEL_MAX times) */
+export const PEEL_RETRY_MS = 30_000;
+export const PEEL_MAX = 4;
+
+/**
+ * Look through the loader now? Round 29: only while the kept frame and this frame are both flat, and either the picture has sat
+ * still for FLAT_STILL_MS or the watch has passed its hard cap (a counter that keeps crawling changes the picture, so stillness
+ * alone never fired on jehaduddin.vercel.app). Not gated on the loader check, which can miss a loader.
+ */
+export function shouldPeel(s: {
+  bestFlat: boolean;
+  flat: boolean;
+  changedAge: number;
+  elapsed: number;
+  hardCap: number;
+  sincePeel: number;
+  peels: number;
+}): boolean {
+  if (!s.bestFlat || !s.flat || s.peels >= PEEL_MAX || s.sincePeel < PEEL_RETRY_MS) return false;
+  return s.changedAge >= FLAT_STILL_MS || s.elapsed >= s.hardCap;
+}

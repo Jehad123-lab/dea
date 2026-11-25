@@ -11,6 +11,13 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 29: the reference watch looks through a flat loading screen while it runs (`shouldPeel`): once the kept frame and the
+  current frame are both flat and the picture has sat still for `FLAT_STILL_MS` or the watch has passed its hard cap, the loader's
+  layers are hidden and a detailed page behind them becomes the reference. Not gated on the loader check. A flat look puts the
+  loader back (`LOADER_UNHIDE`) and retries after 30 s, at most 4 times.
+- Round 29: `LOADER_WHY` logs, whenever it changes, why the loader check matched or turned candidates down (named element, cover,
+  text length, main canvas, counter layer) in the timings; every poll with `DEA_DEBUG_LOADER=1`.
+
 - Round 28: a loader still covering the page when the reference watch ends is hidden (`LOADER_HIDE`: its layers get
   visibility hidden) and the reference is taken through it when that shows a detailed page. The timings log says so.
   jehaduddin.vercel.app's counter crawls 63 -> 64 and stalls on software WebGL while the site behind it is already laid out.
@@ -47,6 +54,10 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
   `too few triangles left after clustering`), listed in rebuild.md as "boxes, by reason".
 
 ### Changed
+
+- Round 29: the watch clock (base length, hard cap, counter stall) starts at the first frame the watch got, not at page load. On
+  software WebGL jehaduddin.vercel.app's first screenshots took ~49 s and ate the 2.5x hard cap. A safety stop at the long cap
+  plus 2 minutes from page load remains. The end-of-watch look through the loader no longer needs the loader check to match.
 
 - Round 28: quick mode follows a rising loader counter up to 180 s (`QUICK_LOADER_CAP_MS`; it used to stop at its 2.5x hard
   cap), and a counter is stuck after 60 s without going up (`PCT_STALL_MS`, was 45 s). Only the counter buys this time.
