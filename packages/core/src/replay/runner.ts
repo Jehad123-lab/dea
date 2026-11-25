@@ -430,13 +430,17 @@ export function createRebuild(canvas, data, options = {}) {
     let geo;
     let mode = step.mode;
     if (step.proxy) {
-      // --own-assets: the coarse stand-in of the shape (rebuild.ts proxyMesh); UVs are zero, normals from the faces
+      // --own-assets: the coarse stand-in of the shape (rebuild.ts proxyMesh), under the site's attribute names: the position, and
+      // its other vertex attributes averaged per cluster; normals from the faces and zero UVs only where the site had none
       geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(step.proxy.pos), 3));
+      const posName = (step.attrs.find((a) => !a.div && a.type === 0x1406 && a.size >= 3) || { name: 'position' }).name;
+      geo.setAttribute(posName, new THREE.BufferAttribute(new Float32Array(step.proxy.pos), 3));
+      if (posName !== 'position') geo.setAttribute('position', geo.getAttribute(posName));
       const nv = step.proxy.pos.length / 3;
       geo.setIndex(new THREE.BufferAttribute(nv > 65535 ? new Uint32Array(step.proxy.idx) : new Uint16Array(step.proxy.idx), 1));
-      geo.computeVertexNormals();
-      geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(nv * 2), 2));
+      for (const [name, A] of Object.entries(step.proxy.attrs || {})) geo.setAttribute(name, new THREE.BufferAttribute(new Float32Array(A.data), A.size));
+      if (!geo.getAttribute('normal')) geo.computeVertexNormals();
+      if (!geo.getAttribute('uv')) geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(nv * 2), 2));
       mode = 4;
     } else if (step.placeholder) {
       const mn = step.placeholder.min;

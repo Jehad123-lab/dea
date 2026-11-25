@@ -5,7 +5,7 @@
     {
       "name": "lusion.co",
       "url": "https://lusion.co",
-      "why": "award-winning WebGL studio site. Round 25 floors from the owner's PC (PR #17, --own-assets --quick): page 82.9%, rebuild canvas 53.6%, replay 99.0% canvas / 99.8% page, rebuild vs replay 54.5%, all 50 large meshes were boxes (strips/fans/instanced draws had no stand-in). Floors, not goals: expected to rise with the Round 25 stand-ins for strips, fans and instanced draws",
+      "why": "award-winning WebGL studio site. Owner's PC after PR #18 (--own-assets --quick): page 82.9%, rebuild canvas 53.6%, replay 99.0% canvas / 99.8% page, rebuild vs replay 54.5%; all 50 large meshes are coarse stand-ins (0 boxes) yet the canvas did not move, so the gap is the images: every texture was a grey checker. Round 26 keeps each image's tones as an 8x8 colour grid. Floors, not goals",
       "targets": {
         "page": 0.8,
         "canvas": 0.5,
@@ -41,10 +41,9 @@
     {
       "name": "igloo.inc",
       "url": "https://www.igloo.inc",
-      "why": "heavy WebGL with scroll. Round 25: the page score 29.9% is INVALID (the reference settled on igloo's flat grey loading screen, which has no percentage counter; the replay matched that grey frame 100%); rebuild canvas 72.1%, rebuild page vs replay 89.4%, 9 boxes. Measurement pending the Round 25 loader fix (flat reference frames buy more time); only a canvas floor until then",
+      "why": "heavy WebGL with scroll. Round 26 numbers from the owner's PC (PR #18, fresh capture, --own-assets --quick): the reference is now igloo's real wireframe intro (frame at 95.9 s, not flat), so the Round 25 grey-loader numbers are void. Replay 100% canvas / 100% page; rebuild canvas 50.6%, rebuild page 36.8%, rebuild vs replay 50.6% with 79 coarse stand-ins and 0 boxes (the stand-ins then had zero barycentrics, so the wireframe shader drew nothing; Round 26 averages every vertex attribute into the stand-in). Floors until the next PC run",
       "targets": {
-        "canvas": 0.7,
-        "rebuildCanvas": 0.7
+        "rebuildCanvas": 0.5
       }
     },
     {

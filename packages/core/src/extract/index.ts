@@ -241,7 +241,8 @@ const STAGE_CACHE_VERSION = 1;
 // bumped when the probe or the capture's result format changes; the recorder's own source is hashed into the key too, so a change
 // to it never serves a recording made by the old one
 // 4: the scroll tape covers the whole page (recordScrollTape), so a recording made by the old tape is not served
-const CAPTURE_CACHE_VERSION = 4;
+// 5: the reference watch waits past flat loaders (refwait), so a capture whose reference is a loading screen is taken again
+const CAPTURE_CACHE_VERSION = 5;
 /** the recorder and the first-screen reader: a change to either takes the capture again instead of reusing an older reading */
 const CAPTURE_CODE = createHash('sha1').update(REPLAY_CAPTURE_SCRIPT).update(LAYOUT_READ(null)).digest('hex').slice(0, 12);
 
@@ -297,6 +298,8 @@ async function referenceFor(
         recordingError?: string;
         phase?: PhaseInfo | null;
       };
+      // a cached reference that is still a flat frame (a loader) is not worth reusing: watch again, the page may load this time
+      if (m.flat) throw new Error('flat reference');
       const png = `data:image/png;base64,${(await readFile(join(d, 'ref.png'))).toString('base64')}`;
       const layout = JSON.parse(await readFile(join(d, 'layout.json'), 'utf8'));
       const recording = existsSync(join(d, 'capture.bin'))
@@ -2017,7 +2020,7 @@ function renderExtractMd(o: {
       ...(r.rebuild
         ? [
             `- ✔ (b) \`public/rebuild/pipeline.json\`: ${r.rebuild.stats.draws} draws in the site's order as ${r.rebuild.stats.materials} RawShaderMaterials (GLSL in \`public/rebuild/shaders/\`), ${r.rebuild.stats.cameras} camera(s), ${r.rebuild.stats.renderTargets} render targets, ${r.rebuild.stats.glSteps} raw WebGL step(s). three.js reproduces the site's matrices from the camera and model matrix on ${r.rebuild.stats.matricesExact} draw(s)${r.rebuild.stats.matricesOff.length ? `, not on ${r.rebuild.stats.matricesOff.length}` : ''}.`,
-            `- recorded in (b): ${(r.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB of vertex/index buffers and ${(r.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB of texture pixels and simulation start state${o.ownAssets ? `; --own-assets: images are checkers and large meshes are stand-ins, ${standinSummary(r.rebuild.stats)}; their bytes are not in the kit` : " (the site's own bytes: for study and prototyping)"}. See \`rebuild.md\`.`,
+            `- recorded in (b): ${(r.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB of vertex/index buffers and ${(r.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB of texture pixels and simulation start state${o.ownAssets ? `; --own-assets: images are coarse colour grids and large meshes are stand-ins, ${standinSummary(r.rebuild.stats)}; their bytes are not in the kit` : " (the site's own bytes: for study and prototyping)"}. See \`rebuild.md\`.`,
           ]
         : []),
       '',
@@ -2041,7 +2044,7 @@ function renderExtractMd(o: {
         : ['- No mesh draws in the recorded frame (full-screen passes and points only), so no scene.glb.']),
       ...(o.ownAssets && r.placeholders != null
         ? [
-            `- ≈ --own-assets: ${r.placeholders} uploaded texture(s) in the replay are neutral checkers of the same size; render targets and geometry are the frames' own.`,
+            `- ≈ --own-assets: ${r.placeholders} uploaded texture(s) in the replay are the average colours of a coarse grid at the same size (tones, no detail); render targets and geometry are the frames' own.`,
           ]
         : []),
       ...(r.errors.length ? [`- Recording notes: ${r.errors.slice(0, 5).join('; ')}`] : []),

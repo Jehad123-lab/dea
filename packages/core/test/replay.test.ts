@@ -196,19 +196,34 @@ describe('replay: render graph', () => {
     expect(toHalf(1e9)).toBe(0x7c00);
   });
 
-  it('--own-assets turns uploaded textures into checkers and keeps render targets', () => {
+  it('--own-assets turns uploaded textures into coarse colour grids and keeps render targets', () => {
     const d = structuredClone(doc);
     const b = BIN.slice();
     d.snap.textures.push({
       id: 13,
       target: 0x0de1,
       params: {},
-      levels: [{ level: 0, face: 0, ifmt: 0x8058, w: 2, h: 1, d: 1, o: put(new Uint8Array(8).fill(9)), l: 8, upType: 0x1401, ch: 4 } as never],
+      // 32x1 RGBA: pixel x has red = x * 8, so every 4-pixel cell of the 8-cell grid averages to one value
+      levels: [
+        {
+          level: 0,
+          face: 0,
+          ifmt: 0x8058,
+          w: 32,
+          h: 1,
+          d: 1,
+          o: put(Uint8Array.from({ length: 128 }, (_, i) => (i % 4 === 0 ? (i / 4) * 8 : 9))),
+          l: 128,
+          upType: 0x1401,
+          ch: 4,
+        } as never,
+      ],
     });
     const bb = Uint8Array.from(bin);
     expect(placeholderTextures(d, bb)).toBe(2); // tex 12 (never a target) and tex 13
     const lv = d.snap.textures[3].levels[0] as unknown as { o: number };
-    expect(bb[lv.o]).not.toBe(9);
+    // the first cell (pixels 0..3, red 0, 8, 16, 24) is their average everywhere: tones kept, detail gone
+    expect([0, 1, 2, 3].map((x) => bb[lv.o + x * 4])).toEqual([12, 12, 12, 12]);
     expect(b[0]).toBe(BIN[0]);
   });
 });

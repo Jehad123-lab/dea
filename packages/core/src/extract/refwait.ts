@@ -22,10 +22,11 @@ const EDGE_STEP = 24;
 export const FLAT_SD = 8;
 export const FLAT_EDGES = 0.01;
 /** extra wait a flat best frame may buy past the hard cap */
-export const FLAT_EXTRA_QUICK_MS = 20_000;
+export const FLAT_EXTRA_QUICK_MS = 30_000;
 export const FLAT_EXTRA_FULL_MS = 60_000;
-/** a flat picture that has not changed for this long is not going anywhere */
-export const FLAT_STILL_MS = 10_000;
+/** a flat picture that has not changed for this long, with no loader on screen, is not going anywhere. Round 26: 10 s gave up
+ * on jehaduddin.vercel.app, whose black loader holds its counter at 63 for longer than that on a fresh capture */
+export const FLAT_STILL_MS = 20_000;
 
 /** Stats of a luminance thumbnail (row-major, `w`×`h`, values 0..255). */
 export function frameStats(lum: ArrayLike<number>, w = THUMB_W, h = THUMB_H): FrameStats {
@@ -90,5 +91,6 @@ export function keepWatching(s: WatchState): boolean {
   if (s.loader && (s.elapsed < s.hardCap || (s.pctAge < 45_000 && s.elapsed < s.longCap))) return true;
   // a flat best frame (a loader without a counter, a canvas not drawn yet) buys a bounded extra wait while frames still change
   const extra = s.quick ? FLAT_EXTRA_QUICK_MS : FLAT_EXTRA_FULL_MS;
-  return s.bestFlat && s.changedAge < FLAT_STILL_MS && s.elapsed < Math.max(s.ms, s.hardCap) + extra;
+  // a visible loader is still working even when its picture holds still (a stuck counter), so only stillness without one stops
+  return s.bestFlat && (s.loader || s.changedAge < FLAT_STILL_MS) && s.elapsed < Math.max(s.ms, s.hardCap) + extra;
 }

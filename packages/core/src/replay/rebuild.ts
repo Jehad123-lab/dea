@@ -8,7 +8,7 @@
 // recording (Verified). Vertex buffers and texture pixels are the recorded bytes, named "recorded" in pipeline.json
 // wherever they are used; with --own-assets the site's images become placeholders and large meshes become coarse stand-ins (proxyMesh) or boxes.
 
-import { type Arg, type CaptureDoc, type Cmd, numbers, type VaoAttr } from './graph.ts';
+import { type Arg, type CaptureDoc, type Cmd, numbers, TEX_GRID, type VaoAttr } from './graph.ts';
 import { invert, mul } from './scene.ts';
 
 export interface DrawState {
@@ -61,7 +61,8 @@ export interface DrawStep {
   /** with --own-assets: a box of this size stands in for the mesh */
   placeholder?: { min: number[]; max: number[] };
   /** with --own-assets: a coarse stand-in of the mesh's shape (vertex clustering, see proxyMesh), drawn instead of the box */
-  proxy?: { pos: number[]; idx: number[] };
+  /** --own-assets stand-in: clustered positions, triangles, and each other float vertex attribute averaged per cluster */
+  proxy?: { pos: number[]; idx: number[]; attrs?: Record<string, { size: number; data: number[] }> };
   /** a mesh of the recovered scene (scene.glb) drawn here */
   sceneNode?: string;
 }
@@ -409,13 +410,15 @@ export function proxyMesh(
   min: number[],
   max: number[],
   grid = PROXY_GRID,
-): { pos: number[]; idx: number[] } | null {
+  extra: Array<{ name: string; size: number; read: (v: number) => number[] }> = [],
+): { pos: number[]; idx: number[]; attrs?: Record<string, { size: number; data: number[] }> } | null {
   const ext = [0, 1, 2].map((k) => Math.max(max[k] - min[k], 1e-9));
   const big = Math.max(...ext);
   const cells = ext.map((e) => Math.max(1, Math.round((grid * e) / big)));
   const cellOf = new Map<number, number>();
   const sums: number[][] = [];
   const vertCell = new Map<number, number>();
+  const xsums: Array<number[] & { size: number }> = extra.map((e) => Object.assign([] as number[], { size: e.size }));
   const cluster = (v: number): number => {
     const known = vertCell.get(v);
     if (known != null) return known;
@@ -430,12 +433,20 @@ export function proxyMesh(
       id = sums.length;
       cellOf.set(key, id);
       sums.push([0, 0, 0, 0]);
+      for (const x of xsums) x.push(...new Array(x.size).fill(0));
     }
     const s = sums[id];
     s[0] += p[0];
     s[1] += p[1];
     s[2] += p[2];
     s[3]++;
+    // the other attributes (normals, UVs, a wireframe's barycentrics, colours) averaged the same way, so the site's shader
+    // still gets the inputs it reads instead of zeros
+    extra.forEach((e, j) => {
+      const val = e.read(v);
+      const X = xsums[j];
+      for (let k = 0; k < e.size; k++) X[id * e.size + k] += Number.isFinite(val[k]) ? val[k] : 0;
+    });
     vertCell.set(v, id);
     return id;
   };
@@ -455,7 +466,17 @@ export function proxyMesh(
   if (idx.length < 12) return null;
   const pos: number[] = [];
   for (const s of sums) for (let k = 0; k < 3; k++) pos.push(Math.round((s[k] / s[3]) * 1e4) / 1e4);
-  return { pos, idx };
+  if (!extra.length) return { pos, idx };
+  const attrs: Record<string, { size: number; data: number[] }> = {};
+  extra.forEach((e, j) => {
+    const X = xsums[j];
+    const data: number[] = [];
+    sums.forEach((s, id) => {
+      for (let k = 0; k < e.size; k++) data.push(Math.round((X[id * e.size + k] / s[3]) * 1e4) / 1e4);
+    });
+    attrs[e.name] = { size: e.size, data };
+  });
+  return { pos, idx, attrs };
 }
 
 /**
@@ -1160,7 +1181,27 @@ export function rebuildPipeline(
         const o = pos.off + v * stride + k * 4;
         return o + 4 <= B.l ? dv.getFloat32(o, true) : 0;
       };
-      const px = proxyMesh(tris, (v) => [at(v, 0), at(v, 1), Math.min(3, pos.size) > 2 ? at(v, 2) : 0], min, max);
+      // per-vertex float attributes besides the position (not per-instance ones: those stay as recorded)
+      const extra = step.attrs
+        .filter((a) => a !== pos && a.name !== pos.name && !a.div && a.type === 0x1406 && a.size >= 1 && a.size <= 4)
+        .flatMap((a) => {
+          const AB = doc.snap.buffers.find((b) => b.id === a.buf);
+          if (!AB) return [];
+          const adv = new DataView(bin.buffer, bin.byteOffset + AB.o, AB.l);
+          const ast = a.stride || a.size * 4;
+          return [
+            {
+              name: a.name,
+              size: a.size,
+              read: (v: number) =>
+                Array.from({ length: a.size }, (_, k) => {
+                  const o = a.off + v * ast + k * 4;
+                  return o + 4 <= AB.l ? adv.getFloat32(o, true) : 0;
+                }),
+            },
+          ];
+        });
+      const px = proxyMesh(tris, (v) => [at(v, 0), at(v, 1), Math.min(3, pos.size) > 2 ? at(v, 2) : 0], min, max, PROXY_GRID, extra);
       if (px) {
         step.proxy = px;
         stats.proxies++;
@@ -1301,12 +1342,13 @@ export function rebuildMd(p: PipelineDoc, stats: RebuildStats, score: { canvas: 
   L.push(`- recorded: ${stats.recordedTextures} textures, ${mb(stats.recordedTextureBytes)} (image pixels and the starting state of simulation targets)`);
   if (ownAssets)
     L.push(
-      `- --own-assets: the site's images are checker placeholders and ${stats.placeholders} large mesh(es) are stand-ins (${stats.proxies} a coarse shape of at most ${PROXY_GRID} cells per side, ${stats.placeholders - stats.proxies} boxes); their bytes are not in the kit`,
+      `- --own-assets: the site's images are the average colours of a ${TEX_GRID}×${TEX_GRID} grid and ${stats.placeholders} large mesh(es) are stand-ins (${stats.proxies} a coarse shape of at most ${PROXY_GRID} cells per side, ${stats.placeholders - stats.proxies} boxes); their bytes are not in the kit`,
     );
   // why a mesh is still a box, so the next fix is visible (lusion.co: 50 boxes before strips, fans and instanced draws counted)
   const why = Object.entries(stats.boxReasons ?? {}).sort((a, b) => b[1] - a[1]);
-  if (ownAssets && why.length) L.push(`- boxes, by reason: ${why.map(([k, n]) => `${k} ${n}`).join(', ')}`);
-  else L.push("- these bytes are the site's: for study and prototyping; swap them for your own (`--own-assets`) before you ship");
+  if (ownAssets) {
+    if (why.length) L.push(`- boxes, by reason: ${why.map(([k, n]) => `${k} ${n}`).join(', ')}`);
+  } else L.push("- these bytes are the site's: for study and prototyping; swap them for your own (`--own-assets`) before you ship");
   L.push('');
   const skipped = Object.entries(stats.skipped);
   if (skipped.length) {
