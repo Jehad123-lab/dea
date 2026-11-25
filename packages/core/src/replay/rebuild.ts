@@ -398,6 +398,15 @@ export function triangleIds(doc: CaptureDoc, bin: Uint8Array, step: Pick<DrawSte
   return out.length >= 3 ? Uint32Array.from(out) : null;
 }
 
+/** a normal's main direction: 1..6 for ±x, ±y, ±z (0 when unreadable) */
+export function normalBucket(n: number[]): number {
+  let k = 0;
+  for (let i = 1; i < 3; i++) if (Math.abs(n[i] ?? 0) > Math.abs(n[k] ?? 0)) k = i;
+  const x = n[k] ?? 0;
+  if (!Number.isFinite(x) || x === 0) return 0;
+  return 1 + k * 2 + (x < 0 ? 1 : 0);
+}
+
 /**
  * A coarse stand-in for a mesh (vertex clustering): its bounding box is cut into at most `grid` cells per side, every
  * vertex moves to the average of its cell, and triangles that collapse are dropped. What is left keeps the outline and
@@ -419,6 +428,11 @@ export function proxyMesh(
   const sums: number[][] = [];
   const vertCell = new Map<number, number>();
   const xsums: Array<number[] & { size: number }> = extra.map((e) => Object.assign([] as number[], { size: e.size }));
+  // Round 39: a hard edge keeps its faces apart. Vertices in one cell whose normals point different ways (a crystal's facets,
+  // a box's sides) were averaged into one vertex with one blurred normal, so faceted shading went smooth. The cell key now
+  // also carries the normal's main direction (6 buckets): same positions grid, so no more of the site's shape is shipped.
+  const nrm = extra.findIndex((e) => e.size === 3 && /normal/i.test(e.name));
+  const splitByNormal = nrm >= 0;
   const cluster = (v: number): number => {
     const known = vertCell.get(v);
     if (known != null) return known;
@@ -428,6 +442,7 @@ export function proxyMesh(
       const c = Math.min(cells[k] - 1, Math.max(0, Math.floor(((p[k] - min[k]) / ext[k]) * cells[k])));
       key = key * (grid + 1) + c;
     }
+    if (splitByNormal) key = key * 7 + normalBucket(extra[nrm].read(v));
     let id = cellOf.get(key);
     if (id == null) {
       id = sums.length;
@@ -474,6 +489,12 @@ export function proxyMesh(
     sums.forEach((s, id) => {
       for (let k = 0; k < e.size; k++) data.push(Math.round((X[id * e.size + k] / s[3]) * 1e4) / 1e4);
     });
+    // an average of unit normals is shorter than 1 (a shader that does not normalize lit the stand-in darker): back to length 1
+    if (j === nrm)
+      for (let i = 0; i + 2 < data.length; i += 3) {
+        const l = Math.hypot(data[i], data[i + 1], data[i + 2]);
+        if (l > 1e-6) for (let k = 0; k < 3; k++) data[i + k] = Math.round((data[i + k] / l) * 1e4) / 1e4;
+      }
     attrs[e.name] = { size: e.size, data };
   });
   return { pos, idx, attrs };
