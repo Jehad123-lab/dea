@@ -848,6 +848,43 @@ async function thumbStats(page: Page, png: string): Promise<FrameStats> {
   return frameStats(lum);
 }
 
+/** Round 32: the page's environment as DEA set it and as the page reacted, for the report */
+export interface RefEnv {
+  gpuMasked: boolean;
+  coresMasked: boolean;
+  renderer: string | null;
+  /** WebGL contexts the page lost: ms since the page started, canvas size */
+  contextLost: Array<{ t: number; w?: number; h?: number }>;
+  /** the html element's class when it names a fallback mode (static, fallback, no-webgl, lite, reduced) */
+  fallbackClass: string | null;
+}
+
+export const ENV_READ = `(() => {
+  const D = window.__DEA__ || {};
+  const cls = String(document.documentElement.className || '');
+  return {
+    gpuMasked: !!D.gpuMasked,
+    coresMasked: !!D.coresMasked,
+    renderer: D.renderer || null,
+    contextLost: Array.isArray(D.contextLost) ? D.contextLost.slice(0, 20) : [],
+    fallbackClass: /(^|\\s)(static|fallback|no-?webgl|no-?3d|lite|reduced|poster)(\\s|$)/i.test(cls) ? cls.slice(0, 120) : null,
+  };
+})()`;
+
+/** One line for the report about the page's environment (null when there is nothing to say). */
+export function envLine(e: RefEnv | null | undefined): string | null {
+  if (!e) return null;
+  const parts: string[] = [];
+  if (e.gpuMasked) parts.push(`DEA answered a desktop GPU name for the software renderer${e.renderer ? ` (${e.renderer.slice(0, 60)})` : ''}`);
+  if (e.coresMasked) parts.push('DEA answered 8 CPU cores and 8 GB (navigator.hardwareConcurrency, deviceMemory)');
+  if (e.contextLost.length)
+    parts.push(
+      `the page lost ${e.contextLost.length} WebGL context(s) (first at ${Math.round(e.contextLost[0].t / 1000)} s${e.contextLost[0].w ? `, ${e.contextLost[0].w}x${e.contextLost[0].h} canvas` : ''})`,
+    );
+  if (e.fallbackClass) parts.push(`the page switched to a fallback mode (html class "${e.fallbackClass}")`);
+  return parts.length ? parts.join('; ') : null;
+}
+
 export async function referenceShot(
   browser: Browser,
   url: string,
@@ -882,6 +919,8 @@ export async function referenceShot(
   /** the recorded WebGL frames (when `record`), taken right before the screenshot, which shows the last of them */
   recording?: Recording | null;
   recordingError?: string;
+  /** Round 32: what DEA told the page and what the page did: GPU name / CPU masks, lost WebGL contexts, a static-mode class */
+  env?: RefEnv;
   layout: {
     viewport: { width: number; height: number };
     boxes: LayoutBox[];
@@ -986,8 +1025,11 @@ export async function referenceShot(
         if (rising) pctAt = Date.now();
         if (pct !== null) lastPct = pct;
         lastScore = score;
-      } else if (lastScore >= 0 && lastPct !== null) {
-        currentTimings()?.note(`the loading screen finished after ${Math.round((Date.now() - t0) / 1000)} s (it showed ${lastPct}% last)`);
+      } else if (lastScore >= 0) {
+        // Round 32: on any loader-to-no-loader change, with or without a counter reading (PR #24's run had none)
+        currentTimings()?.note(
+          `the loading screen finished after ${Math.round((Date.now() - t0) / 1000)} s${lastPct !== null ? ` (it showed ${lastPct}% last)` : ''}`,
+        );
         // Round 30: once (it repeated on every poll after the loader cleared: 44 identical lines)
         lastScore = -1;
       }
@@ -1104,6 +1146,12 @@ export async function referenceShot(
         }
       }
     }
+    // Round 32: what DEA told the page and how it reacted, once, for the timings and the report
+    const env = ((await page.evaluate(ENV_READ).catch(() => null)) as RefEnv | null) ?? undefined;
+    {
+      const line = envLine(env);
+      if (line) currentTimings()?.note(`page environment: ${line}`);
+    }
     // every screenshot in the watch failed (or the watch never ran): one more try, so the reference is never an empty image
     // (Round 27: --no-replay wrote a 0-byte original.png and the diff died on "image did not load")
     if (!best.png) {
@@ -1121,6 +1169,7 @@ export async function referenceShot(
         loader: best.loader,
         flat: best.flat,
         layout: layout as never,
+        env,
         recording: null,
         recordingError: 'no WebGL canvas drew on the first screen after the loading screen (DEA waited and nudged the pointer and scroll)',
       };
@@ -1229,6 +1278,7 @@ export async function referenceShot(
             loader: useBest ? best.loader : nowLoader,
             flat: useBest ? false : nowFlat,
             layout: (l ?? layout) as never,
+            env,
             recording: canvasPng ? { ...recording, canvasPng } : recording,
             interaction,
             interactionState,
@@ -1243,13 +1293,14 @@ export async function referenceShot(
           loader: best.loader,
           flat: best.flat,
           layout: layout as never,
+          env,
           recording: null,
           recordingError: 'the recording could not be read out of the page',
         };
       }
-      return { png: best.png, atMs: best.atMs, loader: best.loader, flat: best.flat, layout: layout as never, recording: null, recordingError: r.error };
+      return { png: best.png, atMs: best.atMs, loader: best.loader, flat: best.flat, layout: layout as never, env, recording: null, recordingError: r.error };
     }
-    return { png: best.png, atMs: best.atMs, loader: best.loader, flat: best.flat, layout: layout as never };
+    return { png: best.png, atMs: best.atMs, loader: best.loader, flat: best.flat, layout: layout as never, env };
   } finally {
     await context.close();
   }

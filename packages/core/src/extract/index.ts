@@ -63,11 +63,13 @@ import { ownAssetsPage, pageIsWorthKeeping } from './pagelayer.ts';
 import { domPageMap } from './pagemap.ts';
 import {
   compareImages,
+  envLine,
   kitInteraction,
   kitSteadiness,
   LAYOUT_READ,
   placeholderPng,
   previewHtml,
+  type RefEnv,
   readLayout,
   referenceShot,
   renderPreview,
@@ -207,6 +209,8 @@ export interface ExtractResult {
     referenceLoader?: boolean;
     /** the reference frame is near-uniform: it likely still shows a loading screen (one without a visible counter) */
     referenceFlat?: boolean;
+    /** Round 32: GPU / CPU masks DEA applied, WebGL contexts the page lost, a fallback-mode class */
+    referenceEnv?: RefEnv;
     standin?: Standin | null;
     /** the canvas-only perceptual score (text masked out) at the start and at the end; null when there is no canvas */
     canvas?: { start: CanvasScore | null; final: CanvasScore | null };
@@ -299,6 +303,7 @@ async function referenceFor(
         made: string;
         recordingError?: string;
         phase?: PhaseInfo | null;
+        env?: RefEnv;
       };
       // a cached reference that is still a flat frame (a loader) is not worth reusing: watch again, the page may load this time
       if (m.flat) throw new Error('flat reference');
@@ -323,6 +328,7 @@ async function referenceFor(
         loader: m.loader,
         flat: m.flat ?? false,
         layout,
+        ...(m.env ? { env: m.env } : {}),
         ...(record ? { recording, ...(m.recordingError ? { recordingError: m.recordingError } : {}) } : {}),
         ...(interact ? { probe, interaction: interaction.length ? interaction : undefined, phase: m.phase ?? null } : {}),
       };
@@ -361,6 +367,7 @@ async function referenceFor(
           made: new Date().toISOString(),
           ...(r.recordingError ? { recordingError: r.recordingError } : {}),
           ...(r.phase ? { phase: r.phase } : {}),
+          ...(r.env ? { env: r.env } : {}),
         },
         files,
       )
@@ -1395,6 +1402,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           referenceAtMs: ref.atMs,
           referenceLoader: ref.loader,
           ...(ref.flat ? { referenceFlat: true } : {}),
+          ...(ref.env ? { referenceEnv: ref.env } : {}),
           canvas: { start: canvasStart, final: canvasFinal },
         };
         // per-stop score of the whole page: the kit scrolled to each stop the original was read at, against the original's screenshot there
@@ -2086,6 +2094,10 @@ function renderExtractMd(o: {
       L.push(
         `- ⚠ The reference${o.diff.referenceAtMs != null ? ` (taken at ${Math.round(o.diff.referenceAtMs / 1000)} s)` : ''} ${o.diff.referenceLoader ? 'still shows a loading screen' : 'is near-uniform (likely a loading screen)'}: every score here is against that frame, not the site. Try \`--reference-ms 180000\` or \`--reference hero.png\`.`,
       );
+    {
+      const env = envLine(o.diff.referenceEnv);
+      if (env) L.push(`- Page environment: ${env}.`);
+    }
     if (o.diff.error) L.push(`- The preview reported an error: ${o.diff.error}`);
     if (o.diff.research?.rounds.length) {
       L.push('', '### Research rounds', '');
