@@ -348,9 +348,68 @@ const TECHNIQUES: Array<{ id: string; name: string; test: (t: string) => string 
 const TRUSTED =
   /tympanus\.net\/codrops|discourse\.threejs\.org|threejs\.org|shadertoy\.com|codepen\.io|gsap\.com|github\.com|pmndrs|iquilezles\.org|thebookofshaders\.com|webglfundamentals\.org|maximeheckel\.com|medium\.com/i;
 
-/** Which known techniques the decoded shaders and pipeline show (program names + GLSL). */
-export function detectTechniques(text: string): Technique[] {
+/**
+ * The GLSL that actually compiles: drops lines inside `#ifdef` / `#if defined(...)` branches whose macro is not defined.
+ * Why: three.js ships every material chunk with its `#ifdef USE_*` guards, so a MeshStandardMaterial declares
+ * `uniform sampler2D displacementMap` even when no displacement map is set (keyframes example: a false "heightmap").
+ * Defines reset at each `#version` line (one program per block in the joined text). An `#if` DEA cannot evaluate keeps
+ * both branches, so this only ever removes code that is certainly off.
+ */
+export function activeGlsl(text: string): string {
+  const defined = new Set<string>();
+  // each frame: is this branch on (true/false/null = unknown), has an earlier branch been taken, was the parent on
+  const stack: { on: boolean | null; taken: boolean | null; parent: boolean }[] = [];
+  const live = () => stack.every((f) => f.on !== false);
+  const evalIf = (expr: string): boolean | null => {
+    const e = expr.replace(/\/\/.*$/, '').trim();
+    if (!/^[\s()!&|]*(defined\s*\(?\s*\w+\s*\)?[\s()!&|]*)+$/.test(e)) return null;
+    const js = e.replace(/defined\s*\(?\s*(\w+)\s*\)?/g, (_m, n: string) => (defined.has(n) ? ' true ' : ' false '));
+    if (!/^[\s()!&|truefals]*$/.test(js)) return null;
+    try {
+      return Boolean(new Function(`return (${js});`)());
+    } catch {
+      return null;
+    }
+  };
+  const out: string[] = [];
+  for (const line of text.split('\n')) {
+    const m = /^\s*#\s*(\w+)\s*(.*)$/.exec(line);
+    const d = m?.[1];
+    const arg = (m?.[2] ?? '').trim();
+    if (d === 'version') {
+      defined.clear();
+      stack.length = 0;
+    } else if (d === 'ifdef' || d === 'ifndef' || d === 'if') {
+      const name = arg.split(/\s/)[0] ?? '';
+      const on = d === 'ifdef' ? defined.has(name) : d === 'ifndef' ? !defined.has(name) : evalIf(arg);
+      stack.push({ on, taken: on, parent: live() });
+      continue;
+    } else if (d === 'elif' && stack.length) {
+      const f = stack[stack.length - 1] as (typeof stack)[number];
+      const v = f.taken === true ? false : f.taken === null ? null : evalIf(arg);
+      f.on = v;
+      if (v !== false) f.taken = f.taken === null || v === null ? null : true;
+      continue;
+    } else if (d === 'else' && stack.length) {
+      const f = stack[stack.length - 1] as (typeof stack)[number];
+      f.on = f.taken === null ? null : !f.taken;
+      continue;
+    } else if (d === 'endif' && stack.length) {
+      stack.pop();
+      continue;
+    }
+    if (!live()) continue;
+    if (d === 'define') defined.add(arg.split(/[\s(]/)[0] ?? '');
+    else if (d === 'undef') defined.delete(arg.split(/\s/)[0] ?? '');
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+/** Which known techniques the decoded shaders and pipeline show (program names + GLSL, inactive `#ifdef` code left out). */
+export function detectTechniques(raw: string): Technique[] {
   const out: Technique[] = [];
+  const text = activeGlsl(raw);
   for (const t of TECHNIQUES) {
     const ev = t.test(text);
     if (ev) out.push({ id: t.id, name: t.name, evidence: ev, queries: t.queries, sources: [] });

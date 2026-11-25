@@ -871,7 +871,18 @@ export async function grabCanvasFrame(page: Page): Promise<string | null> {
  * Record the next `frames` frames of the busiest visible WebGL canvas. Resolves once the frames are recorded and the
  * page's animation frames are held (call `releaseFrames` after taking the screenshot), or with an error.
  */
-export async function recordFrames(page: Page, opts: { frames?: number; timeoutMs?: number } = {}): Promise<{ ok: true } | { ok: false; error: string }> {
+/** How long the recorder waits on a page with no WebGL context at all before it gives up (the full wait is for on-demand scenes). */
+export const NO_CONTEXT_MS = 8_000;
+export const NO_CONTEXT_ERROR = 'the page made no WebGL context (nothing to record; DEA stopped after 8 s instead of waiting 90 s)';
+/** How long the recorder waits when WebGL contexts exist but none has drawn once since the page loaded. */
+export const NO_DRAW_MS = 15_000;
+export const NO_DRAW_ERROR =
+  'no WebGL context has drawn once since the page loaded (contexts made for feature checks only; DEA stopped after 15 s instead of 90 s)';
+
+export async function recordFrames(
+  page: Page,
+  opts: { frames?: number; timeoutMs?: number; noContextMs?: number; noDrawMs?: number } = {},
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const armed = await page
     .evaluate(
       (f) => (window as unknown as { __DEA_CAP__?: { arm: (o: object) => boolean } }).__DEA_CAP__?.arm({ frames: f, hold: true }) ?? false,
@@ -880,10 +891,22 @@ export async function recordFrames(page: Page, opts: { frames?: number; timeoutM
     .catch(() => false);
   if (!armed) return { ok: false, error: 'the recorder was not in the page' };
   const t0 = Date.now();
+  const noContextMs = opts.noContextMs ?? NO_CONTEXT_MS;
   while (Date.now() - t0 < (opts.timeoutMs ?? 90_000)) {
-    const st = await page.evaluate(() => (window as unknown as { __DEA_CAP__: { state: string } }).__DEA_CAP__.state).catch(() => 'gone');
-    if (st === 'done') return { ok: true };
-    if (st === 'gone') return { ok: false, error: 'the page went away while recording' };
+    type Cap = { state: string; contexts: unknown[]; tDraw: number | null };
+    const st = await page
+      .evaluate(() => {
+        const cap = (window as unknown as { __DEA_CAP__: Cap }).__DEA_CAP__;
+        return { state: cap.state, contexts: cap.contexts.length, drew: cap.tDraw != null };
+      })
+      .catch(() => ({ state: 'gone', contexts: 0, drew: false }));
+    if (st.state === 'done') return { ok: true };
+    if (st.state === 'gone') return { ok: false, error: 'the page went away while recording' };
+    // Round 34: a page that never made a WebGL context cannot draw one (framer.com waited the full 90 s for nothing)
+    if (st.contexts === 0 && Date.now() - t0 >= noContextMs) return { ok: false, error: NO_CONTEXT_ERROR };
+    // a context that has not issued one draw call since the page loaded (feature probes, idle canvases) is not an
+    // on-demand scene waiting for input: an on-demand scene draws its first frame on load
+    if (!st.drew && Date.now() - t0 >= (opts.noDrawMs ?? NO_DRAW_MS)) return { ok: false, error: NO_DRAW_ERROR };
     await page.waitForTimeout(300);
   }
   return { ok: false, error: 'no WebGL canvas drew a frame while DEA waited (the scene may render only on demand)' };
