@@ -487,7 +487,7 @@ export function proxyMesh(
 export function rebuildPipeline(
   doc: CaptureDoc,
   bin: Uint8Array,
-  opts: { data: string; ownAssets?: boolean; sceneNodes?: Map<string, string> } = { data: 'data.bin' },
+  opts: { data: string; ownAssets?: boolean; standIns?: boolean; sceneNodes?: Map<string, string> } = { data: 'data.bin' },
 ): { pipeline: PipelineDoc; shaders: Record<string, string>; stats: RebuildStats } {
   const stats: RebuildStats = {
     draws: 0,
@@ -1147,8 +1147,9 @@ export function rebuildPipeline(
     f.cmds.forEach(onCmd);
   });
 
-  // with --own-assets: meshes become coarse stand-ins (or boxes) and their buffers are not shipped
-  if (opts.ownAssets) {
+  // with --own-assets: meshes become coarse stand-ins (or boxes) and their buffers are not shipped (standIns: false keeps the
+  // site's meshes, only for --own-assets-cost's never-shipped variant)
+  if (opts.ownAssets && opts.standIns !== false) {
     for (const { step, pos } of meshDraws) {
       const B = doc.snap.buffers.find((b) => b.id === pos.buf);
       // anything bigger than a few hundred vertices is a model of the site's, not a helper quad or a gizmo

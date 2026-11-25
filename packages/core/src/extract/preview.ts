@@ -119,7 +119,8 @@ try {
     // the editable rebuild: the recorded render graph as three.js objects (rebuild/rebuild.js, public/rebuild/)
     const THREE = await import('https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js');
     const { loadPipeline, createRebuild } = await import('../rebuild/rebuild.js');
-    const d = await loadPipeline('../public/rebuild/');
+    // Round 38: --own-assets-cost scores never-shipped variants from their own folders (one URL per variant: no stale cache)
+    const d = await loadPipeline(P.rebuildBase || '../public/rebuild/');
     const b = d.pipeline.canvas;
     const c = document.createElement('canvas');
     c.style.cssText = 'position:fixed;pointer-events:none;left:' + b.x + 'px;top:' + b.y + 'px;width:' + b.cssW + 'px;height:' + b.cssH + 'px';

@@ -300,6 +300,10 @@ common(
     .option('--to <target>', 'react, vanilla or framer', 'react')
     .option('--section <selector>', 'keep only motion that touches this CSS selector')
     .option('--own-assets', "placeholders instead of the site's images and large meshes; the kit carries none of the site's recorded bytes")
+    .option(
+      '--own-assets-cost',
+      'with --own-assets: also score real images + stand-in meshes and image grids + real meshes (never shipped), to show what each placeholder costs',
+    )
     .option('--from <runs>', 'reuse runs: design=<id>,motion=<id>,assets=<id>,trace=<id>')
     .option('--no-diff', 'skip the visual diff and research loop')
     .option('--rounds <n>', 'research rounds when the rebuild does not match', '3')
@@ -333,6 +337,7 @@ common(
       to: string;
       section?: string;
       ownAssets?: boolean;
+      ownAssetsCost?: boolean;
       from?: string;
       diff: boolean;
       rounds: string;
@@ -406,6 +411,7 @@ common(
                 to: flags.to as 'react' | 'vanilla' | 'framer',
                 section: flags.section,
                 ownAssets: flags.ownAssets,
+                ownAssetsCost: flags.ownAssetsCost,
                 from: urls.length === 1 ? from : undefined,
                 noDiff: !flags.diff,
                 rounds: Number(flags.rounds),
