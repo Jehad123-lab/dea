@@ -77,6 +77,26 @@ export const INIT_SCRIPT = String.raw`(() => {
     maskGL(window.WebGL2RenderingContext);
   } catch (e) { D.errors.push('gpu mask: ' + e); }
 
+  // Round 31: sites also pick a quality tier from the CPU (jehaduddin.vercel.app: cores >= 8 is "high", else "mid"); a 2-vCPU
+  // server got the tier that shows a poster image instead of the 3D hero. With the mask on, DEA answers at least 8 cores and
+  // 8 GB, like a common desktop. Recorded in D.coresMasked.
+  D.coresMasked = false;
+  try {
+    if (window.__DEA_GPU_MASK__ !== false) {
+      const N = Navigator.prototype;
+      const hc = Object.getOwnPropertyDescriptor(N, 'hardwareConcurrency');
+      if (hc && hc.get) {
+        const real = hc.get.call(navigator);
+        if (real < 8) { Object.defineProperty(N, 'hardwareConcurrency', { get() { return 8; }, configurable: true }); D.coresMasked = true; }
+      }
+      const dm = Object.getOwnPropertyDescriptor(N, 'deviceMemory');
+      if (dm && dm.get) {
+        const realM = dm.get.call(navigator);
+        if (realM < 8) Object.defineProperty(N, 'deviceMemory', { get() { return 8; }, configurable: true });
+      }
+    }
+  } catch (e) { D.errors.push('cores mask: ' + e); }
+
   // WebGL: canvas contexts and every shader source the site compiles
   try {
     const shaderType = new WeakMap();

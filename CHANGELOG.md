@@ -11,6 +11,11 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 31: the GPU mask (on by default, off with the existing no-mask option) also answers `navigator.hardwareConcurrency` and
+  `navigator.deviceMemory` with at least 8, recorded as `__DEA__.coresMasked`. jehaduddin.vercel.app picks its quality tier from
+  the core count (>= 8 "high", else "mid"); a 2-vCPU box got a poster image instead of the 3D hero.
+- Round 31: the timings say when a WebGL canvas was on screen under the loader and is gone afterwards (it belonged to the loader).
+
 - Round 30: after a loading screen, the reference waits for the WebGL scene (`postLoaderGlWait`, `GL_ON_SCREEN`): when the page
   showed a loader and no visible canvas (10% of the viewport or more) is drawing yet, DEA waits up to 60 s (quick) / 120 s (full)
   for one, nudging the pointer and scroll once after 10 s for a scene that mounts on first input, then takes the reference again.
@@ -60,6 +65,9 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
   `too few triangles left after clustering`), listed in rebuild.md as "boxes, by reason".
 
 ### Changed
+
+- Round 31: when the wait after the loader finds no drawing WebGL canvas, recording is skipped instead of waiting 90 s for frames
+  that cannot come (a scored run went past a 300 s shell limit).
 
 - Round 30: a visible loader over a flat kept frame holds the watch to the long cap even when its counter pauses (a --no-replay
   run stopped at 96 s on the flat loader while the next reached the hero at 163 s).
