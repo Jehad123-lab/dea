@@ -91,6 +91,13 @@ import {
 } from './research.ts';
 import { type CanvasScore, canvasLine, compareCanvas } from './score.ts';
 
+/**
+ * Round 35: without a recording there is no (a) or (b), but the canvas still gets a score: DEA's own start (the shader
+ * modules on a full-screen quad) against the site's canvas. igloo.inc's unrecorded run printed "canvas 66.1%" next to
+ * "replay: not recorded", which read like a (b) score. Say what it is.
+ */
+export const UNRECORDED_CANVAS_NOTE = "(DEA's own shader-module draft, not (a) or (b): nothing was recorded, so this is not a rebuild score)";
+
 export interface ExtractOptions extends InspectOptions {
   to?: Target;
   /**
@@ -1744,7 +1751,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       : 'visual diff: skipped',
     ...(diff
       ? [
-          `visual diff (${canvasLine(diff.canvas?.final)})${diff.canvas?.start && diff.canvas.final ? `, from ${pct(diff.canvas.start.score)} at the start` : ''}`,
+          `visual diff (${canvasLine(diff.canvas?.final)})${diff.canvas?.start && diff.canvas.final ? `, from ${pct(diff.canvas.start.score)} at the start` : ''}${!replay && diff.canvas?.final ? ` ${UNRECORDED_CANVAS_NOTE}` : ''}`,
         ]
       : []),
     ...(replay
