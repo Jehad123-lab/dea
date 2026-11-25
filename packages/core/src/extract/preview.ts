@@ -871,11 +871,19 @@ export const ENV_READ = `(() => {
   };
 })()`;
 
+/** Round 33: a renderer name short enough for one line, cut at a word and never mid-id ("(Subzero) (0" was the old cut) */
+export function shortRenderer(r: string, max = 110): string {
+  if (r.length <= max) return r;
+  const cut = r.slice(0, max);
+  const sp = cut.lastIndexOf(' ');
+  return `${(sp > 40 ? cut.slice(0, sp) : cut).replace(/[\s,(]+$/, '')}…`;
+}
+
 /** One line for the report about the page's environment (null when there is nothing to say). */
 export function envLine(e: RefEnv | null | undefined): string | null {
   if (!e) return null;
   const parts: string[] = [];
-  if (e.gpuMasked) parts.push(`DEA answered a desktop GPU name for the software renderer${e.renderer ? ` (${e.renderer.slice(0, 60)})` : ''}`);
+  if (e.gpuMasked) parts.push(`DEA answered a desktop GPU name for the software renderer${e.renderer ? ` (${shortRenderer(e.renderer)})` : ''}`);
   if (e.coresMasked) parts.push('DEA answered 8 CPU cores and 8 GB (navigator.hardwareConcurrency, deviceMemory)');
   if (e.contextLost.length)
     parts.push(
