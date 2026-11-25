@@ -1342,7 +1342,7 @@ export function rebuildMd(p: PipelineDoc, stats: RebuildStats, score: { canvas: 
   L.push(`- recorded: ${stats.recordedTextures} textures, ${mb(stats.recordedTextureBytes)} (image pixels and the starting state of simulation targets)`);
   if (ownAssets)
     L.push(
-      `- --own-assets: the site's images are the average colours of a ${TEX_GRID}×${TEX_GRID} grid and ${stats.placeholders} large mesh(es) are stand-ins (${stats.proxies} a coarse shape of at most ${PROXY_GRID} cells per side, ${stats.placeholders - stats.proxies} boxes); their bytes are not in the kit`,
+      `- --own-assets: the site's images are an ${TEX_GRID}×${TEX_GRID} grid of their own average colours (lookup tables stay as recorded) and ${stats.placeholders} large mesh(es) are stand-ins: ${stats.proxies} coarse shape(s) of at most ${PROXY_GRID} cells per side, ${stats.placeholders - stats.proxies} box(es); their bytes are not in the kit`,
     );
   // why a mesh is still a box, so the next fix is visible (lusion.co: 50 boxes before strips, fans and instanced draws counted)
   const why = Object.entries(stats.boxReasons ?? {}).sort((a, b) => b[1] - a[1]);

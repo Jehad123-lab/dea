@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FLAT_STILL_MS, keepWatching } from '../src/extract/refwait.ts';
-import { coarseTones, TEX_GRID } from '../src/replay/graph.ts';
+import { coarseTones, isLookupTable, TEX_GRID } from '../src/replay/graph.ts';
 import { proxyMesh } from '../src/replay/rebuild.ts';
 
 describe('Round 26: reference watch past a loader with a stuck counter', () => {
@@ -94,5 +94,16 @@ describe('Round 26: stand-ins carry the other vertex attributes', () => {
     ];
     const px = proxyMesh([0, 1, 2, 1, 3, 2, 0, 2, 1, 1, 2, 3, 0, 3, 1, 2, 3, 0], (v) => P[v], [0, 0, 0], [1, 1, 0], 16);
     expect(px?.attrs).toBeUndefined();
+  });
+});
+
+describe('Round 27: lookup tables stay as recorded under --own-assets', () => {
+  it('tells code tables from pictures', () => {
+    expect(isLookupTable(32, 32, 32)).toBe(true); // 3D colour LUT
+    expect(isLookupTable(256, 1)).toBe(true); // gradient ramp
+    expect(isLookupTable(1024, 4)).toBe(true); // palette strip
+    expect(isLookupTable(64, 64)).toBe(true); // tiny table / noise
+    expect(isLookupTable(512, 512)).toBe(false);
+    expect(isLookupTable(128, 40)).toBe(false);
   });
 });

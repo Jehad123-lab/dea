@@ -17,7 +17,7 @@ import { type Gap, renderGaps } from '../gaps.ts';
 import { decodeMotion, type GsapNode, gsapModule, type MotionDoc } from '../motion/index.ts';
 import { pool } from '../pool.ts';
 import { REPLAY_CAPTURE_SCRIPT } from '../replay/capture.ts';
-import { animateEntries, buildGraph, type CaptureDoc, compactCapture, fitCapture, placeholderTextures, renderGraphMd } from '../replay/graph.ts';
+import { animateEntries, buildGraph, type CaptureDoc, compactCapture, fitCapture, placeholderTextures, renderGraphMd, TEX_GRID } from '../replay/graph.ts';
 import { fitInputs, type InputMap, inferInputs, inputsSummary, type ProbeData, type ProbeReport } from '../replay/inputs.ts';
 import { REPLAY_PLAYER } from '../replay/player.ts';
 import { type RebuildStats, rebuildMd, rebuildPipeline, standinSummary } from '../replay/rebuild.ts';
@@ -159,6 +159,8 @@ export interface ReplayInfo {
   scene: { meshes: number; camera: boolean; canvas: number | null; page: number | null } | null;
   errors: string[];
   placeholders?: number;
+  /** --own-assets: data textures kept as recorded because they are lookup tables (LUTs, ramps, tiny tables) */
+  lookups?: number;
   /** false with --own-assets: the capture replay was scored but its recorded bytes are not in the kit */
   shipped: boolean;
   /** uniforms the replay and the rebuild drive from live pointer, scroll and window size */
@@ -964,12 +966,13 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           // (b) the editable rebuild: the same render graph as three.js objects you can change
           const sceneNodes = new Map(sc.meshes.map((m, i) => [`${m.frame}|${m.cmd}`, m.match ? `${m.match} (mesh ${i})` : `mesh ${i}`]));
           let placeholders: number | undefined;
+          const lookupInfo = { lookups: 0 };
           let rbDoc = recDoc;
           let rbBin = binU8;
           if (opts.ownAssets) {
             rbDoc = structuredClone(recDoc);
             rbBin = new Uint8Array(binU8);
-            placeholders = placeholderTextures(rbDoc, rbBin);
+            placeholders = placeholderTextures(rbDoc, rbBin, lookupInfo);
           }
           const rb = rebuildPipeline(rbDoc, rbBin, { data: opts.ownAssets ? 'data.bin' : '../replay/capture.bin', ownAssets: opts.ownAssets, sceneNodes });
           await put('public/rebuild/pipeline.json', JSON.stringify(rb.pipeline));
@@ -996,6 +999,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             scene: sc.meshes.length ? { meshes: sc.meshes.length, camera: Boolean(sc.camera), canvas: null, page: null } : null,
             errors: recDoc.errors.slice(0, 10),
             placeholders,
+            ...(opts.ownAssets ? { lookups: lookupInfo.lookups } : {}),
             shipped: !opts.ownAssets,
             inputs: (recDoc.inputs ?? []).filter((m) => m.kind !== 'clock'),
             clocks: new Set((recDoc.animate ?? []).map((a) => `${a.frame}|${a.cmd}`)).size
@@ -1725,7 +1729,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       ? [
           `(a) capture replay, the recorded frames played back (ground truth, not editable): canvas ${replay.canvas != null ? pct(replay.canvas) : 'n/a'}, page ${replay.page != null ? pct(replay.page) : 'n/a'} · ${replay.passes} passes, ${replay.draws} draws, ${replay.programs} programs, ${(replay.bytes / 1e6).toFixed(1)} MB (render-graph.md)${replay.shipped ? '' : ', scored but not in the kit (--own-assets)'}`,
           replay.rebuild
-            ? `(b) editable rebuild, three.js from the render graph (rebuild.md): canvas ${replay.rebuild.canvas != null ? pct(replay.rebuild.canvas) : 'n/a'}, page ${replay.rebuild.page != null ? pct(replay.rebuild.page) : 'n/a'}${replay.rebuild.vsReplay != null ? `, ${pct(replay.rebuild.vsReplay)} against (a)` : ''} · ${replay.rebuild.stats.materials} RawShaderMaterials, ${replay.rebuild.stats.cameras} cameras, ${replay.rebuild.stats.renderTargets} render targets; recorded bytes still used: ${(replay.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB geometry, ${(replay.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB textures${opts.ownAssets ? ` (--own-assets: images are placeholders, ${standinSummary(replay.rebuild.stats)})` : ''}${replay.rebuild.kept ? ' · what the project runs' : ''}${replay.rebuild.errors.length ? ` · DID NOT RUN: ${rebuildErrorText(replay.rebuild.errors[0])}` : ''}`
+            ? `(b) editable rebuild, three.js from the render graph (rebuild.md): canvas ${replay.rebuild.canvas != null ? pct(replay.rebuild.canvas) : 'n/a'}, page ${replay.rebuild.page != null ? pct(replay.rebuild.page) : 'n/a'}${replay.rebuild.vsReplay != null ? `, ${pct(replay.rebuild.vsReplay)} against (a)` : ''} · ${replay.rebuild.stats.materials} RawShaderMaterials, ${replay.rebuild.stats.cameras} cameras, ${replay.rebuild.stats.renderTargets} render targets; recorded bytes still used: ${(replay.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB geometry, ${(replay.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB textures${opts.ownAssets ? ` (--own-assets: images are coarse colour grids, ${standinSummary(replay.rebuild.stats)})` : ''}${replay.rebuild.kept ? ' · what the project runs' : ''}${replay.rebuild.errors.length ? ` · DID NOT RUN: ${rebuildErrorText(replay.rebuild.errors[0])}` : ''}`
             : '(b) editable rebuild: not made',
           ...(replay.scene
             ? [
@@ -2044,7 +2048,7 @@ function renderExtractMd(o: {
         : ['- No mesh draws in the recorded frame (full-screen passes and points only), so no scene.glb.']),
       ...(o.ownAssets && r.placeholders != null
         ? [
-            `- ≈ --own-assets: ${r.placeholders} uploaded texture(s) in the replay are the average colours of a coarse grid at the same size (tones, no detail); render targets and geometry are the frames' own.`,
+            `- ≈ --own-assets: ${r.placeholders} uploaded texture(s) in the replay are an ${TEX_GRID}×${TEX_GRID} grid of their own average colours at the same size (tones, no detail)${r.lookups ? `; ${r.lookups} lookup table(s) (colour LUTs, ramps, tiny data textures: the site's code tables, not artwork) are kept as recorded` : ''}; render targets and geometry are the frames' own.`,
           ]
         : []),
       ...(r.errors.length ? [`- Recording notes: ${r.errors.slice(0, 5).join('; ')}`] : []),

@@ -287,6 +287,19 @@ export const LOADER_VISIBLE = `(() => {
   const big = (el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05 && r.width * r.height > innerWidth * innerHeight * 0.4; };
   for (const el of document.querySelectorAll('[role=progressbar],[aria-busy=true]')) { const cs = getComputedStyle(el); if (cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05 && el.getBoundingClientRect().width > 0) { const v = el.getAttribute('aria-valuenow'); if (v == null || +v < (+el.getAttribute('aria-valuemax') || 100)) return true; } }
   for (const el of document.querySelectorAll('[class*=loader i],[id*=loader i],[class*=preload i],[id*=preload i],[class*=loading i]')) if (big(el)) return true;
+  // Round 27: a loader with no loader-like name (jehaduddin.vercel.app: a black screen with a big "63"): a visible element whose whole
+  // text is a 0-100 counter, inside a fixed or absolute layer that covers most of the viewport
+  for (const el of document.querySelectorAll('body *')) {
+    if (el.children.length > 2) continue;
+    const t = (el.textContent || '').trim();
+    if (!t || t.length > 5 || !/^\\d{1,3}\\s?%?$/.test(t) || +t.replace('%', '') > 100) continue;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05 || el.getBoundingClientRect().width === 0) continue;
+    for (let a = el; a && a !== document.body; a = a.parentElement) {
+      const ps = getComputedStyle(a).position;
+      if ((ps === 'fixed' || ps === 'absolute') && big(a)) return true;
+    }
+  }
   return false;
 })()`;
 
@@ -303,6 +316,20 @@ export const LOADER_PROGRESS = `(() => {
     const t = (el.textContent || '').trim(); if (t.length > 12) continue;
     const m = /^(\\d{1,3})\\s?%?$/.exec(t); if (m) take(+m[1]);
   }
+  // a bare counter on a full-screen layer (see LOADER_VISIBLE), when no named loader gave a number
+  if (best === null)
+    for (const el of document.querySelectorAll('body *')) {
+      if (el.children.length > 2) continue;
+      const t = (el.textContent || '').trim();
+      const m = t.length <= 5 ? /^(\\d{1,3})\\s?%?$/.exec(t) : null;
+      if (!m) continue;
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) continue;
+      for (let a = el; a && a !== document.body; a = a.parentElement) {
+        const ps = getComputedStyle(a).position; const r = a.getBoundingClientRect();
+        if ((ps === 'fixed' || ps === 'absolute') && r.width * r.height > innerWidth * innerHeight * 0.4) { take(+m[1]); break; }
+      }
+    }
   return best;
 })()`;
 

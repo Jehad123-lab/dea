@@ -203,27 +203,52 @@ describe('replay: render graph', () => {
       id: 13,
       target: 0x0de1,
       params: {},
-      // 32x1 RGBA: pixel x has red = x * 8, so every 4-pixel cell of the 8-cell grid averages to one value
+      // 128x40 RGBA (a picture, not a lookup table): pixel x has red = x, so the first cell (x 0..15) averages to 7.5 -> 8
       levels: [
         {
           level: 0,
           face: 0,
           ifmt: 0x8058,
-          w: 32,
-          h: 1,
+          w: 128,
+          h: 40,
           d: 1,
-          o: put(Uint8Array.from({ length: 128 }, (_, i) => (i % 4 === 0 ? (i / 4) * 8 : 9))),
-          l: 128,
+          o: put(Uint8Array.from({ length: 128 * 40 * 4 }, (_, i) => (i % 4 === 0 ? (i / 4) % 128 : 9))),
+          l: 128 * 40 * 4,
+          upType: 0x1401,
+          ch: 4,
+        } as never,
+      ],
+    });
+    // a 3D colour LUT: kept as recorded (Round 27)
+    d.snap.textures.push({
+      id: 14,
+      target: 0x806f,
+      params: {},
+      levels: [
+        {
+          level: 0,
+          face: 0,
+          ifmt: 0x8058,
+          w: 16,
+          h: 16,
+          d: 16,
+          o: put(new Uint8Array(16 * 16 * 16 * 4).fill(77)),
+          l: 16 * 16 * 16 * 4,
           upType: 0x1401,
           ch: 4,
         } as never,
       ],
     });
     const bb = Uint8Array.from(bin);
-    expect(placeholderTextures(d, bb)).toBe(2); // tex 12 (never a target) and tex 13
+    const info = { lookups: 0 };
+    // tex 13 is a picture; tex 12 (a 2x2 float table, never a target) and the 3D LUT are lookup tables, kept as recorded
+    expect(placeholderTextures(d, bb, info)).toBe(1);
+    expect(info.lookups).toBe(2);
     const lv = d.snap.textures[3].levels[0] as unknown as { o: number };
-    // the first cell (pixels 0..3, red 0, 8, 16, 24) is their average everywhere: tones kept, detail gone
-    expect([0, 1, 2, 3].map((x) => bb[lv.o + x * 4])).toEqual([12, 12, 12, 12]);
+    // every pixel of the first cell is the cell's average: tones kept, detail gone
+    expect([0, 1, 5, 15].map((x) => bb[lv.o + x * 4])).toEqual([8, 8, 8, 8]);
+    const lut = d.snap.textures[4].levels[0] as unknown as { o: number };
+    expect(bb[lut.o]).toBe(77);
     expect(b[0]).toBe(BIN[0]);
   });
 });

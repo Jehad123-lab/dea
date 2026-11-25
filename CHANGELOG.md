@@ -11,6 +11,13 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 27: the loader check (`LOADER_VISIBLE`, `LOADER_PROGRESS`) also sees a loader with no loader-like class or role:
+  an element whose whole text is a 0-100 counter inside a fixed or absolute layer covering most of the viewport
+  (jehaduddin.vercel.app's black "63" screen, which made the watch stop and became the reference).
+- Round 27: `--own-assets` keeps lookup tables as recorded (`isLookupTable`: 3D textures, strips up to 4 rows or columns,
+  tables up to 64x64). They are the site's code tables (colour LUTs, ramps, noise), not artwork, and averaging them shifted
+  igloo.inc's colours (mauve background, pink rim). The report counts them.
+
 - Round 26: `--own-assets` images are the average colours of an 8x8 grid at the same size (`coarseTones`, `TEX_GRID`)
   instead of a grey checker: an image keeps its tones and none of its detail, as a mesh stand-in keeps a shape and none of
   the model. lusion.co's rebuild sat at 53.6% with all 50 meshes as stand-ins because every texture was grey.
@@ -34,6 +41,11 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
   `too few triangles left after clustering`), listed in rebuild.md as "boxes, by reason".
 
 ### Changed
+
+- Round 27: when the screenshot taken after recording is flat but the watch had kept a detailed frame, the watched frame is
+  the reference. If every watch screenshot failed, one more is taken, so `preview/original.png` is never empty (`--no-replay`
+  crashed on a 0-byte reference with "image did not load").
+- Round 27: wording: "an 8×8 grid of their own average colours", "50 coarse shape(s) of at most 16 cells per side, 0 box(es)".
 
 - Round 26: the reference watch keeps going while a loader is on screen even when its picture holds still (a counter stuck
   at 63 on jehaduddin.vercel.app outlasted the 10 s still cutoff and the black loader became ref.png). `FLAT_STILL_MS` is

@@ -946,7 +946,16 @@ export function coarseTones(w: number, h: number, ch: number, get: (p: number, c
  * TEX_GRID grid at the same size (compressed files: an empty level); render targets, which the frames draw themselves,
  * stay. Geometry stays (it is the scene).
  */
-export function placeholderTextures(doc: CaptureDoc, bin: Uint8Array): number {
+/**
+ * A data texture that is a lookup table, not a picture: a 3D texture (a colour-grading LUT), a strip a few rows high (a gradient
+ * ramp, a palette), or a tiny table. These are the site's code tables, carry no artwork, and averaging them shifts every colour
+ * the shader looks up (Round 27: igloo.inc's background turned mauve and its white glow pink).
+ */
+export function isLookupTable(w: number, h: number, d = 1): boolean {
+  return d > 1 || h <= 4 || w <= 4 || w * h <= 4096;
+}
+
+export function placeholderTextures(doc: CaptureDoc, bin: Uint8Array, info?: { lookups: number }): number {
   const written = new Set<number>();
   for (const f of doc.snap.framebuffers) for (const a of f.atts) if (a.tex) written.add(a.tex);
   let n = 0;
@@ -956,6 +965,11 @@ export function placeholderTextures(doc: CaptureDoc, bin: Uint8Array): number {
     for (const L of T.levels ?? []) {
       const lv = L as typeof L & { upType?: number; ch?: number; upload?: unknown; alloc?: number[] };
       if (lv.o != null && lv.l != null) {
+        // raw data uploads that are lookup tables stay as recorded (images decoded from files never take this branch)
+        if (isLookupTable(L.w, L.h ?? 1, (L as { d?: number }).d ?? 1)) {
+          if (info) info.lookups++;
+          continue;
+        }
         const ch = lv.ch ?? 4;
         const t = lv.upType ?? 0x1401;
         const size = t === 0x1406 || t === 0x1404 || t === 0x1405 ? 4 : t === 0x140b ? 2 : 1;
