@@ -1113,13 +1113,19 @@ export async function referenceShot(
         let prev = r1;
         let drawing = false;
         let nudged = false;
+        // Round 35: a visible canvas whose frame counter is still at the first read counts once the counter moves past ANY
+        // earlier visible read (igloo.inc on a slow box: frames over 2.5 s apart, and a -1 poll in between reset the chain)
+        let seen = r1 >= 0 ? r1 : r0;
+        let lastVisible = -1;
         while (Date.now() - g0 < waitMs) {
           await page.waitForTimeout(2500);
           const r = await glRead();
-          if (r >= 0 && prev >= 0 && r > prev) {
+          if (r >= 0) lastVisible = r;
+          if (r >= 0 && seen >= 0 && r > seen) {
             drawing = true;
             break;
           }
+          if (r >= 0 && seen < 0) seen = r;
           prev = r;
           // a scene that mounts on the first pointer or scroll (lazy R3F, an IntersectionObserver): nudge once after 10 s, then
           // put the page back at the top
@@ -1142,6 +1148,12 @@ export async function referenceShot(
           }
           currentTimings()?.note(
             `the WebGL scene started drawing ${Math.round((Date.now() - g0) / 1000)} s after the watch ended (after the loading screen): reference taken again`,
+          );
+        } else if (lastVisible >= 0 || prev >= 0) {
+          // Round 35: a big WebGL canvas is on screen but its frames did not advance while DEA watched. Do not drop it:
+          // the recorder decides (it gives up in 15 s when no context ever drew, Round 34), so a slow scene is still recorded
+          currentTimings()?.note(
+            `a WebGL canvas is on screen after the loading screen but its frame count did not move in ${Math.round(waitMs / 1000)} s: recording anyway (the recorder stops in 15 s if nothing ever drew)`,
           );
         } else {
           glMissing = true;
