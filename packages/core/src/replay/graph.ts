@@ -900,15 +900,56 @@ export function compactCapture(doc: CaptureDoc, bin: Uint8Array, opts: { drop?: 
   return { doc: out, bin: Buffer.concat(chunks, size), dropped };
 }
 
+/** cells per side of an --own-assets image stand-in: the colours of a coarse grid, not the picture */
+export const TEX_GRID = 8;
+
+const fromHalf = (h: number): number => {
+  const e = (h >> 10) & 31;
+  const m = h & 1023;
+  const v = e === 0 ? m * 2 ** -24 : e === 31 ? (m ? Number.NaN : Number.POSITIVE_INFINITY) : (1 + m / 1024) * 2 ** (e - 15);
+  return h & 0x8000 ? -v : v;
+};
+
 /**
- * --own-assets for the replay: every texture the site uploaded (images, data, compressed files) becomes a neutral
- * checker of the same size; render targets, which the frames draw themselves, stay. Geometry stays (it is the scene).
+ * Paint `w`×`h` pixels of `ch` channels as the average of each cell of a TEX_GRID×TEX_GRID grid. `get`/`set` read and write
+ * channel `c` of pixel `p`. Round 26: lusion.co's rebuild stayed at 53.6% with every mesh a stand-in, because each image
+ * was a grey checker; a coarse grid keeps an image's tones (a dark sky stays dark, a warm matcap stays warm) and none of
+ * its detail, as the mesh stand-ins keep a shape and none of the model.
+ */
+export function coarseTones(w: number, h: number, ch: number, get: (p: number, c: number) => number, set: (p: number, c: number, v: number) => void): void {
+  if (!(w > 0 && h > 0 && ch > 0)) return;
+  const gx = Math.min(TEX_GRID, w);
+  const gy = Math.min(TEX_GRID, h);
+  const sum = new Float64Array(gx * gy * ch);
+  const cnt = new Float64Array(gx * gy);
+  const cellOf = (x: number, y: number) => Math.min(gy - 1, Math.floor((y * gy) / h)) * gx + Math.min(gx - 1, Math.floor((x * gx) / w));
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      const cell = cellOf(x, y);
+      cnt[cell]++;
+      for (let c = 0; c < ch; c++) {
+        const v = get(p, c);
+        sum[cell * ch + c] += Number.isFinite(v) ? v : 0;
+      }
+    }
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      const cell = cellOf(x, y);
+      for (let c = 0; c < ch; c++) set(p, c, sum[cell * ch + c] / (cnt[cell] || 1));
+    }
+}
+
+/**
+ * --own-assets for the replay: every texture the site uploaded (images, data) becomes the average colours of a coarse
+ * TEX_GRID grid at the same size (compressed files: an empty level); render targets, which the frames draw themselves,
+ * stay. Geometry stays (it is the scene).
  */
 export function placeholderTextures(doc: CaptureDoc, bin: Uint8Array): number {
   const written = new Set<number>();
   for (const f of doc.snap.framebuffers) for (const a of f.atts) if (a.tex) written.add(a.tex);
   let n = 0;
-  const checker = (x: number, y: number) => ((x >> 3) + (y >> 3)) % 2;
   for (const T of doc.snap.textures) {
     if (written.has(T.id) || T.missing) continue;
     let touched = false;
@@ -918,33 +959,51 @@ export function placeholderTextures(doc: CaptureDoc, bin: Uint8Array): number {
         const ch = lv.ch ?? 4;
         const t = lv.upType ?? 0x1401;
         const size = t === 0x1406 || t === 0x1404 || t === 0x1405 ? 4 : t === 0x140b ? 2 : 1;
-        const dv = new DataView(bin.buffer, bin.byteOffset + lv.o, lv.l);
-        for (let i = 0; i * size < lv.l; i++) {
-          const px = Math.floor(i / ch);
-          const c = i % ch;
-          const v = c === 3 ? 1 : checker(px % L.w, Math.floor(px / L.w)) ? 0.62 : 0.5;
-          if (t === 0x1406) dv.setFloat32(i * 4, v, true);
-          else if (t === 0x140b) dv.setUint16(i * 2, toHalf(v), true);
-          else if (size === 1) dv.setUint8(i, Math.round(v * 255));
+        const len = lv.l;
+        const dv = new DataView(bin.buffer, bin.byteOffset + lv.o, len);
+        const w = Math.max(1, L.w);
+        const px = Math.floor(len / size / ch);
+        const h = Math.max(1, Math.floor(px / w));
+        const at = (p: number, c: number) => (p * ch + c) * size;
+        const ok = (p: number, c: number) => at(p, c) + size <= len;
+        if (t === 0x1406 || t === 0x140b || t === 0x1401) {
+          coarseTones(
+            w,
+            h,
+            ch,
+            (p, c) =>
+              !ok(p, c) ? 0 : t === 0x1406 ? dv.getFloat32(at(p, c), true) : t === 0x140b ? fromHalf(dv.getUint16(at(p, c), true)) : dv.getUint8(at(p, c)),
+            (p, c, v) => {
+              if (!ok(p, c)) return;
+              if (t === 0x1406) dv.setFloat32(at(p, c), v, true);
+              else if (t === 0x140b) dv.setUint16(at(p, c), toHalf(v), true);
+              else dv.setUint8(at(p, c), Math.max(0, Math.min(255, Math.round(v))));
+            },
+          );
+        } else {
+          // integer formats other than bytes (packed, int32...): a flat mid value, as before
+          for (let i = 0; i * size < len; i++) if (size === 1) dv.setUint8(i, 128);
         }
         touched = true;
       } else if (lv.upload) {
-        // an image upload: paint the image bytes as the checker
+        // an image upload: paint the image bytes (RGBA8) as the coarse grid of its own colours
         const walk = (x: unknown): void => {
           if (!x || typeof x !== 'object') return;
           if (Array.isArray(x)) return void x.forEach(walk);
           const o = x as Record<string, unknown>;
           if (o.$ === 'img') {
-            const w = Number(o.w);
+            const w = Math.max(1, Number(o.w));
             const u8 = bin.subarray(Number(o.o), Number(o.o) + Number(o.l));
-            for (let i = 0; i < u8.length; i += 4) {
-              const p = i / 4;
-              const v = checker(p % w, Math.floor(p / w)) ? 158 : 128;
-              u8[i] = v;
-              u8[i + 1] = v;
-              u8[i + 2] = v;
-              u8[i + 3] = 255;
-            }
+            const h = Math.max(1, Math.floor(u8.length / 4 / w));
+            coarseTones(
+              w,
+              h,
+              4,
+              (p, c) => u8[p * 4 + c] ?? 0,
+              (p, c, v) => {
+                if (p * 4 + c < u8.length) u8[p * 4 + c] = Math.max(0, Math.min(255, Math.round(v)));
+              },
+            );
             return;
           }
           for (const v of Object.values(o)) walk(v);

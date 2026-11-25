@@ -11,6 +11,13 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 26: `--own-assets` images are the average colours of an 8x8 grid at the same size (`coarseTones`, `TEX_GRID`)
+  instead of a grey checker: an image keeps its tones and none of its detail, as a mesh stand-in keeps a shape and none of
+  the model. lusion.co's rebuild sat at 53.6% with all 50 meshes as stand-ins because every texture was grey.
+- Round 26: mesh stand-ins carry the draw's other float vertex attributes (normals, UVs, a wireframe's barycentrics,
+  colours), averaged per cluster under the site's attribute names, so the site's shader reads real inputs instead of zeros.
+  igloo.inc's 79 stand-ins drew its wireframe intro from zero barycentrics (rebuild 50.6% against the replay).
+
 - Round 25: the reference watch no longer settles on a flat loading screen. A frame is "flat" when its 96x60 thumbnail
   has a luminance standard deviation under 8 and fewer than 1% edge pixels (`extract/refwait.ts`). A flat best frame
   buys more time past the hard cap (up to +20 s in quick mode, +60 s in full mode) while the picture still changes
@@ -27,6 +34,13 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
   `too few triangles left after clustering`), listed in rebuild.md as "boxes, by reason".
 
 ### Changed
+
+- Round 26: the reference watch keeps going while a loader is on screen even when its picture holds still (a counter stuck
+  at 63 on jehaduddin.vercel.app outlasted the 10 s still cutoff and the black loader became ref.png). `FLAT_STILL_MS` is
+  20 s and applies only with no loader; the quick-mode extra wait for a flat frame is 30 s.
+- Round 26: `CAPTURE_CACHE_VERSION` 5, and a cached capture whose reference is flat is taken again instead of reused (a
+  warm cache served PR #17's grey igloo.inc capture after the loader fix).
+- Round 26: rebuild.md no longer prints "these bytes are the site's" under `--own-assets` when no mesh is a box.
 
 - Round 25: the extract summary and the report counted every `--own-assets` mesh as a box ("3 mesh(es) are boxes")
   even when it was a coarse stand-in. They now say e.g. "3 mesh(es) are stand-ins (3 coarse shapes, 0 boxes)"

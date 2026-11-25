@@ -3,6 +3,7 @@ import {
   betterFrame,
   FLAT_EXTRA_FULL_MS,
   FLAT_EXTRA_QUICK_MS,
+  FLAT_STILL_MS,
   type FrameStats,
   frameChanged,
   frameStats,
@@ -79,8 +80,10 @@ describe('reference watch: when to stop', () => {
     expect(at(55_000)).toBe(true);
     expect(at(50_000 + FLAT_EXTRA_QUICK_MS - 1)).toBe(true);
     expect(at(50_000 + FLAT_EXTRA_QUICK_MS)).toBe(false);
-    // a flat picture that stopped changing is not going anywhere
-    expect(at(55_000, { changedAge: 12_000 })).toBe(false);
+    // a flat picture that stopped changing, with no loader on screen, is not going anywhere (Round 26: a visible loader
+    // with a stuck counter still holds)
+    expect(at(55_000, { changedAge: FLAT_STILL_MS + 1, loader: false })).toBe(false);
+    expect(at(55_000, { changedAge: FLAT_STILL_MS + 1 })).toBe(true);
     // full mode waits longer
     expect(at(50_000 + FLAT_EXTRA_QUICK_MS + 5000, { quick: false, longCap: 420_000 })).toBe(true);
     expect(at(50_000 + FLAT_EXTRA_FULL_MS, { quick: false, longCap: 420_000 })).toBe(false);
