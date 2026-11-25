@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import type { Browser, Page } from 'playwright';
 import { NAME_SHIM } from '../browser/init.ts';
-import { installObservers, LOADER_HIDE, LOADER_PROGRESS, LOADER_VISIBLE } from '../browser/open.ts';
+import { installObservers, LOADER_HIDE, LOADER_PROGRESS, LOADER_UNHIDE, LOADER_VISIBLE, LOADER_WHY } from '../browser/open.ts';
 import { alignToReference, type PhaseInfo, phaseInfo } from '../browser/phase.ts';
 import { thumbOfImage } from '../browser/settle.ts';
 import { assertNotBotWall } from '../browser/wall.ts';
@@ -23,7 +23,7 @@ import { type ProbeData, probeInputs } from '../replay/inputs.ts';
 import { currentTimings, overBudget, timed } from '../timings.ts';
 import { type ShaderModule, threeRevision } from './generate.ts';
 import { runInteractionWithState, type StepState, setDragStep } from './interaction.ts';
-import { betterFrame, type FrameStats, frameChanged, frameStats, isFlat, keepWatching, QUICK_LOADER_CAP_MS, THUMB_H, THUMB_W } from './refwait.ts';
+import { betterFrame, type FrameStats, frameChanged, frameStats, isFlat, keepWatching, QUICK_LOADER_CAP_MS, shouldPeel, THUMB_H, THUMB_W } from './refwait.ts';
 import type { Params } from './research.ts';
 
 const MIME: Record<string, string> = {
@@ -907,9 +907,18 @@ export async function referenceShot(
     let lastStats: FrameStats | null = null;
     let changedAt = Date.now();
     let flatNoted = false;
+    // Round 29: the watch clock starts at the first frame the watch actually got, not at page load: on software WebGL the first
+    // screenshots of jehaduddin.vercel.app took ~49 s, which ate the whole 2.5x hard cap before the counter could buy time
+    let wt0 = 0;
+    const welapsed = () => (wt0 ? Date.now() - wt0 : 0);
+    let peelAt = -Infinity;
+    let peels = 0;
+    let lastWhy = '';
+    let whyNotes = 0;
     const watching = () =>
+      Date.now() - t0 < longCap + 120_000 &&
       keepWatching({
-        elapsed: Date.now() - t0,
+        elapsed: welapsed(),
         ms,
         hardCap,
         longCap,
@@ -920,7 +929,7 @@ export async function referenceShot(
         quick: frames < 2,
       });
     while (watching()) {
-      if (!flatNoted && best.flat && best.score >= 0 && Date.now() - t0 >= Math.max(ms, loader ? hardCap : ms)) {
+      if (!flatNoted && best.flat && best.score >= 0 && welapsed() >= Math.max(ms, loader ? hardCap : ms)) {
         flatNoted = true;
         currentTimings()?.note('the best frame so far is near-uniform (a loading screen?): watching longer while it changes');
       }
@@ -932,6 +941,13 @@ export async function referenceShot(
       if (section) await page.evaluate(`document.querySelector(${JSON.stringify(section)})?.scrollIntoView({ block: 'start' })`).catch(() => {});
       const buf = await page.screenshot({ type: 'png' }).catch(() => null);
       if (!buf) continue;
+      if (!wt0) {
+        wt0 = Date.now();
+        pctAt = wt0;
+        changedAt = wt0;
+        if (wt0 - t0 > 10_000)
+          currentTimings()?.note(`the first watch frame came ${Math.round((wt0 - t0) / 1000)} s after page load: the watch clock starts there`);
+      }
       const png = `data:image/png;base64,${buf.toString('base64')}`;
       const st = await thumbStats(page, png);
       const score = st.sd;
@@ -939,6 +955,12 @@ export async function referenceShot(
       if (frameChanged(lastStats, st)) changedAt = Date.now();
       lastStats = st;
       loader = (await page.evaluate(LOADER_VISIBLE).catch(() => false)) as boolean;
+      // Round 29: why the loader check said that, logged when it changes (every poll with DEA_DEBUG_LOADER=1)
+      const why = (await page.evaluate(LOADER_WHY).catch(() => 'loader check failed')) as string;
+      const whyLine = `${loader ? 'loader' : 'no loader'} at ${Math.round((Date.now() - t0) / 1000)} s: ${why}`.slice(0, 400);
+      if (process.env.DEA_DEBUG_LOADER) console.error(whyLine);
+      if (why !== lastWhy && whyNotes++ < 30) currentTimings()?.note(whyLine);
+      lastWhy = why;
       if (loader) {
         const pct = (await page.evaluate(LOADER_PROGRESS).catch(() => null)) as number | null;
         const rising = pct !== null && (lastPct === null || pct > lastPct);
@@ -957,11 +979,37 @@ export async function referenceShot(
           return layout;
         });
       }
+      // Round 29: a flat frame that sits still (or outlasts the hard cap) is looked through: hide the loader layers, whether or not
+      // LOADER_VISIBLE matched, and keep the page behind them if it has detail; else put the loader back and watch on
+      if (shouldPeel({ bestFlat: best.flat, flat, changedAge: Date.now() - changedAt, elapsed: welapsed(), hardCap, sincePeel: Date.now() - peelAt, peels })) {
+        peelAt = Date.now();
+        peels++;
+        const hidden = (await page.evaluate(LOADER_HIDE).catch(() => 0)) as number;
+        if (hidden > 0) {
+          await page.waitForTimeout(1500);
+          const pb = await page.screenshot({ type: 'png' }).catch(() => null);
+          const ppng = pb ? `data:image/png;base64,${pb.toString('base64')}` : '';
+          const pst = ppng ? await thumbStats(page, ppng) : null;
+          if (pst && !isFlat(pst)) {
+            currentTimings()?.note(
+              `a flat loading screen at ${Math.round((Date.now() - t0) / 1000)} s: DEA hid ${hidden} loader layer(s) and took the reference through them`,
+            );
+            best = { png: ppng, score: pst.sd, atMs: Date.now() - t0, loader: false, flat: false };
+            loader = false;
+            layout = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
+            break;
+          }
+          await page.evaluate(LOADER_UNHIDE).catch(() => 0);
+          currentTimings()?.note(
+            `hiding ${hidden} loader layer(s) at ${Math.round((Date.now() - t0) / 1000)} s showed a flat page too: loader put back, watching on`,
+          );
+        }
+      }
     }
     currentTimings()?.record('watch for the reference frame', watchStart, (currentTimings()?.now() ?? 0) - watchStart);
     // Round 28: the watch ended with the loader still up and no detailed frame: hide the loader's layers and look through them
     // (jehaduddin.vercel.app's counter stalls at 64 on software WebGL while the site behind it is already laid out)
-    if (best.flat && (loader || best.loader)) {
+    if (best.flat && best.png) {
       const hidden = (await page.evaluate(LOADER_HIDE).catch(() => 0)) as number;
       if (hidden > 0) {
         await page.waitForTimeout(1500);

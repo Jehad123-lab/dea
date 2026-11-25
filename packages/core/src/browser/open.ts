@@ -345,6 +345,40 @@ export const LOADER_HIDE = `(() => {${LOADER_HELPERS}
   return layers.size;
 })()`;
 
+/** Round 29: undo LOADER_HIDE (a look through the loader showed a flat page too, so the loader goes back and the watch goes on). */
+export const LOADER_UNHIDE = `(() => {
+  const els = document.querySelectorAll('[data-dea-hidden-loader]');
+  for (const el of els) { el.style.removeProperty('visibility'); el.style.removeProperty('opacity'); el.style.removeProperty('pointer-events'); el.removeAttribute('data-dea-hidden-loader'); }
+  return els.length;
+})()`;
+
+/**
+ * Round 29: why the loader check says what it says (runs in the page), as one short line for the timings log: which rule matched,
+ * or why the loader-like candidates were turned down. --no-replay on jehaduddin.vercel.app kept its "36" preloader with
+ * referenceLoader false and nothing said why.
+ */
+export const LOADER_WHY = `(() => {${LOADER_HELPERS}
+  const d = (el) => { const r = el.getBoundingClientRect(); const id = el.id ? '#' + el.id : ''; const c = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\\s+/).slice(0, 2).join('.') : ''; return el.tagName.toLowerCase() + id + c + ' (' + Math.round((r.width * r.height * 100) / area) + '% cover, ' + textLen(el) + ' chars)'; };
+  const why = [];
+  for (const el of document.querySelectorAll('[role=progressbar],[aria-busy=true]')) why.push((shown(el) ? 'progressbar ' : 'hidden progressbar ') + d(el));
+  for (const el of document.querySelectorAll('[class*=loader i],[id*=loader i],[class*=preload i],[id*=preload i],[class*=loading i]')) {
+    if (el === document.body || el === document.documentElement) continue;
+    const cs = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    const reason = cs.display === 'none' ? 'display none' : cs.visibility === 'hidden' ? 'visibility hidden' : +cs.opacity <= 0.05 ? 'opacity ' + cs.opacity : r.width * r.height <= area * 0.4 ? 'covers under 40%' : bigCanvas(el) ? 'holds the main canvas' : textLen(el) > 200 ? 'too much text' : null;
+    why.push((reason ? 'named, rejected (' + reason + ') ' : 'named loader ') + d(el));
+    if (why.length > 5) break;
+  }
+  for (const el of document.querySelectorAll('body *')) {
+    const v = counterOf(el); if (v === null) continue;
+    if (!shown(el)) { why.push('counter ' + v + ' not shown ' + d(el)); continue; }
+    const layer = counterLayer(el);
+    why.push(layer ? 'counter ' + v + ' on ' + d(layer) : 'counter ' + v + ' rejected (no big layer without canvas or text) ' + d(el));
+    if (why.length > 8) break;
+  }
+  return why.length ? why.join('; ') : 'no loader-like element';
+})()`;
+
 /**
  * Wait for a loading screen to finish. Software WebGL loads slowly, so a fixed wait either gives up on a loader that is still
  * moving or waits on one that is stuck: this waits while the loader shows progress (a rising counter, or a picture that keeps
