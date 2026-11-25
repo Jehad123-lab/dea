@@ -202,6 +202,46 @@ export interface StandInInfo {
   dropped: string[];
   /** why it is a box, when it is one */
   box?: string;
+  /** Round 41: how many mesh draws read the same position buffer (above 1: a batched or shared mesh) */
+  sharedBuffer?: number;
+}
+
+/**
+ * The bounding box of a draw's vertices: only the vertex ids it draws when they are known (a batched mesh keeps many
+ * objects in one buffer), the whole buffer otherwise.
+ */
+export function drawBounds(dv: DataView, off: number, stride: number, dims: number, ids?: ArrayLike<number>): { min: number[]; max: number[] } {
+  const min = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+  const max = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  const add = (o: number) => {
+    if (o < 0 || o + dims * 4 > dv.byteLength) return;
+    for (let k = 0; k < dims; k++) {
+      const x = dv.getFloat32(o + k * 4, true);
+      if (Number.isFinite(x)) {
+        min[k] = Math.min(min[k], x);
+        max[k] = Math.max(max[k], x);
+      }
+    }
+  };
+  if (ids?.length) {
+    const seen = new Set<number>();
+    for (let i = 0; i < ids.length; i++) {
+      const v = ids[i];
+      if (seen.has(v)) continue;
+      seen.add(v);
+      add(off + v * stride);
+    }
+  } else for (let o = off; o + dims * 4 <= dv.byteLength; o += stride) add(o);
+  for (let k = dims; k < 3; k++) {
+    min[k] = 0;
+    max[k] = 0;
+  }
+  return { min, max };
+}
+
+/** a vertex input that names an object or a slot (batchId, objectId, aIndex) rather than a quantity to average */
+export function isIdInput(name: string): boolean {
+  return /(^id|Id|ID|_id|^index|Index|_index)$/.test(name);
 }
 
 /** bytes per component of a vertex attribute type (BYTE..FLOAT, HALF_FLOAT); 0 when unknown */
@@ -481,12 +521,12 @@ export function standInTable(list: StandInInfo[], max = 40): string[] {
   const L = [
     `### Stand-ins (${list.length}, most vertices first${rows.length > max ? `, first ${max}` : ''})`,
     '',
-    '| material | program | draw | instances | vertices: site → stand-in | inputs kept | inputs lost (read as 0) |',
-    '|---|---|---|---|---|---|---|',
+    '| material | program | draw | instances | shares its buffer with | vertices: site → stand-in | inputs kept | inputs lost (read as 0) |',
+    '|---|---|---|---|---|---|---|---|',
   ];
   for (const r of rows.slice(0, max))
     L.push(
-      `| ${r.material} | ${r.program.replace(/\|/g, '/')} | ${MODE_NAME[r.mode] ?? `mode ${r.mode}`} | ${r.instances || '-'} | ${r.vertices} → ${r.box ? `box (${r.box})` : r.standInVertices} | ${r.kept.join(', ') || '-'} | ${r.dropped.join(', ') || '-'} |`,
+      `| ${r.material} | ${r.program.replace(/\|/g, '/')} | ${MODE_NAME[r.mode] ?? `mode ${r.mode}`} | ${r.instances || '-'} | ${(r.sharedBuffer ?? 1) > 1 ? `${(r.sharedBuffer ?? 1) - 1} other draw(s)` : '-'} | ${r.vertices} → ${r.box ? `box (${r.box})` : r.standInVertices} | ${r.kept.join(', ') || '-'} | ${r.dropped.join(', ') || '-'} |`,
     );
   const lost = new Map<string, number>();
   for (const r of list) for (const d of r.dropped) lost.set(d, (lost.get(d) ?? 0) + 1);
@@ -522,7 +562,7 @@ export function proxyMesh(
   min: number[],
   max: number[],
   grid = PROXY_GRID,
-  extra: Array<{ name: string; size: number; read: (v: number) => number[] }> = [],
+  extra: Array<{ name: string; size: number; read: (v: number) => number[]; pick?: boolean }> = [],
 ): { pos: number[]; idx: number[]; attrs?: Record<string, { size: number; data: number[] }> } | null {
   const ext = [0, 1, 2].map((k) => Math.max(max[k] - min[k], 1e-9));
   const big = Math.max(...ext);
@@ -561,6 +601,9 @@ export function proxyMesh(
     // the other attributes (normals, UVs, a wireframe's barycentrics, colours) averaged the same way, so the site's shader
     // still gets the inputs it reads instead of zeros
     extra.forEach((e, j) => {
+      // an id (batchId, objectId) is a lookup key, not a quantity: the cell keeps its first vertex's id (an average of two
+      // ids is a third object's)
+      if (e.pick && s[3] > 1) return;
       const val = e.read(v);
       const X = xsums[j];
       for (let k = 0; k < e.size; k++) X[id * e.size + k] += Number.isFinite(val[k]) ? val[k] : 0;
@@ -590,7 +633,7 @@ export function proxyMesh(
     const X = xsums[j];
     const data: number[] = [];
     sums.forEach((s, id) => {
-      for (let k = 0; k < e.size; k++) data.push(Math.round((X[id * e.size + k] / s[3]) * 1e4) / 1e4);
+      for (let k = 0; k < e.size; k++) data.push(Math.round((X[id * e.size + k] / (e.pick ? 1 : s[3])) * 1e4) / 1e4);
     });
     // an average of unit normals is shorter than 1 (a shader that does not normalize lit the stand-in darker): back to length 1
     if (j === nrm)
@@ -1292,16 +1335,11 @@ export function rebuildPipeline(
       if (pos.type !== 0x1406) continue;
       const dv = new DataView(bin.buffer, bin.byteOffset + B.o, B.l);
       const stride = pos.stride || pos.size * 4;
-      const min = [Infinity, Infinity, Infinity];
-      const max = [-Infinity, -Infinity, -Infinity];
-      for (let o = pos.off; o + pos.size * 4 <= B.l; o += stride)
-        for (let k = 0; k < Math.min(3, pos.size); k++) {
-          const x = dv.getFloat32(o + k * 4, true);
-          if (Number.isFinite(x)) {
-            min[k] = Math.min(min[k], x);
-            max[k] = Math.max(max[k], x);
-          }
-        }
+      const tris = triangleIds(doc, bin, step);
+      // Round 41: the bounds of the vertices this draw uses. A batched mesh (three.js BatchedMesh, multi-draw: igloo.inc's
+      // 70 ice pieces) keeps every object in one buffer, and the bounds of the whole buffer made each piece's 16-cell grid
+      // as big as the whole batch, so a small piece kept only a few cells of its shape
+      const { min, max } = drawBounds(dv, pos.off, stride, Math.min(3, pos.size), tris ?? undefined);
       if (!Number.isFinite(min[0])) continue;
       step.placeholder = { min, max };
       stats.placeholders++;
@@ -1316,9 +1354,9 @@ export function rebuildPipeline(
         dropped: step.attrs.filter((a) => a !== pos && a.name !== pos.name && !a.div).map((a) => a.name),
       };
       stats.standIns?.push(info);
+      info.sharedBuffer = meshDraws.filter((m) => m.pos.buf === pos.buf).length;
       // a coarse stand-in of the shape instead of the box: triangle lists, strips and fans, instanced or not (the runner keeps
       // the instance attributes and count, so every instance still draws)
-      const tris = triangleIds(doc, bin, step);
       if (!tris) {
         info.box = step.mode === 4 || step.mode === 5 || step.mode === 6 ? 'index buffer unreadable' : `mode ${step.mode}`;
         boxBecause(step.mode === 4 || step.mode === 5 || step.mode === 6 ? 'index buffer unreadable' : `mode ${step.mode}`);
@@ -1344,6 +1382,7 @@ export function rebuildPipeline(
             {
               name: a.name,
               size: a.size,
+              pick: isIdInput(a.name),
               read: (v: number) =>
                 Array.from({ length: a.size }, (_, k) => {
                   const o = a.off + v * ast + k * bytes;
