@@ -11,6 +11,32 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 25: the reference watch no longer settles on a flat loading screen. A frame is "flat" when its 96x60 thumbnail
+  has a luminance standard deviation under 8 and fewer than 1% edge pixels (`extract/refwait.ts`). A flat best frame
+  buys more time past the hard cap (up to +20 s in quick mode, +60 s in full mode) while the picture still changes
+  (it stops after 10 s without change), and a flat frame never replaces a detailed one. Before, only a rising loader
+  percentage bought time past the hard cap, and quick mode never went past it: igloo.inc's grey loader has no
+  percentage, so the reference was the grey screen (page score 29.9%, canvas edges 0%, the replay "matched" it 100% by
+  replaying grey). When the kept frame is still flat, the report says so ("The reference looks like a loading screen")
+  and the evidence ledger marks the reference Unknown.
+- Round 25: `--own-assets` coarse stand-ins for TRIANGLE_STRIP and TRIANGLE_FAN draws (converted to triangle ids, GL
+  strip winding, index buffers and WebGL2's fixed primitive-restart index respected) and for instanced draws (the runner
+  builds the stand-in or the box as instanced geometry and keeps the recorded per-instance attributes and the instance
+  count, so every instance still draws). On lusion.co all 50 large meshes were boxes before (rebuild canvas 53.6% against
+  99% for the replay). A mesh that stays a box records why in `stats.boxReasons` (`mode N`, `index buffer unreadable`,
+  `too few triangles left after clustering`), listed in rebuild.md as "boxes, by reason".
+
+### Changed
+
+- Round 25: the extract summary and the report counted every `--own-assets` mesh as a box ("3 mesh(es) are boxes")
+  even when it was a coarse stand-in. They now say e.g. "3 mesh(es) are stand-ins (3 coarse shapes, 0 boxes)"
+  (`standinSummary`), and rebuild.md gives the box count instead of "the rest boxes".
+- Round 25: `docs/scoreboard.json` targets from the owner's PC (`--own-assets --quick`): jehaduddin.vercel.app page
+  0.84 / canvas 0.85 (measured 84.8% / 86.3%, replay 94.7% canvas); lusion.co floors page 0.80 / canvas 0.50 (82.9% /
+  53.6%, expected to rise with the instanced stand-ins); igloo.inc a canvas floor of 0.70 only (rebuild canvas 72.1%; its
+  29.9% page score is against the grey loader, pending the loader fix); framer.com page 0.70 (70.3% with `--no-cache`,
+  the live hero changed), no canvas target.
+
 - Extract `--own-assets`: a large mesh is drawn as a coarse stand-in of its own shape instead of a box (`proxyMesh`,
   vertex clustering to at most 16 cells per side of its bounding box; collapsed triangles dropped, no UVs, normals from
   the faces). The kit still carries none of the mesh's buffers, only that sketch. A box is kept when too little is left.

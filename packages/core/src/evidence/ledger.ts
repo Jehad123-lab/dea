@@ -75,7 +75,7 @@ export interface LedgerInput {
   quick: boolean;
   ownAssets: boolean;
   machine?: string;
-  diff?: { start: number; final: number; referenceLoader?: boolean; referenceAtMs?: number } | null;
+  diff?: { start: number; final: number; referenceLoader?: boolean; referenceFlat?: boolean; referenceAtMs?: number } | null;
   replay?: {
     frames: number;
     passes: number;
@@ -191,7 +191,19 @@ export function buildFindings(i: LedgerInput): Finding[] {
 
   // ---- the reference itself: a score against a loader frame says nothing
   if (i.diff) {
-    if (i.diff.referenceLoader) {
+    if (i.diff.referenceFlat && !i.diff.referenceLoader) {
+      // no loader element, but the frame is near-uniform: a loader without a counter or a canvas not drawn yet (igloo.inc)
+      add({
+        id: 'run.reference',
+        area: 'run',
+        claim: 'The reference looks like a loading screen: the kept frame is near-uniform, so the scores below are against that flat frame, not the site.',
+        label: 'Unknown',
+        measurement: `the reference frame has almost no detail (low luminance variance and edge density)${i.diff.referenceAtMs != null ? ` at ${Math.round(i.diff.referenceAtMs / 1000)} s` : ''}`,
+        coverage: 'partial',
+        limitations: ['every score that uses this reference inherits the doubt', 'a replay that matches a flat frame proves little'],
+        nextProbe: 'dea extract <url> --reference-ms 120000',
+      });
+    } else if (i.diff.referenceLoader) {
       add({
         id: 'run.reference',
         area: 'run',

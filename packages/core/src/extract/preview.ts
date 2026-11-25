@@ -23,6 +23,7 @@ import { type ProbeData, probeInputs } from '../replay/inputs.ts';
 import { currentTimings, overBudget, timed } from '../timings.ts';
 import { type ShaderModule, threeRevision } from './generate.ts';
 import { runInteractionWithState, type StepState, setDragStep } from './interaction.ts';
+import { betterFrame, type FrameStats, frameChanged, frameStats, isFlat, keepWatching, THUMB_H, THUMB_W } from './refwait.ts';
 import type { Params } from './research.ts';
 
 const MIME: Record<string, string> = {
@@ -810,6 +811,31 @@ export async function readLayout(
 
 export { LOADER_VISIBLE } from '../browser/open.ts';
 
+/** luminance stats of a PNG data URL on a 96×60 thumbnail, read in the page */
+async function thumbStats(page: Page, png: string): Promise<FrameStats> {
+  await page.evaluate(NAME_SHIM);
+  const lum = (await page.evaluate(
+    async ([src, w, h]) => {
+      const im = new Image();
+      await new Promise((r) => {
+        im.onload = r;
+        im.src = src;
+      });
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const x = c.getContext('2d') as CanvasRenderingContext2D;
+      x.drawImage(im, 0, 0, w, h);
+      const d = x.getImageData(0, 0, w, h).data;
+      const out: number[] = [];
+      for (let i = 0; i < d.length; i += 4) out.push(Math.round(0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]));
+      return out;
+    },
+    [png, THUMB_W, THUMB_H] as const,
+  )) as number[];
+  return frameStats(lum);
+}
+
 export async function referenceShot(
   browser: Browser,
   url: string,
@@ -839,6 +865,8 @@ export async function referenceShot(
   png: string;
   atMs: number;
   loader: boolean;
+  /** the kept frame is near-uniform: likely still a loading screen (no counter) or an undrawn canvas */
+  flat?: boolean;
   /** the recorded WebGL frames (when `record`), taken right before the screenshot, which shows the last of them */
   recording?: Recording | null;
   recordingError?: string;
@@ -858,7 +886,7 @@ export async function referenceShot(
   try {
     const resp = await timed('page load', () => page.goto(url, { waitUntil: 'load', timeout: 60_000 }).catch(() => null));
     await assertNotBotWall(page, resp);
-    let best = { png: '', score: -1, atMs: 0, loader: false };
+    let best = { png: '', score: -1, atMs: 0, loader: false, flat: true };
     let layout: unknown = null;
     const t0 = Date.now();
     // a loader still covering the page at the end buys more time (up to 2.5× or 3 minutes): software WebGL is slow
@@ -874,8 +902,28 @@ export async function referenceShot(
     // past the hard cap only a rising loader counter buys more time: an animated loader keeps changing the picture forever on a
     // slow CPU (lusion.co on a 2-vCPU box sat here for 13+ minutes); quick mode (1 frame) never goes past its hard cap
     const longCap = frames < 2 ? hardCap : 420_000;
-    while (Date.now() - t0 < ms || (loader && (Date.now() - t0 < hardCap || (Date.now() - pctAt < 45_000 && Date.now() - t0 < longCap)))) {
-      if (smart && !loader && best.score > 0 && quiet >= 4 && Date.now() - t0 >= 8000) {
+    // a flat best frame (igloo.inc's grey loader has no counter) buys a bounded extra wait while the picture still changes
+    let lastStats: FrameStats | null = null;
+    let changedAt = Date.now();
+    let flatNoted = false;
+    const watching = () =>
+      keepWatching({
+        elapsed: Date.now() - t0,
+        ms,
+        hardCap,
+        longCap,
+        loader,
+        pctAge: Date.now() - pctAt,
+        bestFlat: best.score >= 0 && best.flat,
+        changedAge: Date.now() - changedAt,
+        quick: frames < 2,
+      });
+    while (watching()) {
+      if (!flatNoted && best.flat && best.score >= 0 && Date.now() - t0 >= Math.max(ms, loader ? hardCap : ms)) {
+        flatNoted = true;
+        currentTimings()?.note('the best frame so far is near-uniform (a loading screen?): watching longer while it changes');
+      }
+      if (smart && !loader && !best.flat && best.score > 0 && quiet >= 4 && Date.now() - t0 >= 8000) {
         currentTimings()?.note(`settled after ${Math.round((Date.now() - t0) / 1000)} s (cap ${Math.round(ms / 1000)} s)`);
         break;
       }
@@ -884,29 +932,11 @@ export async function referenceShot(
       const buf = await page.screenshot({ type: 'png' }).catch(() => null);
       if (!buf) continue;
       const png = `data:image/png;base64,${buf.toString('base64')}`;
-      await page.evaluate(NAME_SHIM);
-      const score = (await page.evaluate(async (src) => {
-        const im = new Image();
-        await new Promise((r) => {
-          im.onload = r;
-          im.src = src;
-        });
-        const c = document.createElement('canvas');
-        c.width = 96;
-        c.height = 60;
-        const x = c.getContext('2d') as CanvasRenderingContext2D;
-        x.drawImage(im, 0, 0, 96, 60);
-        const d = x.getImageData(0, 0, 96, 60).data;
-        let s = 0;
-        let s2 = 0;
-        for (let i = 0; i < d.length; i += 4) {
-          const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-          s += l;
-          s2 += l * l;
-        }
-        const m = s / (d.length / 4);
-        return Math.sqrt(s2 / (d.length / 4) - m * m);
-      }, png)) as number;
+      const st = await thumbStats(page, png);
+      const score = st.sd;
+      const flat = isFlat(st);
+      if (frameChanged(lastStats, st)) changedAt = Date.now();
+      lastStats = st;
       loader = (await page.evaluate(LOADER_VISIBLE).catch(() => false)) as boolean;
       if (loader) {
         const pct = (await page.evaluate(LOADER_PROGRESS).catch(() => null)) as number | null;
@@ -919,8 +949,8 @@ export async function referenceShot(
       // frames behind a loader only count when nothing better comes
       const s2 = loader ? score * 0.25 : score;
       quiet = s2 > best.score * 1.02 || loader ? 0 : quiet + 1;
-      if (s2 > best.score) {
-        best = { png, score: s2, atMs: Date.now() - t0, loader };
+      if (betterFrame({ score: s2, flat }, best)) {
+        best = { png, score: s2, atMs: Date.now() - t0, loader, flat };
         layout = await page.evaluate(LAYOUT_READ(section)).catch((e) => {
           if (process.env.DEA_DEBUG_LAYOUT) console.error('layout read failed (watch):', String(e).slice(0, 300));
           return layout;
@@ -1025,6 +1055,7 @@ export async function referenceShot(
             png: `data:image/png;base64,${buf.toString('base64')}`,
             atMs,
             loader: nowLoader,
+            flat: await thumbStats(page, `data:image/png;base64,${buf.toString('base64')}`).then(isFlat, () => best.flat),
             layout: (l ?? layout) as never,
             recording: canvasPng ? { ...recording, canvasPng } : recording,
             interaction,
@@ -1038,14 +1069,15 @@ export async function referenceShot(
           png: best.png,
           atMs: best.atMs,
           loader: best.loader,
+          flat: best.flat,
           layout: layout as never,
           recording: null,
           recordingError: 'the recording could not be read out of the page',
         };
       }
-      return { png: best.png, atMs: best.atMs, loader: best.loader, layout: layout as never, recording: null, recordingError: r.error };
+      return { png: best.png, atMs: best.atMs, loader: best.loader, flat: best.flat, layout: layout as never, recording: null, recordingError: r.error };
     }
-    return { png: best.png, atMs: best.atMs, loader: best.loader, layout: layout as never };
+    return { png: best.png, atMs: best.atMs, loader: best.loader, flat: best.flat, layout: layout as never };
   } finally {
     await context.close();
   }

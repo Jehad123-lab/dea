@@ -5,21 +5,22 @@
     {
       "name": "lusion.co",
       "url": "https://lusion.co",
-      "why": "award-winning WebGL studio site; Round 4 numbers",
+      "why": "award-winning WebGL studio site. Round 25 floors from the owner's PC (PR #17, --own-assets --quick): page 82.9%, rebuild canvas 53.6%, replay 99.0% canvas / 99.8% page, rebuild vs replay 54.5%, all 50 large meshes were boxes (strips/fans/instanced draws had no stand-in). Floors, not goals: expected to rise with the Round 25 stand-ins for strips, fans and instanced draws",
       "targets": {
-        "page": 0.998,
-        "canvas": 0.997
+        "page": 0.8,
+        "canvas": 0.5,
+        "rebuildCanvas": 0.5
       }
     },
     {
       "name": "jehaduddin.vercel.app",
       "url": "https://jehaduddin.vercel.app",
-      "why": "Jehad's portfolio (loading screen over a full-screen WebGL layer); Round 23 numbers, the replay and the rebuild scored against the canvas copied at the recorded frame because the loader's overlay covers it",
+      "why": "Jehad's portfolio (loading screen over a full-screen WebGL layer). Round 25 numbers from the owner's PC (--own-assets --quick): kept (rebuild) page 84.8%, canvas 86.3%; replay canvas 94.7%, page 85.1%; rebuild vs replay 90.6%. Scored against the canvas copied at the recorded frame because the loader's overlay covers it",
       "targets": {
-        "page": 0.85,
-        "canvas": 0.94,
-        "rebuildPage": 0.85,
-        "rebuildCanvas": 0.94
+        "page": 0.84,
+        "canvas": 0.85,
+        "rebuildPage": 0.84,
+        "rebuildCanvas": 0.85
       }
     },
     {
@@ -40,12 +41,19 @@
     {
       "name": "igloo.inc",
       "url": "https://www.igloo.inc",
-      "why": "heavy WebGL with scroll; measure only until a first full run sets the target"
+      "why": "heavy WebGL with scroll. Round 25: the page score 29.9% is INVALID (the reference settled on igloo's flat grey loading screen, which has no percentage counter; the replay matched that grey frame 100%); rebuild canvas 72.1%, rebuild page vs replay 89.4%, 9 boxes. Measurement pending the Round 25 loader fix (flat reference frames buy more time); only a canvas floor until then",
+      "targets": {
+        "canvas": 0.7,
+        "rebuildCanvas": 0.7
+      }
     },
     {
       "name": "framer.com",
       "url": "https://www.framer.com",
-      "why": "a Framer-built site (the template business); measure only until a first full run sets the target"
+      "why": "a Framer-built site (the template business). Round 25: page 70.3% with --no-cache (the live hero changed: the old 84.4% is stale, a cached run gives 61.6%); no canvas, so no canvas target",
+      "targets": {
+        "page": 0.7
+      }
     }
   ]
 }

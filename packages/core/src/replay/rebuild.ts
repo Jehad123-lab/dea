@@ -178,6 +178,8 @@ export interface RebuildStats {
   placeholders: number;
   /** of those, how many are drawn as a coarse stand-in of their shape rather than a box */
   proxies: number;
+  /** why each of the rest is still a box (e.g. "mode 0", "index buffer unreadable", "too few triangles left after clustering") */
+  boxReasons: Record<string, number>;
   skipped: Record<string, number>;
 }
 
@@ -342,24 +344,57 @@ const slug = (s: string) =>
     .replace(/^-|-$/g, '')
     .slice(0, 40) || 'program';
 
+/** "3 mesh(es) are stand-ins (3 coarse shapes, 0 boxes)": the --own-assets summary, from the stats (boxes were over-reported before) */
+export function standinSummary(stats: Pick<RebuildStats, 'placeholders' | 'proxies'>): string {
+  const shapes = stats.proxies ?? 0;
+  const boxes = Math.max(0, stats.placeholders - shapes);
+  return `${stats.placeholders} mesh(es) are stand-ins (${shapes} coarse shape${shapes === 1 ? '' : 's'}, ${boxes} box${boxes === 1 ? '' : 'es'})`;
+}
+
 /** cells per side of the bounding box when a mesh is clustered into its coarse stand-in */
 export const PROXY_GRID = 16;
 
-/** The vertex ids of each triangle of a TRIANGLES draw (indexed or not), read from the recording; null if unreadable. */
-function triangleIds(doc: CaptureDoc, bin: Uint8Array, step: DrawStep): Uint32Array | null {
-  const n = step.count - (step.count % 3);
-  if (n < 3) return null;
-  const out = new Uint32Array(n);
+/**
+ * The vertex ids of each triangle of a TRIANGLES, TRIANGLE_STRIP or TRIANGLE_FAN draw (indexed or not), read from the
+ * recording; null if unreadable. Strips alternate winding like GL; an index equal to the type's max value is WebGL2's
+ * fixed primitive restart (always on), so a strip or fan starts over after it.
+ */
+export function triangleIds(doc: CaptureDoc, bin: Uint8Array, step: Pick<DrawStep, 'mode' | 'first' | 'count' | 'index'>): Uint32Array | null {
+  if (step.mode !== 4 && step.mode !== 5 && step.mode !== 6) return null;
+  if (step.count < 3) return null;
+  let ids: ArrayLike<number>;
+  let restart = -1;
   if (!step.index) {
-    for (let i = 0; i < n; i++) out[i] = step.first + i;
-    return out;
+    const a = new Uint32Array(step.count);
+    for (let i = 0; i < step.count; i++) a[i] = step.first + i;
+    ids = a;
+  } else {
+    const B = doc.snap.buffers.find((b) => b.id === step.index?.buf);
+    const size = step.index.type === 0x1405 ? 4 : step.index.type === 0x1403 ? 2 : step.index.type === 0x1401 ? 1 : 0;
+    if (!B || !size || step.index.offset + step.count * size > B.l) return null;
+    const dv = new DataView(bin.buffer, bin.byteOffset + B.o + step.index.offset, step.count * size);
+    const a = new Uint32Array(step.count);
+    for (let i = 0; i < step.count; i++) a[i] = size === 4 ? dv.getUint32(i * 4, true) : size === 2 ? dv.getUint16(i * 2, true) : dv.getUint8(i);
+    ids = a;
+    restart = size === 4 ? 0xffffffff : size === 2 ? 0xffff : 0xff;
   }
-  const B = doc.snap.buffers.find((b) => b.id === step.index?.buf);
-  const size = step.index.type === 0x1405 ? 4 : step.index.type === 0x1403 ? 2 : step.index.type === 0x1401 ? 1 : 0;
-  if (!B || !size || step.index.offset + n * size > B.l) return null;
-  const dv = new DataView(bin.buffer, bin.byteOffset + B.o + step.index.offset, n * size);
-  for (let i = 0; i < n; i++) out[i] = size === 4 ? dv.getUint32(i * 4, true) : size === 2 ? dv.getUint16(i * 2, true) : dv.getUint8(i);
-  return out;
+  if (step.mode === 4) {
+    const n = ids.length - (ids.length % 3);
+    return n >= 3 ? Uint32Array.from({ length: n }, (_, i) => ids[i]) : null;
+  }
+  const out: number[] = [];
+  let run: number[] = [];
+  const flush = () => {
+    if (step.mode === 5) for (let i = 2; i < run.length; i++) out.push(...(i % 2 ? [run[i - 1], run[i - 2], run[i]] : [run[i - 2], run[i - 1], run[i]]));
+    else for (let i = 2; i < run.length; i++) out.push(run[0], run[i - 1], run[i]);
+    run = [];
+  };
+  for (let i = 0; i < ids.length; i++) {
+    if (ids[i] === restart) flush();
+    else run.push(ids[i]);
+  }
+  flush();
+  return out.length >= 3 ? Uint32Array.from(out) : null;
 }
 
 /**
@@ -449,10 +484,14 @@ export function rebuildPipeline(
     recordedTextureBytes: 0,
     placeholders: 0,
     proxies: 0,
+    boxReasons: {},
     skipped: {},
   };
   const skip = (n: string) => {
     stats.skipped[n] = (stats.skipped[n] ?? 0) + 1;
+  };
+  const boxBecause = (n: string) => {
+    stats.boxReasons[n] = (stats.boxReasons[n] ?? 0) + 1;
   };
   const progs = new Map(doc.snap.programs.map((p) => [p.id, p]));
   const shaders: Record<string, string> = {};
@@ -1110,21 +1149,22 @@ export function rebuildPipeline(
       if (!Number.isFinite(min[0])) continue;
       step.placeholder = { min, max };
       stats.placeholders++;
-      // a coarse stand-in of the shape instead of the box (indexed or plain triangle lists only)
-      if (step.mode === 4) {
-        const tris = triangleIds(doc, bin, step);
-        if (tris) {
-          const at = (v: number, k: number) => {
-            const o = pos.off + v * stride + k * 4;
-            return o + 4 <= B.l ? dv.getFloat32(o, true) : 0;
-          };
-          const px = proxyMesh(tris, (v) => [at(v, 0), at(v, 1), Math.min(3, pos.size) > 2 ? at(v, 2) : 0], min, max);
-          if (px) {
-            step.proxy = px;
-            stats.proxies++;
-          }
-        }
+      // a coarse stand-in of the shape instead of the box: triangle lists, strips and fans, instanced or not (the runner keeps
+      // the instance attributes and count, so every instance still draws)
+      const tris = triangleIds(doc, bin, step);
+      if (!tris) {
+        boxBecause(step.mode === 4 || step.mode === 5 || step.mode === 6 ? 'index buffer unreadable' : `mode ${step.mode}`);
+        continue;
       }
+      const at = (v: number, k: number) => {
+        const o = pos.off + v * stride + k * 4;
+        return o + 4 <= B.l ? dv.getFloat32(o, true) : 0;
+      };
+      const px = proxyMesh(tris, (v) => [at(v, 0), at(v, 1), Math.min(3, pos.size) > 2 ? at(v, 2) : 0], min, max);
+      if (px) {
+        step.proxy = px;
+        stats.proxies++;
+      } else boxBecause('too few triangles left after clustering');
     }
     for (const { step } of meshDraws) {
       if (!step.placeholder) continue;
@@ -1261,8 +1301,11 @@ export function rebuildMd(p: PipelineDoc, stats: RebuildStats, score: { canvas: 
   L.push(`- recorded: ${stats.recordedTextures} textures, ${mb(stats.recordedTextureBytes)} (image pixels and the starting state of simulation targets)`);
   if (ownAssets)
     L.push(
-      `- --own-assets: the site's images are checker placeholders and ${stats.placeholders} large mesh(es) are stand-ins (${stats.proxies} a coarse shape of at most ${PROXY_GRID} cells per side, the rest boxes); their bytes are not in the kit`,
+      `- --own-assets: the site's images are checker placeholders and ${stats.placeholders} large mesh(es) are stand-ins (${stats.proxies} a coarse shape of at most ${PROXY_GRID} cells per side, ${stats.placeholders - stats.proxies} boxes); their bytes are not in the kit`,
     );
+  // why a mesh is still a box, so the next fix is visible (lusion.co: 50 boxes before strips, fans and instanced draws counted)
+  const why = Object.entries(stats.boxReasons ?? {}).sort((a, b) => b[1] - a[1]);
+  if (ownAssets && why.length) L.push(`- boxes, by reason: ${why.map(([k, n]) => `${k} ${n}`).join(', ')}`);
   else L.push("- these bytes are the site's: for study and prototyping; swap them for your own (`--own-assets`) before you ship");
   L.push('');
   const skipped = Object.entries(stats.skipped);

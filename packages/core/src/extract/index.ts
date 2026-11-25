@@ -20,7 +20,7 @@ import { REPLAY_CAPTURE_SCRIPT } from '../replay/capture.ts';
 import { animateEntries, buildGraph, type CaptureDoc, compactCapture, fitCapture, placeholderTextures, renderGraphMd } from '../replay/graph.ts';
 import { fitInputs, type InputMap, inferInputs, inputsSummary, type ProbeData, type ProbeReport } from '../replay/inputs.ts';
 import { REPLAY_PLAYER } from '../replay/player.ts';
-import { type RebuildStats, rebuildMd, rebuildPipeline } from '../replay/rebuild.ts';
+import { type RebuildStats, rebuildMd, rebuildPipeline, standinSummary } from '../replay/rebuild.ts';
 import { REBUILD_RUNNER } from '../replay/runner.ts';
 import { recoverScene, sceneGlb, sceneMd, sceneModule } from '../replay/scene.ts';
 import { buildPageMap, fitScrollTape, pageMapMd, type ScrollTapeFit, tapeMoved } from '../replay/scrolltape.ts';
@@ -203,6 +203,8 @@ export interface ExtractResult {
     parts?: Similarity;
     referenceAtMs?: number;
     referenceLoader?: boolean;
+    /** the reference frame is near-uniform: it likely still shows a loading screen (one without a visible counter) */
+    referenceFlat?: boolean;
     standin?: Standin | null;
     /** the canvas-only perceptual score (text masked out) at the start and at the end; null when there is no canvas */
     canvas?: { start: CanvasScore | null; final: CanvasScore | null };
@@ -290,6 +292,7 @@ async function referenceFor(
       const m = JSON.parse(await readFile(join(d, 'meta.json'), 'utf8')) as {
         atMs: number;
         loader: boolean;
+        flat?: boolean;
         made: string;
         recordingError?: string;
         phase?: PhaseInfo | null;
@@ -313,6 +316,7 @@ async function referenceFor(
         png,
         atMs: m.atMs,
         loader: m.loader,
+        flat: m.flat ?? false,
         layout,
         ...(record ? { recording, ...(m.recordingError ? { recordingError: m.recordingError } : {}) } : {}),
         ...(interact ? { probe, interaction: interaction.length ? interaction : undefined, phase: m.phase ?? null } : {}),
@@ -348,6 +352,7 @@ async function referenceFor(
           url,
           atMs: r.atMs,
           loader: r.loader,
+          ...(r.flat ? { flat: true } : {}),
           made: new Date().toISOString(),
           ...(r.recordingError ? { recordingError: r.recordingError } : {}),
           ...(r.phase ? { phase: r.phase } : {}),
@@ -1382,6 +1387,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           parts: lastCmp ?? undefined,
           referenceAtMs: ref.atMs,
           referenceLoader: ref.loader,
+          ...(ref.flat ? { referenceFlat: true } : {}),
           canvas: { start: canvasStart, final: canvasFinal },
         };
         // per-stop score of the whole page: the kit scrolled to each stop the original was read at, against the original's screenshot there
@@ -1589,7 +1595,9 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     quick,
     ownAssets: Boolean(opts.ownAssets),
     machine: `${platform()} · ${cpus().length} CPUs · ${Math.round(totalmem() / 1e9)} GB`,
-    diff: diff ? { start: diff.start, final: diff.final, referenceLoader: diff.referenceLoader, referenceAtMs: diff.referenceAtMs } : null,
+    diff: diff
+      ? { start: diff.start, final: diff.final, referenceLoader: diff.referenceLoader, referenceFlat: diff.referenceFlat, referenceAtMs: diff.referenceAtMs }
+      : null,
     replay,
     interaction,
     phase: interaction?.phase
@@ -1714,7 +1722,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       ? [
           `(a) capture replay, the recorded frames played back (ground truth, not editable): canvas ${replay.canvas != null ? pct(replay.canvas) : 'n/a'}, page ${replay.page != null ? pct(replay.page) : 'n/a'} · ${replay.passes} passes, ${replay.draws} draws, ${replay.programs} programs, ${(replay.bytes / 1e6).toFixed(1)} MB (render-graph.md)${replay.shipped ? '' : ', scored but not in the kit (--own-assets)'}`,
           replay.rebuild
-            ? `(b) editable rebuild, three.js from the render graph (rebuild.md): canvas ${replay.rebuild.canvas != null ? pct(replay.rebuild.canvas) : 'n/a'}, page ${replay.rebuild.page != null ? pct(replay.rebuild.page) : 'n/a'}${replay.rebuild.vsReplay != null ? `, ${pct(replay.rebuild.vsReplay)} against (a)` : ''} · ${replay.rebuild.stats.materials} RawShaderMaterials, ${replay.rebuild.stats.cameras} cameras, ${replay.rebuild.stats.renderTargets} render targets; recorded bytes still used: ${(replay.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB geometry, ${(replay.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB textures${opts.ownAssets ? ` (--own-assets: images are placeholders, ${replay.rebuild.stats.placeholders} mesh(es) are boxes)` : ''}${replay.rebuild.kept ? ' · what the project runs' : ''}${replay.rebuild.errors.length ? ` · DID NOT RUN: ${rebuildErrorText(replay.rebuild.errors[0])}` : ''}`
+            ? `(b) editable rebuild, three.js from the render graph (rebuild.md): canvas ${replay.rebuild.canvas != null ? pct(replay.rebuild.canvas) : 'n/a'}, page ${replay.rebuild.page != null ? pct(replay.rebuild.page) : 'n/a'}${replay.rebuild.vsReplay != null ? `, ${pct(replay.rebuild.vsReplay)} against (a)` : ''} · ${replay.rebuild.stats.materials} RawShaderMaterials, ${replay.rebuild.stats.cameras} cameras, ${replay.rebuild.stats.renderTargets} render targets; recorded bytes still used: ${(replay.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB geometry, ${(replay.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB textures${opts.ownAssets ? ` (--own-assets: images are placeholders, ${standinSummary(replay.rebuild.stats)})` : ''}${replay.rebuild.kept ? ' · what the project runs' : ''}${replay.rebuild.errors.length ? ` · DID NOT RUN: ${rebuildErrorText(replay.rebuild.errors[0])}` : ''}`
             : '(b) editable rebuild: not made',
           ...(replay.scene
             ? [
@@ -1863,7 +1871,9 @@ export function extractGaps(o: {
       known,
       missing: o.referenceLoader
         ? 'The original was still behind its loader when DEA took the reference (software WebGL on a machine without a GPU is slow), so the score compares against a loading screen.'
-        : o.passes > 1
+        : o.diff.referenceFlat
+          ? 'The reference looks like a loading screen: the kept frame is near-uniform (almost no detail), so the scores (and a replay that "matches" it) compare against that flat frame, not the site.'
+          : o.passes > 1
           ? 'The preview draws one program at a time; the site composes many passes (simulation, scene, post-processing) and its own meshes, which a single full-screen program cannot match.'
           : 'Layout, meshes or images outside the shader are not rebuilt.',
       approximation:
@@ -1871,7 +1881,7 @@ export function extractGaps(o: {
           ? { text: 'Run the passes in order with createPipeline(renderer) from pipeline.js and hook your scene into the scene passes.' }
           : undefined,
       next: [
-        ...(o.referenceLoader
+        ...(o.referenceLoader || o.diff.referenceFlat
           ? [
               {
                 why: 'compare against a real frame: take a screenshot of the hero on a machine with a GPU',
@@ -2007,7 +2017,7 @@ function renderExtractMd(o: {
       ...(r.rebuild
         ? [
             `- ✔ (b) \`public/rebuild/pipeline.json\`: ${r.rebuild.stats.draws} draws in the site's order as ${r.rebuild.stats.materials} RawShaderMaterials (GLSL in \`public/rebuild/shaders/\`), ${r.rebuild.stats.cameras} camera(s), ${r.rebuild.stats.renderTargets} render targets, ${r.rebuild.stats.glSteps} raw WebGL step(s). three.js reproduces the site's matrices from the camera and model matrix on ${r.rebuild.stats.matricesExact} draw(s)${r.rebuild.stats.matricesOff.length ? `, not on ${r.rebuild.stats.matricesOff.length}` : ''}.`,
-            `- recorded in (b): ${(r.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB of vertex/index buffers and ${(r.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB of texture pixels and simulation start state${o.ownAssets ? `; --own-assets: images are checkers and ${r.rebuild.stats.placeholders} large mesh(es) are boxes, their bytes are not in the kit` : " (the site's own bytes: for study and prototyping)"}. See \`rebuild.md\`.`,
+            `- recorded in (b): ${(r.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB of vertex/index buffers and ${(r.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB of texture pixels and simulation start state${o.ownAssets ? `; --own-assets: images are checkers and large meshes are stand-ins, ${standinSummary(r.rebuild.stats)}; their bytes are not in the kit` : " (the site's own bytes: for study and prototyping)"}. See \`rebuild.md\`.`,
           ]
         : []),
       '',

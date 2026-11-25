@@ -444,7 +444,17 @@ export function createRebuild(canvas, data, options = {}) {
       geo = new THREE.BoxGeometry(mx[0] - mn[0] || 1e-3, mx[1] - mn[1] || 1e-3, mx[2] - mn[2] || 1e-3);
       geo.translate((mx[0] + mn[0]) / 2, (mx[1] + mn[1]) / 2, (mx[2] + mn[2]) / 2);
       mode = 4;
-    } else {
+    }
+    if ((step.proxy || step.placeholder) && step.instances) {
+      // an instanced stand-in: the base shape above, with the recorded per-instance attributes (kept, never zeroed) and count
+      const base = geo;
+      geo = new THREE.InstancedBufferGeometry();
+      geo.index = base.index;
+      for (const k of Object.keys(base.attributes)) geo.setAttribute(k, base.attributes[k]);
+      for (const a of step.attrs) if (a.div) geo.setAttribute(a.name, attrOf(a));
+      geo.instanceCount = step.instances;
+    }
+    if (!step.proxy && !step.placeholder) {
       geo = step.instances ? new THREE.InstancedBufferGeometry() : new THREE.BufferGeometry();
       for (const a of step.attrs) {
         const k = [a.buf, a.type, a.size, a.norm, a.stride, a.off, a.div, a.int].join(',');
