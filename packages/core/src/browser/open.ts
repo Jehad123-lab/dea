@@ -302,7 +302,8 @@ export async function quietOrDrawing(page: Page, maxMs: number): Promise<'idle' 
 const LOADER_HELPERS = `
   const area = innerWidth * innerHeight;
   const shown = (el) => { const cs = getComputedStyle(el); return cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05 && el.getBoundingClientRect().width > 0; };
-  const bigCanvas = (a) => [...a.querySelectorAll('canvas')].some((c) => { const r = c.getBoundingClientRect(); return r.width * r.height > area * 0.4; });
+  const canvasesIn = (a) => (window.__DEA__ && window.__DEA__.allCanvases ? window.__DEA__.allCanvases().filter((c) => window.__DEA__.holds(a, c)) : [...a.querySelectorAll('canvas')]);
+  const bigCanvas = (a) => canvasesIn(a).some((c) => { const r = c.getBoundingClientRect(); return r.width * r.height > area * 0.4; });
   const big = (el) => { const r = el.getBoundingClientRect(); return shown(el) && r.width * r.height > area * 0.4; };
   const textLen = (el) => (el.textContent || '').replace(/\\s+/g, ' ').trim().length;
   const counterOf = (el) => { if (el.children.length > 3) return null; const t = (el.textContent || '').replace(/\\s+/g, '').trim(); const m = t.length <= 5 ? /^(\\d{1,3})%?$/.exec(t) : null; return m && +m[1] <= 100 ? +m[1] : null; };
@@ -399,7 +400,8 @@ export const GL_ON_SCREEN = `(() => {
   const D = window.__DEA__;
   if (!D || !D.contexts || !D.contexts.length) return -1;
   const area = innerWidth * innerHeight;
-  const ok = [...document.querySelectorAll('canvas')].some((c) => { const r = c.getBoundingClientRect(); const cs = getComputedStyle(c); return cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05 && r.width * r.height > area * 0.1 && r.bottom > 0 && r.top < innerHeight; });
+  const list = D.allCanvases ? D.allCanvases() : [...document.querySelectorAll('canvas')];
+  const ok = list.some((c) => { const r = c.getBoundingClientRect(); const cs = getComputedStyle(c); return cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05 && r.width * r.height > area * 0.1 && r.bottom > 0 && r.top < innerHeight; });
   return ok ? D.raf.calls : -1;
 })()`;
 

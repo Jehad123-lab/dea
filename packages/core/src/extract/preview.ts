@@ -502,7 +502,7 @@ export const LAYOUT_READ = (section: string | null, o: LayoutReadOptions = {}) =
     const big = r.width * r.height > W * H * 0.25;
     // a page panel (a full-width section with its own colour) is a shape of the page; only a panel that holds the canvas stays out
     // (a small canvas, one read back as a picture, does not keep its panel out)
-    if (PAGE && big) { const inside = (window.__DEA__ && window.__DEA__.deep ? window.__DEA__.deep('canvas') : [...el.querySelectorAll('canvas')]).filter((c) => el.contains(c) || (c.getRootNode && el.contains(c.getRootNode().host || null))); if (inside.some((c) => { const cr = c.getBoundingClientRect(); return cr.width * cr.height > W * H * 0.6; })) continue; }
+    if (PAGE && big) { const inside = (window.__DEA__ && window.__DEA__.deep ? (window.__DEA__.allCanvases ? window.__DEA__.allCanvases() : window.__DEA__.deep('canvas')) : [...el.querySelectorAll('canvas')]).filter((c) => el.contains(c) || (c.getRootNode && el.contains(c.getRootNode().host || null))); if (inside.some((c) => { const cr = c.getBoundingClientRect(); return cr.width * cr.height > W * H * 0.6; })) continue; }
     else if (big && hasUrl) { if (el.querySelector('canvas')) continue; }
     else if (big && !((grad || (bg && /rgba\\(.*, 0?\\.\\d+\\)$/.test(bg))) && cs.position !== 'static' && !el.querySelector('canvas'))) continue;
     if (hiddenUp(el) || shown(el, r) < 0.5) continue;
@@ -600,7 +600,7 @@ export const LAYOUT_READ = (section: string | null, o: LayoutReadOptions = {}) =
   // a canvas that is not the page's scene (a chart, a map, a 2D drawing) and can be read back becomes a picture of what it shows,
   // so the section it sits in is not an empty hole in the kit; a canvas that reads back blank (WebGL without a kept buffer) stays out
   if (PAGE) {
-    const snap = (window.__DEA__ && window.__DEA__.deep ? window.__DEA__.deep('canvas') : [...root.querySelectorAll('canvas')]);
+    const snap = (window.__DEA__ && window.__DEA__.deep ? (window.__DEA__.allCanvases ? window.__DEA__.allCanvases() : window.__DEA__.deep('canvas')) : [...root.querySelectorAll('canvas')]);
     let bytes = 0;
     for (const c of snap) {
       if (graphics.length >= CAP.graphics || bytes > 900000) break;
@@ -617,7 +617,7 @@ export const LAYOUT_READ = (section: string | null, o: LayoutReadOptions = {}) =
   }
   // canvases in the document and in shadow roots, open or closed (the observers record every attachShadow)
   const inRoot = (c) => { for (let n = c; n; n = n.parentElement || (n.getRootNode && n.getRootNode().host) || null) if (n === root) return true; return false; };
-  const canvasList = window.__DEA__ && window.__DEA__.deep ? window.__DEA__.deep('canvas').filter(inRoot) : [...root.querySelectorAll('canvas')];
+  const canvasList = window.__DEA__ && window.__DEA__.deep ? (window.__DEA__.allCanvases ? window.__DEA__.allCanvases() : window.__DEA__.deep('canvas')).filter(inRoot) : [...root.querySelectorAll('canvas')];
   for (const c of canvasList) {
     const r = c.getBoundingClientRect();
     const vis = Math.max(0, Math.min(r.right, W) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, H) - Math.max(r.top, 0));
