@@ -182,6 +182,78 @@ export interface RebuildStats {
   /** why each of the rest is still a box (e.g. "mode 0", "index buffer unreadable", "too few triangles left after clustering") */
   boxReasons: Record<string, number>;
   skipped: Record<string, number>;
+  /** Round 40: each --own-assets stand-in, so the kit says what it kept and lost (rebuild.md table, extract.json) */
+  standIns?: StandInInfo[];
+}
+
+/** one --own-assets stand-in: which material, how it is drawn, how much of it is left, which vertex inputs it kept */
+export interface StandInInfo {
+  material: number;
+  program: string;
+  mode: number;
+  instances: number;
+  /** distinct vertices the site's mesh draws */
+  vertices: number;
+  /** vertices of the stand-in (0 for a box) */
+  standInVertices: number;
+  /** vertex inputs carried into the stand-in (averaged per cell) */
+  kept: string[];
+  /** vertex inputs the stand-in could not carry (the shader reads 0 for them) */
+  dropped: string[];
+  /** why it is a box, when it is one */
+  box?: string;
+}
+
+/** bytes per component of a vertex attribute type (BYTE..FLOAT, HALF_FLOAT); 0 when unknown */
+const ATTR_BYTES: Record<number, number> = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5124: 4, 5125: 4, 5126: 4, 5131: 2 };
+
+function halfToFloat(h: number): number {
+  const s = h & 0x8000 ? -1 : 1;
+  const e = (h >> 10) & 0x1f;
+  const f = h & 0x3ff;
+  if (e === 0) return s * 2 ** -14 * (f / 1024);
+  if (e === 31) return f ? Number.NaN : s * Number.POSITIVE_INFINITY;
+  return s * 2 ** (e - 15) * (1 + f / 1024);
+}
+
+/**
+ * One component of a vertex attribute as the vertex shader sees it: floats and half floats as stored, the integer types
+ * scaled to [0, 1] or [-1, 1] when the attribute is normalized (GL's rule for signed: max(v / max, -1)), as-is otherwise.
+ * Compressed meshes (quantized normals and UVs) are read this way instead of being dropped from the stand-in.
+ */
+export function readAttrComponent(dv: DataView, o: number, type: number, norm: boolean): number {
+  switch (type) {
+    case 0x1406:
+      return dv.getFloat32(o, true);
+    case 0x140b:
+      return halfToFloat(dv.getUint16(o, true));
+    case 0x1400: {
+      const v = dv.getInt8(o);
+      return norm ? Math.max(v / 127, -1) : v;
+    }
+    case 0x1401: {
+      const v = dv.getUint8(o);
+      return norm ? v / 255 : v;
+    }
+    case 0x1402: {
+      const v = dv.getInt16(o, true);
+      return norm ? Math.max(v / 32767, -1) : v;
+    }
+    case 0x1403: {
+      const v = dv.getUint16(o, true);
+      return norm ? v / 65535 : v;
+    }
+    case 0x1404: {
+      const v = dv.getInt32(o, true);
+      return norm ? Math.max(v / 2147483647, -1) : v;
+    }
+    case 0x1405: {
+      const v = dv.getUint32(o, true);
+      return norm ? v / 4294967295 : v;
+    }
+    default:
+      return 0;
+  }
 }
 
 const IDENT = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -398,6 +470,37 @@ export function triangleIds(doc: CaptureDoc, bin: Uint8Array, step: Pick<DrawSte
   return out.length >= 3 ? Uint32Array.from(out) : null;
 }
 
+const MODE_NAME: Record<number, string> = { 0: 'points', 1: 'lines', 2: 'line loop', 3: 'line strip', 4: 'triangles', 5: 'strip', 6: 'fan' };
+
+/**
+ * Round 40: the --own-assets stand-ins as a table (most vertices first, at most `max` rows), so a low (b) score with
+ * --own-assets points at the meshes it comes from: what each stand-in kept of the site's mesh and which inputs it lost.
+ */
+export function standInTable(list: StandInInfo[], max = 40): string[] {
+  const rows = [...list].sort((a, b) => b.vertices - a.vertices);
+  const L = [
+    `### Stand-ins (${list.length}, most vertices first${rows.length > max ? `, first ${max}` : ''})`,
+    '',
+    '| material | program | draw | instances | vertices: site → stand-in | inputs kept | inputs lost (read as 0) |',
+    '|---|---|---|---|---|---|---|',
+  ];
+  for (const r of rows.slice(0, max))
+    L.push(
+      `| ${r.material} | ${r.program.replace(/\|/g, '/')} | ${MODE_NAME[r.mode] ?? `mode ${r.mode}`} | ${r.instances || '-'} | ${r.vertices} → ${r.box ? `box (${r.box})` : r.standInVertices} | ${r.kept.join(', ') || '-'} | ${r.dropped.join(', ') || '-'} |`,
+    );
+  const lost = new Map<string, number>();
+  for (const r of list) for (const d of r.dropped) lost.set(d, (lost.get(d) ?? 0) + 1);
+  if (lost.size)
+    L.push(
+      '',
+      `- inputs lost, by name: ${[...lost]
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, n]) => `${k} ${n}×`)
+        .join(', ')}`,
+    );
+  return L;
+}
+
 /** a normal's main direction: 1..6 for ±x, ±y, ±z (0 when unreadable) */
 export function normalBucket(n: number[]): number {
   let k = 0;
@@ -508,7 +611,14 @@ export function proxyMesh(
 export function rebuildPipeline(
   doc: CaptureDoc,
   bin: Uint8Array,
-  opts: { data: string; ownAssets?: boolean; standIns?: boolean; sceneNodes?: Map<string, string> } = { data: 'data.bin' },
+  opts: {
+    data: string;
+    ownAssets?: boolean;
+    standIns?: boolean;
+    /** --own-assets-cost only: these materials keep the site's meshes (what one material's stand-ins cost) */
+    realMaterials?: number[];
+    sceneNodes?: Map<string, string>;
+  } = { data: 'data.bin' },
 ): { pipeline: PipelineDoc; shaders: Record<string, string>; stats: RebuildStats } {
   const stats: RebuildStats = {
     draws: 0,
@@ -528,6 +638,7 @@ export function rebuildPipeline(
     proxies: 0,
     boxReasons: {},
     skipped: {},
+    standIns: [],
   };
   const skip = (n: string) => {
     stats.skipped[n] = (stats.skipped[n] ?? 0) + 1;
@@ -1171,7 +1282,9 @@ export function rebuildPipeline(
   // with --own-assets: meshes become coarse stand-ins (or boxes) and their buffers are not shipped (standIns: false keeps the
   // site's meshes, only for --own-assets-cost's never-shipped variant)
   if (opts.ownAssets && opts.standIns !== false) {
+    const realMats = new Set(opts.realMaterials ?? []);
     for (const { step, pos } of meshDraws) {
+      if (realMats.has(step.material)) continue;
       const B = doc.snap.buffers.find((b) => b.id === pos.buf);
       // anything bigger than a few hundred vertices is a model of the site's, not a helper quad or a gizmo
       if (!B || B.l < 16384) continue;
@@ -1192,10 +1305,22 @@ export function rebuildPipeline(
       if (!Number.isFinite(min[0])) continue;
       step.placeholder = { min, max };
       stats.placeholders++;
+      const info: StandInInfo = {
+        material: step.material,
+        program: materials[step.material]?.name ?? `material ${step.material}`,
+        mode: step.mode,
+        instances: step.instances,
+        vertices: step.count,
+        standInVertices: 0,
+        kept: [],
+        dropped: step.attrs.filter((a) => a !== pos && a.name !== pos.name && !a.div).map((a) => a.name),
+      };
+      stats.standIns?.push(info);
       // a coarse stand-in of the shape instead of the box: triangle lists, strips and fans, instanced or not (the runner keeps
       // the instance attributes and count, so every instance still draws)
       const tris = triangleIds(doc, bin, step);
       if (!tris) {
+        info.box = step.mode === 4 || step.mode === 5 || step.mode === 6 ? 'index buffer unreadable' : `mode ${step.mode}`;
         boxBecause(step.mode === 4 || step.mode === 5 || step.mode === 6 ? 'index buffer unreadable' : `mode ${step.mode}`);
         continue;
       }
@@ -1203,31 +1328,41 @@ export function rebuildPipeline(
         const o = pos.off + v * stride + k * 4;
         return o + 4 <= B.l ? dv.getFloat32(o, true) : 0;
       };
-      // per-vertex float attributes besides the position (not per-instance ones: those stay as recorded)
+      info.vertices = new Set(tris).size;
+      // per-vertex attributes besides the position (not per-instance ones: those stay as recorded). Round 40: any float
+      // view the shader gets (floats, half floats, normalized or plain integers: quantized normals and UVs of compressed
+      // meshes); integer inputs (ivec, ids) cannot be averaged and are left out
       const extra = step.attrs
-        .filter((a) => a !== pos && a.name !== pos.name && !a.div && a.type === 0x1406 && a.size >= 1 && a.size <= 4)
+        .filter((a) => a !== pos && a.name !== pos.name && !a.div && !a.int && ATTR_BYTES[a.type] && a.size >= 1 && a.size <= 4)
         .flatMap((a) => {
           const AB = doc.snap.buffers.find((b) => b.id === a.buf);
           if (!AB) return [];
           const adv = new DataView(bin.buffer, bin.byteOffset + AB.o, AB.l);
-          const ast = a.stride || a.size * 4;
+          const bytes = ATTR_BYTES[a.type];
+          const ast = a.stride || a.size * bytes;
           return [
             {
               name: a.name,
               size: a.size,
               read: (v: number) =>
                 Array.from({ length: a.size }, (_, k) => {
-                  const o = a.off + v * ast + k * 4;
-                  return o + 4 <= AB.l ? adv.getFloat32(o, true) : 0;
+                  const o = a.off + v * ast + k * bytes;
+                  return o + bytes <= AB.l ? readAttrComponent(adv, o, a.type, a.norm) : 0;
                 }),
             },
           ];
         });
+      info.kept = extra.map((e) => e.name);
+      info.dropped = info.dropped.filter((n) => !info.kept.includes(n));
       const px = proxyMesh(tris, (v) => [at(v, 0), at(v, 1), Math.min(3, pos.size) > 2 ? at(v, 2) : 0], min, max, PROXY_GRID, extra);
       if (px) {
         step.proxy = px;
         stats.proxies++;
-      } else boxBecause('too few triangles left after clustering');
+        info.standInVertices = px.pos.length / 3;
+      } else {
+        info.box = 'too few triangles left after clustering';
+        boxBecause(info.box);
+      }
     }
     for (const { step } of meshDraws) {
       if (!step.placeholder) continue;
@@ -1370,6 +1505,7 @@ export function rebuildMd(p: PipelineDoc, stats: RebuildStats, score: { canvas: 
   const why = Object.entries(stats.boxReasons ?? {}).sort((a, b) => b[1] - a[1]);
   if (ownAssets) {
     if (why.length) L.push(`- boxes, by reason: ${why.map(([k, n]) => `${k} ${n}`).join(', ')}`);
+    if (stats.standIns?.length) L.push('', ...standInTable(stats.standIns));
   } else L.push("- these bytes are the site's: for study and prototyping; swap them for your own (`--own-assets`) before you ship");
   L.push('');
   const skipped = Object.entries(stats.skipped);

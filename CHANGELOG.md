@@ -11,9 +11,15 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 40: --own-assets stand-ins carry every float view of a vertex input (half floats and normalized or plain integers:
+  the quantized normals and UVs of compressed meshes were dropped and read as 0); integer inputs are listed as lost.
+  rebuild.md has a stand-in table (material, program, draw, instances, vertices site -> stand-in, inputs kept and lost) and
+  extract.json carries it (rebuild.stats.standIns). --own-assets-cost also scores the site's meshes one material at a time
+  (the 6 materials with the most stand-ins), so the cost line names the material the (b) gap comes from; variants are built
+  one at a time. extract.md's cost line no longer repeats its label; the textures/ previews are in extract.json's file list.
 - Round 39: --own-assets stand-ins keep hard edges: the cell key also carries the normal's main direction, so a flat-shaded
   model's faces are no longer averaged into one blurred normal (same 16-cell position grid: no more of the site's shape), and
-  averaged normals are length 1 again. three.js keyframes (b): canvas 72.2% -> 77.5%, page 82% -> 85%. Round 38 fixes: the
+  averaged normals are length 1 again. three.js keyframes (b): canvas 72.2% -> 77.5% in the sandbox, 77.0% on a PC (page 82% -> 85%). Round 38 fixes: the
   cost variants no longer stay in extract.json's file list, the cost line is in extract.md and extract.json (rebuild.ownCost,
   with vsReplay and stats), and --own-assets-cost without --own-assets says it is ignored.
 - Round 38: `--own-assets-cost` (with `--own-assets`): also scores two never-shipped variants of the rebuild (the site's real
