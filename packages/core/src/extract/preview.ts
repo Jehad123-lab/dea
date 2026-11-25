@@ -928,6 +928,8 @@ export async function referenceShot(
     let lastWhy = '';
     let whyNotes = 0;
     let loaderSeen = false;
+    let glMissing = false;
+    let sawCanvasUnderLoader = false;
     const watching = () =>
       Date.now() - t0 < longCap + 120_000 &&
       keepWatching({
@@ -968,7 +970,10 @@ export async function referenceShot(
       if (frameChanged(lastStats, st)) changedAt = Date.now();
       lastStats = st;
       loader = (await page.evaluate(LOADER_VISIBLE).catch(() => false)) as boolean;
-      if (loader) loaderSeen = true;
+      if (loader) {
+        loaderSeen = true;
+        if (!sawCanvasUnderLoader) sawCanvasUnderLoader = ((await page.evaluate(GL_ON_SCREEN).catch(() => -1)) as number) >= 0;
+      }
       // Round 29: why the loader check said that, logged when it changes (every poll with DEA_DEBUG_LOADER=1)
       const why = (await page.evaluate(LOADER_WHY).catch(() => 'loader check failed')) as string;
       const whyLine = `${loader ? 'loader' : 'no loader'} at ${Math.round((Date.now() - t0) / 1000)} s: ${why}`.slice(0, 400);
@@ -1088,10 +1093,15 @@ export async function referenceShot(
           currentTimings()?.note(
             `the WebGL scene started drawing ${Math.round((Date.now() - g0) / 1000)} s after the watch ended (after the loading screen): reference taken again`,
           );
-        } else
+        } else {
+          glMissing = true;
           currentTimings()?.note(
             `no WebGL canvas drew within ${Math.round(waitMs / 1000)} s after the loading screen finished (pointer and scroll nudged too): the first screen after the loader has no WebGL`,
           );
+          // Round 31: a WebGL canvas that was up during the loader and is gone now belonged to the loading screen
+          if (sawCanvasUnderLoader)
+            currentTimings()?.note('a WebGL canvas was on screen while the loader was up and is gone now: it belonged to the loading screen');
+        }
       }
     }
     // every screenshot in the watch failed (or the watch never ran): one more try, so the reference is never an empty image
@@ -1101,6 +1111,19 @@ export async function referenceShot(
       if (!buf) throw new Error('could not take a screenshot of the page for the reference');
       best = { png: `data:image/png;base64,${buf.toString('base64')}`, score: 0, atMs: Date.now() - t0, loader, flat: true };
       layout = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
+    }
+    // Round 31: the wait after the loader found no drawing WebGL canvas: recording would wait 90 s for frames that cannot come
+    if (record && glMissing) {
+      currentTimings()?.note('not recording: no WebGL canvas is drawing on the first screen after the loader');
+      return {
+        png: best.png,
+        atMs: best.atMs,
+        loader: best.loader,
+        flat: best.flat,
+        layout: layout as never,
+        recording: null,
+        recordingError: 'no WebGL canvas drew on the first screen after the loading screen (DEA waited and nudged the pointer and scroll)',
+      };
     }
     if (record) {
       // record two frames, hold the page on the last one, and use that moment as the reference: the replay then has the
