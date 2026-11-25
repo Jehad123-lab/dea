@@ -20,7 +20,7 @@ import { REPLAY_CAPTURE_SCRIPT } from '../replay/capture.ts';
 import { animateEntries, buildGraph, type CaptureDoc, compactCapture, fitCapture, placeholderTextures, renderGraphMd, TEX_GRID } from '../replay/graph.ts';
 import { fitInputs, type InputMap, inferInputs, inputsSummary, type ProbeData, type ProbeReport } from '../replay/inputs.ts';
 import { REPLAY_PLAYER } from '../replay/player.ts';
-import { type RebuildStats, rebuildMd, rebuildPipeline, standinSummary } from '../replay/rebuild.ts';
+import { type RebuildStats, rebuildMd, rebuildPipeline, type StandInInfo, standinSummary } from '../replay/rebuild.ts';
 import { REBUILD_RUNNER } from '../replay/runner.ts';
 import { recoverScene, sceneGlb, sceneMd, sceneModule } from '../replay/scene.ts';
 import { buildPageMap, fitScrollTape, pageMapMd, type ScrollTapeFit, tapeMoved } from '../replay/scrolltape.ts';
@@ -100,6 +100,21 @@ import { type CanvasScore, canvasLine, compareCanvas } from './score.ts';
  * Round 38: one line saying what each --own-assets placeholder kind costs on the canvas, from the never-shipped variants.
  * A variant that keeps the site's images and still scores like the shipped rebuild means the images were not the loss.
  */
+/**
+ * Round 40: the materials whose stand-ins --own-assets-cost scores one at a time: the `max` with the most stand-ins (ties:
+ * the most site vertices), so the cost line says which material's meshes the (b) gap comes from.
+ */
+export function costMaterials(list: StandInInfo[], max = 6): Array<{ material: number; program: string; n: number; vertices: number }> {
+  const by = new Map<number, { material: number; program: string; n: number; vertices: number }>();
+  for (const r of list) {
+    const m = by.get(r.material) ?? { material: r.material, program: r.program, n: 0, vertices: 0 };
+    m.n++;
+    m.vertices += r.vertices;
+    by.set(r.material, m);
+  }
+  return [...by.values()].sort((a, b) => b.n - a.n || b.vertices - a.vertices).slice(0, max);
+}
+
 export function ownCostLine(shipped: number | null, cost: Array<{ what: string; canvas: number | null; page: number }>): string {
   const p = (x: number) => `${Math.round(x * 1000) / 10}%`;
   const parts = cost.map((c) => {
@@ -868,7 +883,13 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     // the preview server serves /textures from public/
     if (texNames.size) {
       await mkdir(join(out, 'textures'), { recursive: true });
-      for (const name of texNames.values()) await copyFile(join(out, 'public', 'textures', name), join(out, 'textures', name)).catch(() => {});
+      for (const name of texNames.values())
+        await copyFile(join(out, 'public', 'textures', name), join(out, 'textures', name))
+          .then(() => {
+            // Round 40: these previews are in the kit too (extract.json listed none of them)
+            if (!files.includes(`textures/${name}`)) files.push(`textures/${name}`);
+          })
+          .catch(() => {});
     }
 
     // 4. visual diff + analysis + research loop
@@ -910,7 +931,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       let rebuildDoc: { pipeline: import('../replay/rebuild.ts').PipelineDoc; stats: RebuildStats } | null = null;
       // Round 38: never-shipped rebuild variants for --own-assets-cost, and the shipped files to put back after scoring them
       type RbFiles = { pipeline: string; shaders: Record<string, string>; data: Uint8Array };
-      let ownCostVariants: Array<{ what: string; files: RbFiles }> = [];
+      let ownCostVariants: Array<{ what: string; build: () => RbFiles }> = [];
       if (recording) {
         say('recorded the WebGL frames behind that screenshot; building the render graph and the replay');
         const doneBuild = mark('build the replay, editable rebuild and scene');
@@ -1034,16 +1055,22 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           await put('rebuild/rebuild.js', REBUILD_RUNNER);
           rebuildDoc = { pipeline: rb.pipeline, stats: rb.stats };
           if (opts.ownAssets && opts.ownAssetsCost) {
-            const variant = (images: boolean, meshes: boolean): RbFiles => {
+            // built one at a time when scored (Round 40: up to 8 variants, each a full copy of the recording)
+            const variant = (images: boolean, meshes: boolean, realMaterials?: number[]) => (): RbFiles => {
               const d = structuredClone(recDoc as CaptureDoc);
               const b = new Uint8Array(binU8);
               if (!images) placeholderTextures(d, b, { lookups: 0 });
-              const v = rebuildPipeline(d, b, { data: 'data.bin', ownAssets: true, standIns: !meshes, sceneNodes });
+              const v = rebuildPipeline(d, b, { data: 'data.bin', ownAssets: true, standIns: !meshes, realMaterials, sceneNodes });
               return { pipeline: JSON.stringify(v.pipeline), shaders: v.shaders, data: b };
             };
             ownCostVariants = [
-              { what: "the site's real images, stand-in meshes", files: variant(true, false) },
-              { what: "image colour grids, the site's real meshes", files: variant(false, true) },
+              { what: "the site's real images, stand-in meshes", build: variant(true, false) },
+              { what: "image colour grids, the site's real meshes", build: variant(false, true) },
+              // Round 40: which material's stand-ins cost the points: the site's meshes for one material at a time
+              ...costMaterials(rb.stats.standIns ?? []).map((m) => ({
+                what: `the site's meshes for material ${m.material} only (${m.program}, ${m.n} stand-in${m.n === 1 ? '' : 's'})`,
+                build: variant(false, false, [m.material]),
+              })),
             ];
           }
           if (sc.meshes.length) {
@@ -1292,8 +1319,9 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
               // each variant gets its own folder: the preview browser caches /public/rebuild/ by URL, so rewriting the shipped
               // folder in place scored the shipped files again (first try: real images "+0 points" on keyframes)
               const cost: Array<{ what: string; canvas: number | null; page: number }> = [];
-              for (const [i, v] of ownCostVariants.entries()) {
+              for (const [i, v0] of ownCostVariants.entries()) {
                 const dir = `public/rebuild-cost-${i}`;
+                const v = { what: v0.what, files: v0.build() };
                 await put(`${dir}/pipeline.json`, v.files.pipeline);
                 for (const [n, src] of Object.entries(v.files.shaders)) await put(`${dir}/${n}`, src);
                 await put(`${dir}/data.bin`, Buffer.from(v.files.data.buffer, v.files.data.byteOffset, v.files.data.byteLength));
@@ -2127,7 +2155,7 @@ function renderExtractMd(o: {
         ? [
             `- ✔ (b) \`public/rebuild/pipeline.json\`: ${r.rebuild.stats.draws} draws in the site's order as ${r.rebuild.stats.materials} RawShaderMaterials (GLSL in \`public/rebuild/shaders/\`), ${r.rebuild.stats.cameras} camera(s), ${r.rebuild.stats.renderTargets} render targets, ${r.rebuild.stats.glSteps} raw WebGL step(s). three.js reproduces the site's matrices from the camera and model matrix on ${r.rebuild.stats.matricesExact} draw(s)${r.rebuild.stats.matricesOff.length ? `, not on ${r.rebuild.stats.matricesOff.length}` : ''}.`,
             `- recorded in (b): ${(r.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB of vertex/index buffers and ${(r.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB of texture pixels and simulation start state${o.ownAssets ? `; --own-assets: images are coarse colour grids and large meshes are stand-ins, ${standinSummary(r.rebuild.stats)}; their bytes are not in the kit` : " (the site's own bytes: for study and prototyping)"}. See \`rebuild.md\`.`,
-            ...(r.rebuild.ownCost?.length ? [`- --own-assets-cost: ${ownCostLine(r.rebuild.canvas ?? null, r.rebuild.ownCost)}`] : []),
+            ...(r.rebuild.ownCost?.length ? [`- ${ownCostLine(r.rebuild.canvas ?? null, r.rebuild.ownCost)}`] : []),
           ]
         : []),
       '',
