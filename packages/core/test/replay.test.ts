@@ -340,6 +340,10 @@ describe('replay: editable rebuild', () => {
     const mesh = r.pipeline.frames[0].steps.find((s) => s.op === 'draw' && s.target === 0) as { placeholder?: { min: number[]; max: number[] } };
     expect(mesh.placeholder).toEqual({ min: [0, 2, 0], max: [6, 2, 6] });
     expect(r.stats.placeholders).toBe(2);
+    // every stand-in is a coarse shape or a box with a recorded reason
+    const boxes = Object.values(r.stats.boxReasons).reduce((a, x) => a + x, 0);
+    expect(r.stats.proxies + boxes).toBe(r.stats.placeholders);
+    if (boxes) expect(rebuildMd(r.pipeline, r.stats, { canvas: 0.5, page: 0.5 }, true)).toMatch(/boxes, by reason: /);
     expect(b.subarray(o, o + n * 12).every((x) => x === 0)).toBe(true);
   });
 });

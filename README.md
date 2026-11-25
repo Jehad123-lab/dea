@@ -456,7 +456,8 @@ recording) and the role DEA reads from them (≈ Inferred, with why). The projec
 beats DEA's own start; side-by-sides for both are in `preview/side-by-side-replay.png` and
 `preview/side-by-side-rebuild.png`. Meshes in the frame are also read back into `scene/scene.glb` (positions, normals,
 UVs, model matrices, the camera), matched to the site's GLB files by vertex count. `--own-assets` swaps the site's
-images for placeholders and large meshes for boxes, and leaves the capture replay out of the kit (it is scored, then
+images for placeholders and large meshes for coarse stand-ins of their shape (triangle lists, strips and fans, instanced
+draws included; a box only when no shape can be read, with the reason in `rebuild.md`), and leaves the capture replay out of the kit (it is scored, then
 removed); `--max-capture-mb` caps the recording (64 MB after compaction by default); `--no-replay` turns all of it off.
 
 The recorded bytes are the site's own: use them to study and prototype, and swap in your own before you ship.
