@@ -11,6 +11,8 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 34: the recorder stops after 8 s on a page that never made a WebGL context (`NO_CONTEXT_MS`) instead of waiting the
+  full 90 s meant for on-demand scenes (framer.com quick run).
 - Round 33: a page renderer crash is recorded when it happens (`page.on('crash')` in `openSite`, `session.crashed`, a warning in the
   run) instead of surfacing later as "Target page, context or browser has been closed" on an unrelated call.
 
@@ -75,6 +77,8 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Changed
 
+- Round 34: technique detection reads only the GLSL that compiles (`activeGlsl`): code inside an `#ifdef` whose macro is not
+  defined is ignored, so three.js material chunks no longer report a heightmap (three.js keyframes example).
 - Round 33: the design decode survives a closed CDP session: Chrome's stylesheet and platform-font read retries on a fresh
   session and otherwise goes on with computed styles, with a warning (a PR #24 run lost its design stage ~65 s in and retried).
   The stage retry message names the likely cause.
