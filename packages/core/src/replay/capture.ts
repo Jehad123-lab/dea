@@ -1009,7 +1009,7 @@ export const STOP_DOM = `(() => {
   const inView = [...set].map((el) => ({ sel: sel(el), heading: heading(el), share: Math.round(share(el.getBoundingClientRect()) * 100) / 100 })).filter((x) => x.share > 0.05).sort((a, b) => b.share - a.share).slice(0, 6);
   // shadow roots are searched too, open or closed (the observers record every attachShadow): a canvas inside a web component is still the page's canvas
   const deep = (q) => { if (window.__DEA__ && window.__DEA__.deep) return window.__DEA__.deep(q); const out = [...document.querySelectorAll(q)]; let hosts = 0; const walk = (root) => { for (const el of root.querySelectorAll('*')) { if (el.shadowRoot && hosts++ < 300) { out.push(...el.shadowRoot.querySelectorAll(q)); walk(el.shadowRoot); } } }; walk(document); return out; };
-  const canvases = deep('canvas').map((el) => ({ sel: sel(el), share: Math.round(share(el.getBoundingClientRect()) * 100) / 100 })).filter((x) => x.share > 0.05).slice(0, 6);
+  const canvases = (window.__DEA__ && window.__DEA__.allCanvases ? window.__DEA__.allCanvases() : deep('canvas')).map((el) => ({ sel: sel(el), share: Math.round(share(el.getBoundingClientRect()) * 100) / 100 })).filter((x) => x.share > 0.05).slice(0, 6);
   return { scrollY: Math.round(scrollY), docHeight: document.documentElement.scrollHeight, viewport: [vw, vh], inView, canvases };
 })()`;
 

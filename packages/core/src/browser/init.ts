@@ -22,6 +22,7 @@ export const INIT_SCRIPT = String.raw`(() => {
   // Every shadow root, open or closed. attachShadow is the only way to make one, so this sees what a query cannot: a
   // closed root answers shadowRoot with null, and a canvas inside one is not found by querySelectorAll either.
   D.shadowHosts = new WeakMap();
+  D.canvasRefs = [];
   D.shadows = [];
   try {
     const attach = Element.prototype.attachShadow;
@@ -44,6 +45,24 @@ export const INIT_SCRIPT = String.raw`(() => {
       if (r && r.host && r.host.isConnected) out.push(...r.querySelectorAll(q));
     }
     return out;
+  };
+  /** every canvas: the document, every shadow root, and every canvas that made a WebGL context (Round 36) */
+  D.allCanvases = () => {
+    const out = new Set(D.deep('canvas'));
+    for (const w of D.canvasRefs) {
+      const c = w.deref();
+      if (c && c.isConnected) out.add(c);
+    }
+    return [...out];
+  };
+  /** does element a hold canvas c, through any number of shadow roots, open or closed */
+  D.holds = (a, c) => {
+    for (let n = c; n; ) {
+      if (a === n || (a.contains && a.contains(n))) return true;
+      const r = n.getRootNode ? n.getRootNode() : null;
+      n = r && r.host ? r.host : null;
+    }
+    return false;
   };
   const MAX_SHADERS = 400;
   const MAX_SRC = 200000;
@@ -139,6 +158,9 @@ export const INIT_SCRIPT = String.raw`(() => {
             const id = 'c' + D.contexts.length;
             if (this.setAttribute) this.setAttribute('data-dea-canvas', id);
             D.contexts.push({ id, kind, type: String(type), attrs: attrs || null, width: this.width, height: this.height, t: now() });
+            // Round 36: the canvas itself, kept apart from the JSON-safe list: a canvas in a closed shadow root (igloo.inc)
+            // is found by no query, but the element that made the context is still here
+            if (D.canvasRefs.length < 64) D.canvasRefs.push(new WeakRef(this));
           }
         } catch (e) {}
         return ctx;

@@ -11,6 +11,9 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 36: a WebGL canvas inside a CLOSED shadow root is found: the page script keeps the canvas that made each context
+  (`__DEA__.canvasRefs`, `allCanvases`, `holds`), and the post-loader WebGL check, the loader checks and the layout read use it
+  (igloo.inc mounts its three.js canvas in a closed root, so 3 of 4 runs skipped the recording).
 - Round 35: after a loading screen, a big WebGL canvas that is on screen but whose frame count did not move is recorded anyway
   (the recorder stops in 15 s if nothing ever drew) instead of being dropped as "no WebGL" (igloo.inc flake on a slow box).
 - Round 35: an unrecorded run labels its canvas score as DEA's own shader-module draft, not (a) or (b).
