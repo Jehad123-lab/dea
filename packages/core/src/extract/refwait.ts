@@ -94,6 +94,9 @@ export interface WatchState {
 export function keepWatching(s: WatchState): boolean {
   if (s.elapsed < s.ms) return true;
   if (s.loader && (s.elapsed < s.hardCap || (s.pctAge < PCT_STALL_MS && s.elapsed < s.longCap))) return true;
+  // Round 30: a visible loader over a flat kept frame holds the watch to the long cap even when its counter pauses (a --no-replay
+  // run on jehaduddin.vercel.app stopped at 96 s on the flat loader; the next one reached the hero at 163 s)
+  if (s.loader && s.bestFlat && s.elapsed < s.longCap) return true;
   // a flat best frame (a loader without a counter, a canvas not drawn yet) buys a bounded extra wait while frames still change
   const extra = s.quick ? FLAT_EXTRA_QUICK_MS : FLAT_EXTRA_FULL_MS;
   // a visible loader is still working even when its picture holds still (a stuck counter), so only stillness without one stops
@@ -120,4 +123,18 @@ export function shouldPeel(s: {
 }): boolean {
   if (!s.bestFlat || !s.flat || s.peels >= PEEL_MAX || s.sincePeel < PEEL_RETRY_MS) return false;
   return s.changedAge >= FLAT_STILL_MS || s.elapsed >= s.hardCap;
+}
+
+/** Round 30: after a loading screen, how long the watch waits for the WebGL scene to mount and draw (quick / full) */
+export const POST_LOADER_GL_QUICK_MS = 60_000;
+export const POST_LOADER_GL_FULL_MS = 120_000;
+
+/**
+ * How long to wait for WebGL after the watch, in ms (0: no wait). Round 30: jehaduddin.vercel.app's loader finished at 162 s on
+ * software WebGL and the watch ended one poll later, while the hero was still a poster <img> and R3F had not mounted, so nothing
+ * was recorded ("no WebGL canvas drew a frame"). Only a page that showed a loader waits, and only while no WebGL canvas is drawing.
+ */
+export function postLoaderGlWait(s: { loaderSeen: boolean; bestFlat: boolean; glOnScreen: boolean; quick: boolean }): number {
+  if (!s.loaderSeen || s.bestFlat || s.glOnScreen) return 0;
+  return s.quick ? POST_LOADER_GL_QUICK_MS : POST_LOADER_GL_FULL_MS;
 }

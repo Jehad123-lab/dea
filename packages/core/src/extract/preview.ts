@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import type { Browser, Page } from 'playwright';
 import { NAME_SHIM } from '../browser/init.ts';
-import { installObservers, LOADER_HIDE, LOADER_PROGRESS, LOADER_UNHIDE, LOADER_VISIBLE, LOADER_WHY } from '../browser/open.ts';
+import { GL_ON_SCREEN, installObservers, LOADER_HIDE, LOADER_PROGRESS, LOADER_UNHIDE, LOADER_VISIBLE, LOADER_WHY } from '../browser/open.ts';
 import { alignToReference, type PhaseInfo, phaseInfo } from '../browser/phase.ts';
 import { thumbOfImage } from '../browser/settle.ts';
 import { assertNotBotWall } from '../browser/wall.ts';
@@ -23,7 +23,19 @@ import { type ProbeData, probeInputs } from '../replay/inputs.ts';
 import { currentTimings, overBudget, timed } from '../timings.ts';
 import { type ShaderModule, threeRevision } from './generate.ts';
 import { runInteractionWithState, type StepState, setDragStep } from './interaction.ts';
-import { betterFrame, type FrameStats, frameChanged, frameStats, isFlat, keepWatching, QUICK_LOADER_CAP_MS, shouldPeel, THUMB_H, THUMB_W } from './refwait.ts';
+import {
+  betterFrame,
+  type FrameStats,
+  frameChanged,
+  frameStats,
+  isFlat,
+  keepWatching,
+  postLoaderGlWait,
+  QUICK_LOADER_CAP_MS,
+  shouldPeel,
+  THUMB_H,
+  THUMB_W,
+} from './refwait.ts';
 import type { Params } from './research.ts';
 
 const MIME: Record<string, string> = {
@@ -915,6 +927,7 @@ export async function referenceShot(
     let peels = 0;
     let lastWhy = '';
     let whyNotes = 0;
+    let loaderSeen = false;
     const watching = () =>
       Date.now() - t0 < longCap + 120_000 &&
       keepWatching({
@@ -955,6 +968,7 @@ export async function referenceShot(
       if (frameChanged(lastStats, st)) changedAt = Date.now();
       lastStats = st;
       loader = (await page.evaluate(LOADER_VISIBLE).catch(() => false)) as boolean;
+      if (loader) loaderSeen = true;
       // Round 29: why the loader check said that, logged when it changes (every poll with DEA_DEBUG_LOADER=1)
       const why = (await page.evaluate(LOADER_WHY).catch(() => 'loader check failed')) as string;
       const whyLine = `${loader ? 'loader' : 'no loader'} at ${Math.round((Date.now() - t0) / 1000)} s: ${why}`.slice(0, 400);
@@ -967,8 +981,11 @@ export async function referenceShot(
         if (rising) pctAt = Date.now();
         if (pct !== null) lastPct = pct;
         lastScore = score;
-      } else if (lastScore >= 0 && lastPct !== null)
+      } else if (lastScore >= 0 && lastPct !== null) {
         currentTimings()?.note(`the loading screen finished after ${Math.round((Date.now() - t0) / 1000)} s (it showed ${lastPct}% last)`);
+        // Round 30: once (it repeated on every poll after the loader cleared: 44 identical lines)
+        lastScore = -1;
+      }
       // frames behind a loader only count when nothing better comes
       const s2 = loader ? score * 0.25 : score;
       quiet = s2 > best.score * 1.02 || loader ? 0 : quiet + 1;
@@ -1026,6 +1043,55 @@ export async function referenceShot(
             layout = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
           } else currentTimings()?.note(`the loader was still up; hiding ${hidden} loader layer(s) showed a flat page too`);
         }
+      }
+    }
+    // Round 30: a loader just finished but the WebGL scene has not mounted yet (the hero is still a poster image): wait for a
+    // drawing canvas, then take the reference again, so the recording has a scene to record
+    {
+      const glRead = async () => (await page.evaluate(GL_ON_SCREEN).catch(() => -1)) as number;
+      const r0 = await glRead();
+      await page.waitForTimeout(1000);
+      const r1 = await glRead();
+      const waitMs = postLoaderGlWait({ loaderSeen: loaderSeen || peels > 0, bestFlat: best.flat, glOnScreen: r0 >= 0 && r1 > r0, quick: frames < 2 });
+      if (waitMs > 0) {
+        const g0 = Date.now();
+        let prev = r1;
+        let drawing = false;
+        let nudged = false;
+        while (Date.now() - g0 < waitMs) {
+          await page.waitForTimeout(2500);
+          const r = await glRead();
+          if (r >= 0 && prev >= 0 && r > prev) {
+            drawing = true;
+            break;
+          }
+          prev = r;
+          // a scene that mounts on the first pointer or scroll (lazy R3F, an IntersectionObserver): nudge once after 10 s, then
+          // put the page back at the top
+          if (!nudged && Date.now() - g0 >= 10_000) {
+            nudged = true;
+            await page.mouse.move(viewport.width / 2, viewport.height / 2).catch(() => {});
+            await page.mouse.wheel(0, 40).catch(() => {});
+            await page.waitForTimeout(600);
+            await page.evaluate('window.scrollTo(0, 0)').catch(() => {});
+          }
+        }
+        if (drawing) {
+          await page.waitForTimeout(2500);
+          const gb = await page.screenshot({ type: 'png' }).catch(() => null);
+          const gpng = gb ? `data:image/png;base64,${gb.toString('base64')}` : '';
+          const gst = gpng ? await thumbStats(page, gpng) : null;
+          if (gst && !isFlat(gst)) {
+            best = { png: gpng, score: gst.sd, atMs: Date.now() - t0, loader: false, flat: false };
+            layout = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
+          }
+          currentTimings()?.note(
+            `the WebGL scene started drawing ${Math.round((Date.now() - g0) / 1000)} s after the watch ended (after the loading screen): reference taken again`,
+          );
+        } else
+          currentTimings()?.note(
+            `no WebGL canvas drew within ${Math.round(waitMs / 1000)} s after the loading screen finished (pointer and scroll nudged too): the first screen after the loader has no WebGL`,
+          );
       }
     }
     // every screenshot in the watch failed (or the watch never ran): one more try, so the reference is never an empty image

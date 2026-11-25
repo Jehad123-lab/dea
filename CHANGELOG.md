@@ -11,6 +11,12 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 30: after a loading screen, the reference waits for the WebGL scene (`postLoaderGlWait`, `GL_ON_SCREEN`): when the page
+  showed a loader and no visible canvas (10% of the viewport or more) is drawing yet, DEA waits up to 60 s (quick) / 120 s (full)
+  for one, nudging the pointer and scroll once after 10 s for a scene that mounts on first input, then takes the reference again.
+  The timings say whether it drew. jehaduddin.vercel.app's watch ended at 162 s while the hero was still a poster image, so
+  nothing was recorded.
+
 - Round 29: the reference watch looks through a flat loading screen while it runs (`shouldPeel`): once the kept frame and the
   current frame are both flat and the picture has sat still for `FLAT_STILL_MS` or the watch has passed its hard cap, the loader's
   layers are hidden and a detailed page behind them becomes the reference. Not gated on the loader check. A flat look puts the
@@ -54,6 +60,10 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
   `too few triangles left after clustering`), listed in rebuild.md as "boxes, by reason".
 
 ### Changed
+
+- Round 30: a visible loader over a flat kept frame holds the watch to the long cap even when its counter pauses (a --no-replay
+  run stopped at 96 s on the flat loader while the next reached the hero at 163 s).
+- Round 30: "the loading screen finished after N s" is logged once (it repeated on every poll after the loader cleared).
 
 - Round 29: the watch clock (base length, hard cap, counter stall) starts at the first frame the watch got, not at page load. On
   software WebGL jehaduddin.vercel.app's first screenshots took ~49 s and ate the 2.5x hard cap. A safety stop at the long cap
