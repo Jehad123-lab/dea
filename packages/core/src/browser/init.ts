@@ -80,6 +80,13 @@ export const INIT_SCRIPT = String.raw`(() => {
   // Round 31: sites also pick a quality tier from the CPU (jehaduddin.vercel.app: cores >= 8 is "high", else "mid"); a 2-vCPU
   // server got the tier that shows a poster image instead of the 3D hero. With the mask on, DEA answers at least 8 cores and
   // 8 GB, like a common desktop. Recorded in D.coresMasked.
+  // Round 32: a WebGL context the site loses (software WebGL runs out, a post chain dies) is recorded, with the canvas size
+  D.contextLost = [];
+  try {
+    window.addEventListener('webglcontextlost', (e) => {
+      try { const c = e.target; if (D.contextLost.length < 20) D.contextLost.push({ t: now(), w: c && c.width, h: c && c.height }); } catch (x) {}
+    }, true);
+  } catch (e) {}
   D.coresMasked = false;
   try {
     if (window.__DEA_GPU_MASK__ !== false) {

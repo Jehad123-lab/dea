@@ -11,6 +11,12 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 32: the page environment is reported (timings "page environment: ...", extract.md "Page environment:", extract.json
+  `diff.referenceEnv`, kept in the capture cache): the GPU name and CPU masks DEA applied, WebGL contexts the page lost
+  (`webglcontextlost`, time and canvas size), and an html class naming a fallback mode (static, fallback, no-webgl, lite, reduced,
+  poster). jehaduddin.vercel.app's post chain lost its context on software WebGL and switched to "vscroll static", and no output
+  said so; `__DEA__.coresMasked` was set but never printed.
+
 - Round 31: the GPU mask (on by default, off with the existing no-mask option) also answers `navigator.hardwareConcurrency` and
   `navigator.deviceMemory` with at least 8, recorded as `__DEA__.coresMasked`. jehaduddin.vercel.app picks its quality tier from
   the core count (>= 8 "high", else "mid"); a 2-vCPU box got a poster image instead of the 3D hero.
@@ -65,6 +71,9 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
   `too few triangles left after clustering`), listed in rebuild.md as "boxes, by reason".
 
 ### Changed
+
+- Round 32: "the loading screen finished after N s" is logged on any loader-to-no-loader change, with the last counter value only
+  when one was read (PR #24's run had no counter reading and no line).
 
 - Round 31: when the wait after the loader finds no drawing WebGL canvas, recording is skipped instead of waiting 90 s for frames
   that cannot come (a scored run went past a 300 s shell limit).
