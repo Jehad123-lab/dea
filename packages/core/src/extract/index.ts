@@ -96,6 +96,20 @@ import { type CanvasScore, canvasLine, compareCanvas } from './score.ts';
  * modules on a full-screen quad) against the site's canvas. igloo.inc's unrecorded run printed "canvas 66.1%" next to
  * "replay: not recorded", which read like a (b) score. Say what it is.
  */
+/**
+ * Round 38: one line saying what each --own-assets placeholder kind costs on the canvas, from the never-shipped variants.
+ * A variant that keeps the site's images and still scores like the shipped rebuild means the images were not the loss.
+ */
+export function ownCostLine(shipped: number | null, cost: Array<{ what: string; canvas: number | null; page: number }>): string {
+  const p = (x: number) => `${Math.round(x * 1000) / 10}%`;
+  const parts = cost.map((c) => {
+    if (c.canvas == null) return `${c.what}: canvas n/a, page ${p(c.page)}`;
+    const gain = shipped != null ? ` (${c.canvas >= shipped ? '+' : ''}${Math.round((c.canvas - shipped) * 1000) / 10} points)` : '';
+    return `${c.what}: canvas ${p(c.canvas)}${gain}, page ${p(c.page)}`;
+  });
+  return `--own-assets cost (variants scored, never shipped; shipped canvas ${shipped != null ? p(shipped) : 'n/a'}): ${parts.join(' · ')}`;
+}
+
 export const UNRECORDED_CANVAS_NOTE = "(DEA's own shader-module draft, not (a) or (b): nothing was recorded, so this is not a rebuild score)";
 
 export interface ExtractOptions extends InspectOptions {
@@ -119,6 +133,11 @@ export interface ExtractOptions extends InspectOptions {
   section?: string;
   /** reference textures by path but write neutral placeholders of the same size instead of the site's files */
   ownAssets?: boolean;
+  /**
+   * Round 38: with --own-assets, also score two variants that are never shipped (real images + stand-in meshes, image grids +
+   * real meshes), so the report says what each placeholder kind costs (three.js keyframes: images ~11 points, shapes ~26)
+   */
+  ownAssetsCost?: boolean;
   /** reuse earlier runs instead of opening the site again */
   from?: { design?: string; motion?: string; assets?: string; trace?: string };
   /** skip the live WebGL trace (uniform values and drivers) */
@@ -194,6 +213,8 @@ export interface ReplayInfo {
     errors: string[];
     /** canvas score of (b) against (a): what the translation to three.js itself loses */
     vsReplay?: number | null;
+    /** Round 38 (--own-assets-cost): the score of each never-shipped variant, to show what each placeholder kind costs */
+    ownCost?: Array<{ what: string; canvas: number | null; page: number }>;
   };
 }
 
@@ -885,6 +906,9 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       let hasScene = false;
       let fullPage: FullPageResult | null = null;
       let rebuildDoc: { pipeline: import('../replay/rebuild.ts').PipelineDoc; stats: RebuildStats } | null = null;
+      // Round 38: never-shipped rebuild variants for --own-assets-cost, and the shipped files to put back after scoring them
+      type RbFiles = { pipeline: string; shaders: Record<string, string>; data: Uint8Array };
+      let ownCostVariants: Array<{ what: string; files: RbFiles }> = [];
       if (recording) {
         say('recorded the WebGL frames behind that screenshot; building the render graph and the replay');
         const doneBuild = mark('build the replay, editable rebuild and scene');
@@ -1007,6 +1031,19 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           if (opts.ownAssets) await put('public/rebuild/data.bin', Buffer.from(rbBin.buffer, rbBin.byteOffset, rbBin.byteLength));
           await put('rebuild/rebuild.js', REBUILD_RUNNER);
           rebuildDoc = { pipeline: rb.pipeline, stats: rb.stats };
+          if (opts.ownAssets && opts.ownAssetsCost) {
+            const variant = (images: boolean, meshes: boolean): RbFiles => {
+              const d = structuredClone(recDoc as CaptureDoc);
+              const b = new Uint8Array(binU8);
+              if (!images) placeholderTextures(d, b, { lookups: 0 });
+              const v = rebuildPipeline(d, b, { data: 'data.bin', ownAssets: true, standIns: !meshes, sceneNodes });
+              return { pipeline: JSON.stringify(v.pipeline), shaders: v.shaders, data: b };
+            };
+            ownCostVariants = [
+              { what: "the site's real images, stand-in meshes", files: variant(true, false) },
+              { what: "image colour grids, the site's real meshes", files: variant(false, true) },
+            ];
+          }
           if (sc.meshes.length) {
             hasScene = true;
             await put('public/scene/scene.glb', sceneGlb(sc, { placeholders: Boolean(opts.ownAssets) }));
@@ -1248,6 +1285,28 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             replay.rebuild.canvas = cB?.score ?? null;
             replay.rebuild.errors = lastErr ? [lastErr] : [];
             const rebuildPng = lastPng;
+            // Round 38: what each placeholder kind costs: score the never-shipped variants, then put the shipped files back
+            if (ownCostVariants.length) {
+              // each variant gets its own folder: the preview browser caches /public/rebuild/ by URL, so rewriting the shipped
+              // folder in place scored the shipped files again (first try: real images "+0 points" on keyframes)
+              const cost: Array<{ what: string; canvas: number | null; page: number }> = [];
+              for (const [i, v] of ownCostVariants.entries()) {
+                const dir = `public/rebuild-cost-${i}`;
+                await put(`${dir}/pipeline.json`, v.files.pipeline);
+                for (const [n, src] of Object.entries(v.files.shaders)) await put(`${dir}/${n}`, src);
+                await put(`${dir}/data.bin`, Buffer.from(v.files.data.buffer, v.files.data.byteOffset, v.files.data.byteLength));
+                const sv = await render({ ...params, program: '__rebuild', rebuildBase: `../${dir}/` });
+                const cv = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp, canvasRef);
+                cost.push({ what: v.what, canvas: cv?.score ?? null, page: sv });
+                // never shipped: the kit keeps only the real --own-assets rebuild
+                await rm(join(out, dir), { recursive: true, force: true }).catch(() => {});
+              }
+              replay.rebuild.ownCost = cost;
+              const line = ownCostLine(cB?.score ?? null, cost);
+              say(line);
+              currentTimings()?.note(line);
+              ownCostVariants = [];
+            }
             // how close (b) comes to (a), pixel structure only: what the three.js translation itself loses
             const agree = await compareCanvas(cmp, replayPng, rebuildPng, canvasBox, textBoxes, vp);
             replay.rebuild.vsReplay = agree?.score ?? null;
@@ -1760,6 +1819,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           replay.rebuild
             ? `(b) editable rebuild, three.js from the render graph (rebuild.md): canvas ${replay.rebuild.canvas != null ? pct(replay.rebuild.canvas) : 'n/a'}, page ${replay.rebuild.page != null ? pct(replay.rebuild.page) : 'n/a'}${replay.rebuild.vsReplay != null ? `, ${pct(replay.rebuild.vsReplay)} against (a)` : ''} · ${replay.rebuild.stats.materials} RawShaderMaterials, ${replay.rebuild.stats.cameras} cameras, ${replay.rebuild.stats.renderTargets} render targets; recorded bytes still used: ${(replay.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB geometry, ${(replay.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB textures${opts.ownAssets ? ` (--own-assets: images are coarse colour grids, ${standinSummary(replay.rebuild.stats)})` : ''}${replay.rebuild.kept ? ' · what the project runs' : ''}${replay.rebuild.errors.length ? ` · DID NOT RUN: ${rebuildErrorText(replay.rebuild.errors[0])}` : ''}`
             : '(b) editable rebuild: not made',
+          ...(replay.rebuild?.ownCost?.length ? [ownCostLine(replay.rebuild.canvas ?? null, replay.rebuild.ownCost)] : []),
           ...(replay.scene
             ? [
                 `scene: ${replay.scene.meshes} meshes + camera in public/scene/scene.glb${replay.scene.canvas != null ? ` (canvas ${pct(replay.scene.canvas)} with a plain material)` : ''}`,

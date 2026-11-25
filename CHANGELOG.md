@@ -11,6 +11,9 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 38: `--own-assets-cost` (with `--own-assets`): also scores two never-shipped variants of the rebuild (the site's real
+  images + stand-in meshes, image colour grids + the site's real meshes), each from its own folder, and prints what each
+  placeholder kind costs. three.js keyframes: shipped 72.2%, real images 73.6% (+1.4), real meshes 88.8% (+16.6).
 - Round 36: a WebGL canvas inside a CLOSED shadow root is found: the page script keeps the canvas that made each context
   (`__DEA__.canvasRefs`, `allCanvases`, `holds`), and the post-loader WebGL check, the loader checks and the layout read use it
   (igloo.inc mounts its three.js canvas in a closed root, so 3 of 4 runs skipped the recording).
