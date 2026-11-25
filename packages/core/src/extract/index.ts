@@ -589,7 +589,9 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
     const dir = await timed(name, () =>
       run().catch((e) => {
         if (!/crashed|Target closed|has been closed|disposed/i.test(String(e))) throw e;
-        say(`${name}: the page or its browser connection went away (${String(e).split('\n')[0].slice(0, 100)}), often a renderer crash on software WebGL; trying once more`);
+        say(
+          `${name}: the page or its browser connection went away (${String(e).split('\n')[0].slice(0, 100)}), often a renderer crash on software WebGL; trying once more`,
+        );
         return run();
       }),
     );

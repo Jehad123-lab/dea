@@ -74,7 +74,9 @@ async function buildDesign(session: Session, writer: RunWriter, watch: Animation
         if (r) return r;
       }
     }
-    session.warnings.push(`Chrome's stylesheet and font answers were not available (${String(e).split('\n')[0].slice(0, 100)}); fonts and CSS come from computed styles only.`);
+    session.warnings.push(
+      `Chrome's stylesheet and font answers were not available (${String(e).split('\n')[0].slice(0, 100)}); fonts and CSS come from computed styles only.`,
+    );
     return { sheets: [], platformFonts: {} };
   });
   const css = readCss(domCss.sheets);
