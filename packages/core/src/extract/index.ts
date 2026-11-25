@@ -573,6 +573,8 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   givenStages.length = 0;
   const target = opts.to ?? 'react';
   const say = (s: string) => opts.onProgress?.(s);
+  if (opts.ownAssetsCost && !opts.ownAssets)
+    say('--own-assets-cost does nothing without --own-assets (it scores what the --own-assets placeholders cost): ignored');
   setDragStep(false);
   // the run-time budget (--budget): once it is spent, the optional stages are skipped and the run says so
   const budgetSkip = (what: string): boolean => {
@@ -1300,6 +1302,8 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
                 cost.push({ what: v.what, canvas: cv?.score ?? null, page: sv });
                 // never shipped: the kit keeps only the real --own-assets rebuild
                 await rm(join(out, dir), { recursive: true, force: true }).catch(() => {});
+                // and out of the kit's file list (Round 38 left 120 entries that were not on disk)
+                for (let j = files.length - 1; j >= 0; j--) if (files[j].startsWith(`${dir}/`)) files.splice(j, 1);
               }
               replay.rebuild.ownCost = cost;
               const line = ownCostLine(cB?.score ?? null, cost);
@@ -1762,7 +1766,16 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             canvas: replay.canvas,
             page: replay.page,
             kept: replay.kept,
-            rebuild: replay.rebuild ? { canvas: replay.rebuild.canvas, page: replay.rebuild.page, kept: replay.rebuild.kept } : null,
+            rebuild: replay.rebuild
+              ? {
+                  canvas: replay.rebuild.canvas,
+                  page: replay.rebuild.page,
+                  vsReplay: replay.rebuild.vsReplay ?? null,
+                  kept: replay.rebuild.kept,
+                  stats: replay.rebuild.stats,
+                  ...(replay.rebuild.ownCost?.length ? { ownCost: replay.rebuild.ownCost } : {}),
+                }
+              : null,
           }
         : null,
       quick: Boolean(quick),
@@ -2114,6 +2127,7 @@ function renderExtractMd(o: {
         ? [
             `- ✔ (b) \`public/rebuild/pipeline.json\`: ${r.rebuild.stats.draws} draws in the site's order as ${r.rebuild.stats.materials} RawShaderMaterials (GLSL in \`public/rebuild/shaders/\`), ${r.rebuild.stats.cameras} camera(s), ${r.rebuild.stats.renderTargets} render targets, ${r.rebuild.stats.glSteps} raw WebGL step(s). three.js reproduces the site's matrices from the camera and model matrix on ${r.rebuild.stats.matricesExact} draw(s)${r.rebuild.stats.matricesOff.length ? `, not on ${r.rebuild.stats.matricesOff.length}` : ''}.`,
             `- recorded in (b): ${(r.rebuild.stats.recordedBufferBytes / 1e6).toFixed(1)} MB of vertex/index buffers and ${(r.rebuild.stats.recordedTextureBytes / 1e6).toFixed(1)} MB of texture pixels and simulation start state${o.ownAssets ? `; --own-assets: images are coarse colour grids and large meshes are stand-ins, ${standinSummary(r.rebuild.stats)}; their bytes are not in the kit` : " (the site's own bytes: for study and prototyping)"}. See \`rebuild.md\`.`,
+            ...(r.rebuild.ownCost?.length ? [`- --own-assets-cost: ${ownCostLine(r.rebuild.canvas ?? null, r.rebuild.ownCost)}`] : []),
           ]
         : []),
       '',
