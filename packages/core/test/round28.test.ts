@@ -20,8 +20,8 @@ describe('Round 28: quick mode follows a crawling loader counter', () => {
   it('stops at the quick loader cap', () => {
     expect(keepWatching({ ...base, elapsed: QUICK_LOADER_CAP_MS + 1 })).toBe(false);
   });
-  it('a counter stuck longer than the stall window does not buy time once the flat extra wait is spent', () => {
-    expect(keepWatching({ ...base, pctAge: PCT_STALL_MS + 1 })).toBe(false);
+  it('a counter stuck longer than the stall window does not buy time over a detailed kept frame', () => {
+    expect(keepWatching({ ...base, bestFlat: false, pctAge: PCT_STALL_MS + 1 })).toBe(false);
   });
   it('a detailed frame with no loader stops at the base length', () => {
     expect(keepWatching({ ...base, loader: false, bestFlat: false })).toBe(false);

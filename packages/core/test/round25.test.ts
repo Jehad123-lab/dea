@@ -86,7 +86,9 @@ describe('reference watch: when to stop', () => {
     expect(at(55_000, { changedAge: FLAT_STILL_MS + 1 })).toBe(true);
     // full mode waits longer
     expect(at(50_000 + FLAT_EXTRA_QUICK_MS + 5000, { quick: false, longCap: 420_000 })).toBe(true);
-    expect(at(50_000 + FLAT_EXTRA_FULL_MS, { quick: false, longCap: 420_000 })).toBe(false);
+    // Round 30: a visible loader over a flat kept frame holds to the long cap
+    expect(at(50_000 + FLAT_EXTRA_FULL_MS, { quick: false, longCap: 420_000 })).toBe(true);
+    expect(at(50_000 + FLAT_EXTRA_FULL_MS, { quick: false, longCap: 420_000, loader: false })).toBe(false);
   });
   it('a detailed best frame stops at the usual limits', () => {
     expect(keepWatching({ ...base, elapsed: 55_000, loader: true, pctAge: 60_000 })).toBe(false);

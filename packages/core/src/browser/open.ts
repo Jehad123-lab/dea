@@ -380,6 +380,18 @@ export const LOADER_WHY = `(() => {${LOADER_HELPERS}
 })()`;
 
 /**
+ * Round 30: is a WebGL canvas on the first screen and drawing? (runs in the page) A context exists, a visible canvas covers 10% of
+ * the viewport, and the page's animation frames keep coming (the raf count is returned so two reads can tell).
+ */
+export const GL_ON_SCREEN = `(() => {
+  const D = window.__DEA__;
+  if (!D || !D.contexts || !D.contexts.length) return -1;
+  const area = innerWidth * innerHeight;
+  const ok = [...document.querySelectorAll('canvas')].some((c) => { const r = c.getBoundingClientRect(); const cs = getComputedStyle(c); return cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05 && r.width * r.height > area * 0.1 && r.bottom > 0 && r.top < innerHeight; });
+  return ok ? D.raf.calls : -1;
+})()`;
+
+/**
  * Wait for a loading screen to finish. Software WebGL loads slowly, so a fixed wait either gives up on a loader that is still
  * moving or waits on one that is stuck: this waits while the loader shows progress (a rising counter, or a picture that keeps
  * changing) and gives up after `stuckMs` without any, or at `maxMs`. Returns how it ended, so a report can say it.
