@@ -26,7 +26,7 @@ const thumb = (f: (x: number, y: number) => number) => {
 describe('reference frame: flat (loading screen) detection', () => {
   const grey = frameStats(thumb(() => 128));
   const greyNoise = frameStats(thumb((x, y) => 126 + ((x * 7 + y * 13) % 5)));
-  const scene = frameStats(thumb((x, y) => ((x >> 3) + (y >> 3)) % 2 ? 230 : 20));
+  const scene = frameStats(thumb((x, y) => (((x >> 3) + (y >> 3)) % 2 ? 230 : 20)));
   it('a uniform grey screen (igloo.inc) is flat, a detailed frame is not', () => {
     expect(grey).toMatchObject({ sd: 0, edges: 0, mean: 128 });
     expect(isFlat(grey)).toBe(true);

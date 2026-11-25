@@ -1874,8 +1874,8 @@ export function extractGaps(o: {
         : o.diff.referenceFlat
           ? 'The reference looks like a loading screen: the kept frame is near-uniform (almost no detail), so the scores (and a replay that "matches" it) compare against that flat frame, not the site.'
           : o.passes > 1
-          ? 'The preview draws one program at a time; the site composes many passes (simulation, scene, post-processing) and its own meshes, which a single full-screen program cannot match.'
-          : 'Layout, meshes or images outside the shader are not rebuilt.',
+            ? 'The preview draws one program at a time; the site composes many passes (simulation, scene, post-processing) and its own meshes, which a single full-screen program cannot match.'
+            : 'Layout, meshes or images outside the shader are not rebuilt.',
       approximation:
         o.passes > 1
           ? { text: 'Run the passes in order with createPipeline(renderer) from pipeline.js and hook your scene into the scene passes.' }
