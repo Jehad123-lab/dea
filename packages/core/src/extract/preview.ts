@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import type { Browser, Page } from 'playwright';
 import { NAME_SHIM } from '../browser/init.ts';
-import { installObservers, LOADER_PROGRESS, LOADER_VISIBLE } from '../browser/open.ts';
+import { installObservers, LOADER_HIDE, LOADER_PROGRESS, LOADER_VISIBLE } from '../browser/open.ts';
 import { alignToReference, type PhaseInfo, phaseInfo } from '../browser/phase.ts';
 import { thumbOfImage } from '../browser/settle.ts';
 import { assertNotBotWall } from '../browser/wall.ts';
@@ -23,7 +23,7 @@ import { type ProbeData, probeInputs } from '../replay/inputs.ts';
 import { currentTimings, overBudget, timed } from '../timings.ts';
 import { type ShaderModule, threeRevision } from './generate.ts';
 import { runInteractionWithState, type StepState, setDragStep } from './interaction.ts';
-import { betterFrame, type FrameStats, frameChanged, frameStats, isFlat, keepWatching, THUMB_H, THUMB_W } from './refwait.ts';
+import { betterFrame, type FrameStats, frameChanged, frameStats, isFlat, keepWatching, QUICK_LOADER_CAP_MS, THUMB_H, THUMB_W } from './refwait.ts';
 import type { Params } from './research.ts';
 
 const MIME: Record<string, string> = {
@@ -901,7 +901,8 @@ export async function referenceShot(
     let lastScore = -1;
     // past the hard cap only a rising loader counter buys more time: an animated loader keeps changing the picture forever on a
     // slow CPU (lusion.co on a 2-vCPU box sat here for 13+ minutes); quick mode (1 frame) never goes past its hard cap
-    const longCap = frames < 2 ? hardCap : 420_000;
+    // Round 28: quick mode now also follows a rising counter, up to 3 minutes (only the counter buys this, not a changing picture)
+    const longCap = frames < 2 ? Math.max(hardCap, QUICK_LOADER_CAP_MS) : 420_000;
     // a flat best frame (igloo.inc's grey loader has no counter) buys a bounded extra wait while the picture still changes
     let lastStats: FrameStats | null = null;
     let changedAt = Date.now();
@@ -958,6 +959,27 @@ export async function referenceShot(
       }
     }
     currentTimings()?.record('watch for the reference frame', watchStart, (currentTimings()?.now() ?? 0) - watchStart);
+    // Round 28: the watch ended with the loader still up and no detailed frame: hide the loader's layers and look through them
+    // (jehaduddin.vercel.app's counter stalls at 64 on software WebGL while the site behind it is already laid out)
+    if (best.flat && (loader || best.loader)) {
+      const hidden = (await page.evaluate(LOADER_HIDE).catch(() => 0)) as number;
+      if (hidden > 0) {
+        await page.waitForTimeout(1500);
+        const buf = await page.screenshot({ type: 'png' }).catch(() => null);
+        if (buf) {
+          const png = `data:image/png;base64,${buf.toString('base64')}`;
+          const st = await thumbStats(page, png);
+          if (!isFlat(st)) {
+            currentTimings()?.note(
+              `the loader was still up after ${Math.round((Date.now() - t0) / 1000)} s: DEA hid ${hidden} loader layer(s) and took the reference through them`,
+            );
+            best = { png, score: st.sd, atMs: Date.now() - t0, loader: false, flat: false };
+            loader = false;
+            layout = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
+          } else currentTimings()?.note(`the loader was still up; hiding ${hidden} loader layer(s) showed a flat page too`);
+        }
+      }
+    }
     // every screenshot in the watch failed (or the watch never ran): one more try, so the reference is never an empty image
     // (Round 27: --no-replay wrote a 0-byte original.png and the diff died on "image did not load")
     if (!best.png) {

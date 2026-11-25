@@ -282,55 +282,67 @@ export async function quietOrDrawing(page: Page, maxMs: number): Promise<'idle' 
  * Let the page settle after the network went quiet: a page with no WebGL waits a short beat; a page with WebGL waits
  * until it has drawn a few animation frames (its first real frames), never longer than `maxMs`.
  */
-/** Is a loading screen covering the page? A visible progressbar or busy element, or a big element named like a loader. */
-export const LOADER_VISIBLE = `(() => {
-  const big = (el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05 && r.width * r.height > innerWidth * innerHeight * 0.4; };
-  for (const el of document.querySelectorAll('[role=progressbar],[aria-busy=true]')) { const cs = getComputedStyle(el); if (cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05 && el.getBoundingClientRect().width > 0) { const v = el.getAttribute('aria-valuenow'); if (v == null || +v < (+el.getAttribute('aria-valuemax') || 100)) return true; } }
-  for (const el of document.querySelectorAll('[class*=loader i],[id*=loader i],[class*=preload i],[id*=preload i],[class*=loading i]')) if (big(el)) return true;
-  // Round 27: a loader with no loader-like name (jehaduddin.vercel.app: a black screen with a big "63"): a visible element whose whole
-  // text is a 0-100 counter, inside a fixed or absolute layer that covers most of the viewport
-  for (const el of document.querySelectorAll('body *')) {
-    if (el.children.length > 2) continue;
-    const t = (el.textContent || '').trim();
-    if (!t || t.length > 5 || !/^\\d{1,3}\\s?%?$/.test(t) || +t.replace('%', '') > 100) continue;
-    const cs = getComputedStyle(el);
-    if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05 || el.getBoundingClientRect().width === 0) continue;
-    for (let a = el; a && a !== document.body; a = a.parentElement) {
-      const ps = getComputedStyle(a).position;
-      if ((ps === 'fixed' || ps === 'absolute') && big(a)) return true;
+/**
+ * Helpers shared by the loader checks (run in the page). Round 28: a bare-counter layer is any ancestor covering 40% of the
+ * viewport (fixed, absolute, or a plain 100vh block: jehaduddin.vercel.app's "28" in --no-replay was missed when it sat in
+ * normal flow), but never one that holds the site's main canvas or real text (lusion.co's first screen was a false positive).
+ */
+const LOADER_HELPERS = `
+  const area = innerWidth * innerHeight;
+  const shown = (el) => { const cs = getComputedStyle(el); return cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05 && el.getBoundingClientRect().width > 0; };
+  const bigCanvas = (a) => [...a.querySelectorAll('canvas')].some((c) => { const r = c.getBoundingClientRect(); return r.width * r.height > area * 0.4; });
+  const big = (el) => { const r = el.getBoundingClientRect(); return shown(el) && r.width * r.height > area * 0.4; };
+  const textLen = (el) => (el.textContent || '').replace(/\\s+/g, ' ').trim().length;
+  const counterOf = (el) => { if (el.children.length > 3) return null; const t = (el.textContent || '').replace(/\\s+/g, '').trim(); const m = t.length <= 5 ? /^(\\d{1,3})%?$/.exec(t) : null; return m && +m[1] <= 100 ? +m[1] : null; };
+  const counterLayer = (el) => {
+    for (let a = el; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+      const r = a.getBoundingClientRect();
+      if (r.width * r.height <= area * 0.4) continue;
+      if (textLen(a) > 60 || bigCanvas(a)) return null;
+      return a;
     }
-  }
-  return false;
+    return null;
+  };
+  const named = () => [...document.querySelectorAll('[class*=loader i],[id*=loader i],[class*=preload i],[id*=preload i],[class*=loading i]')].filter((el) => el !== document.body && el !== document.documentElement && big(el) && !bigCanvas(el) && textLen(el) <= 200);
+  const counters = () => { const out = []; for (const el of document.querySelectorAll('body *')) { const v = counterOf(el); if (v === null || !shown(el)) continue; const layer = counterLayer(el); if (layer) out.push({ el, v, layer }); } return out; };
+`;
+
+/** Is a loading screen covering the page? A visible progressbar or busy element, a big element named like a loader, or a bare
+ * 0-100 counter alone on a big layer (Round 27/28). A named or counter layer that holds the main canvas or real text is the page. */
+export const LOADER_VISIBLE = `(() => {${LOADER_HELPERS}
+  for (const el of document.querySelectorAll('[role=progressbar],[aria-busy=true]')) { if (shown(el)) { const v = el.getAttribute('aria-valuenow'); if (v == null || +v < (+el.getAttribute('aria-valuemax') || 100)) return true; } }
+  if (named().length) return true;
+  return counters().length > 0;
 })()`;
 
 /**
  * How far a loading screen says it is, 0 to 100, or null when it shows no number (runs in the page): an ARIA progress value, or the
- * largest "42%" / "042" counter shown inside an element named like a loader. Read twice, a rising number says the loader is working.
+ * largest "42%" / "042" counter shown inside an element named like a loader, or a bare counter on a big layer. Read twice, a
+ * rising number says the loader is working.
  */
-export const LOADER_PROGRESS = `(() => {
+export const LOADER_PROGRESS = `(() => {${LOADER_HELPERS}
   let best = null;
   const take = (v) => { if (Number.isFinite(v) && v >= 0 && v <= 100 && (best === null || v > best)) best = v; };
   for (const el of document.querySelectorAll('[role=progressbar]')) { const v = el.getAttribute('aria-valuenow'); if (v != null) take(+v / ((+el.getAttribute('aria-valuemax') || 100) / 100)); }
   for (const el of document.querySelectorAll('[class*=loader i],[id*=loader i],[class*=preload i],[id*=preload i],[class*=loading i],[class*=progress i],[class*=counter i],[class*=percent i]')) {
-    const cs = getComputedStyle(el); if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) continue;
+    if (!shown(el)) continue;
     const t = (el.textContent || '').trim(); if (t.length > 12) continue;
     const m = /^(\\d{1,3})\\s?%?$/.exec(t); if (m) take(+m[1]);
   }
-  // a bare counter on a full-screen layer (see LOADER_VISIBLE), when no named loader gave a number
-  if (best === null)
-    for (const el of document.querySelectorAll('body *')) {
-      if (el.children.length > 2) continue;
-      const t = (el.textContent || '').trim();
-      const m = t.length <= 5 ? /^(\\d{1,3})\\s?%?$/.exec(t) : null;
-      if (!m) continue;
-      const cs = getComputedStyle(el);
-      if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) continue;
-      for (let a = el; a && a !== document.body; a = a.parentElement) {
-        const ps = getComputedStyle(a).position; const r = a.getBoundingClientRect();
-        if ((ps === 'fixed' || ps === 'absolute') && r.width * r.height > innerWidth * innerHeight * 0.4) { take(+m[1]); break; }
-      }
-    }
+  if (best === null) for (const c of counters()) take(c.v);
   return best;
+})()`;
+
+/**
+ * Round 28: hide the layers a stalled loader sits on (runs in the page) and return how many were hidden. jehaduddin.vercel.app's
+ * counter crawls 63 -> 64 and stalls on software WebGL while the page behind it is already laid out, so a reference taken
+ * through the loader shows the site instead of a black screen. The page is told nothing; only the cover is hidden.
+ */
+export const LOADER_HIDE = `(() => {${LOADER_HELPERS}
+  const layers = new Set([...named(), ...counters().map((c) => c.layer)]);
+  for (const el of document.querySelectorAll('[role=progressbar],[aria-busy=true]')) { let a = el; while (a.parentElement && a.parentElement !== document.body && !big(a)) a = a.parentElement; if (big(a) && !bigCanvas(a) && textLen(a) <= 200) layers.add(a); }
+  for (const el of layers) { el.style.setProperty('visibility', 'hidden', 'important'); el.style.setProperty('opacity', '0', 'important'); el.style.setProperty('pointer-events', 'none', 'important'); el.setAttribute('data-dea-hidden-loader', ''); }
+  return layers.size;
 })()`;
 
 /**

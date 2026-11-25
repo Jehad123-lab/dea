@@ -11,6 +11,12 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 28: a loader still covering the page when the reference watch ends is hidden (`LOADER_HIDE`: its layers get
+  visibility hidden) and the reference is taken through it when that shows a detailed page. The timings log says so.
+  jehaduddin.vercel.app's counter crawls 63 -> 64 and stalls on software WebGL while the site behind it is already laid out.
+- Round 28: extract.md warns about a loader or near-uniform reference whatever the score (`--no-replay` on
+  jehaduddin.vercel.app scored 95% against its "28" preloader and said nothing, because the warning only came with a low score).
+
 - Round 27: the loader check (`LOADER_VISIBLE`, `LOADER_PROGRESS`) also sees a loader with no loader-like class or role:
   an element whose whole text is a 0-100 counter inside a fixed or absolute layer covering most of the viewport
   (jehaduddin.vercel.app's black "63" screen, which made the watch stop and became the reference).
@@ -41,6 +47,12 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
   `too few triangles left after clustering`), listed in rebuild.md as "boxes, by reason".
 
 ### Changed
+
+- Round 28: quick mode follows a rising loader counter up to 180 s (`QUICK_LOADER_CAP_MS`; it used to stop at its 2.5x hard
+  cap), and a counter is stuck after 60 s without going up (`PCT_STALL_MS`, was 45 s). Only the counter buys this time.
+- Round 28: loader checks share one set of page helpers. A bare 0-100 counter (digits may be split into up to 3 spans) counts on
+  any layer covering 40% of the viewport, positioned or not, but a layer (or a loader-named element) that holds the main canvas or
+  more than a little text is the page, not a loader (lusion.co's real first screen was reported as a loader).
 
 - Round 27: when the screenshot taken after recording is flat but the watch had kept a detailed frame, the watched frame is
   the reference. If every watch screenshot failed, one more is taken, so `preview/original.png` is never empty (`--no-replay`

@@ -27,6 +27,11 @@ export const FLAT_EXTRA_FULL_MS = 60_000;
 /** a flat picture that has not changed for this long, with no loader on screen, is not going anywhere. Round 26: 10 s gave up
  * on jehaduddin.vercel.app, whose black loader holds its counter at 63 for longer than that on a fresh capture */
 export const FLAT_STILL_MS = 20_000;
+/** Round 28: in quick mode a loader whose own counter keeps rising may hold the watch up to this long (jehaduddin.vercel.app's
+ * counter crawls 63 -> 64 on software WebGL; the owner reached the real site only with --reference-ms 180000) */
+export const QUICK_LOADER_CAP_MS = 180_000;
+/** a loader counter that has not gone up for this long is stuck */
+export const PCT_STALL_MS = 60_000;
 
 /** Stats of a luminance thumbnail (row-major, `w`×`h`, values 0..255). */
 export function frameStats(lum: ArrayLike<number>, w = THUMB_W, h = THUMB_H): FrameStats {
@@ -88,7 +93,7 @@ export interface WatchState {
 /** keep watching for a better reference frame? */
 export function keepWatching(s: WatchState): boolean {
   if (s.elapsed < s.ms) return true;
-  if (s.loader && (s.elapsed < s.hardCap || (s.pctAge < 45_000 && s.elapsed < s.longCap))) return true;
+  if (s.loader && (s.elapsed < s.hardCap || (s.pctAge < PCT_STALL_MS && s.elapsed < s.longCap))) return true;
   // a flat best frame (a loader without a counter, a canvas not drawn yet) buys a bounded extra wait while frames still change
   const extra = s.quick ? FLAT_EXTRA_QUICK_MS : FLAT_EXTRA_FULL_MS;
   // a visible loader is still working even when its picture holds still (a stuck counter), so only stillness without one stops

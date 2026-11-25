@@ -2080,6 +2080,12 @@ function renderExtractMd(o: {
       L.push(
         `- ≈ Kept a technique stand-in: \`standins/particles.js\`, a particle cloud written by DEA (not the site's code) where the site runs its GPGPU particle simulation (spread ${o.diff.standin.spread}, offset ${o.diff.standin.x}, ${o.diff.standin.y}, colour ${o.diff.standin.color}). Replace it with a real simulation: see "Techniques behind it".`,
       );
+    // Round 28: said whatever the score (a high score against a loader is the misleading case: --no-replay on
+    // jehaduddin.vercel.app scored 95% against its "28" preloader and extract.md said nothing)
+    if (o.diff.referenceLoader || o.diff.referenceFlat)
+      L.push(
+        `- ⚠ The reference${o.diff.referenceAtMs != null ? ` (taken at ${Math.round(o.diff.referenceAtMs / 1000)} s)` : ''} ${o.diff.referenceLoader ? 'still shows a loading screen' : 'is near-uniform (likely a loading screen)'}: every score here is against that frame, not the site. Try \`--reference-ms 180000\` or \`--reference hero.png\`.`,
+      );
     if (o.diff.error) L.push(`- The preview reported an error: ${o.diff.error}`);
     if (o.diff.research?.rounds.length) {
       L.push('', '### Research rounds', '');
