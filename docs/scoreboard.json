@@ -5,17 +5,18 @@
     {
       "name": "lusion.co",
       "url": "https://lusion.co",
-      "why": "award-winning WebGL studio site. Owner's PC after PR #18 (--own-assets --quick): page 82.9%, rebuild canvas 53.6%, replay 99.0% canvas / 99.8% page, rebuild vs replay 54.5%; all 50 large meshes are coarse stand-ins (0 boxes) yet the canvas did not move, so the gap is the images: every texture was a grey checker. Round 26 keeps each image's tones as an 8x8 colour grid. Floors, not goals",
+      "why": "award-winning WebGL studio site. Owner's PC after PR #19 (fresh capture, --own-assets --quick): page 97.6%, rebuild canvas 89.6% (from 53.6%), replay 99.1% canvas / 99.7% page, rebuild vs replay 90.4%; 50 coarse stand-ins, 0 boxes; images as 8x8 colour grids",
       "targets": {
-        "page": 0.8,
-        "canvas": 0.5,
-        "rebuildCanvas": 0.5
+        "page": 0.95,
+        "canvas": 0.88,
+        "rebuildPage": 0.95,
+        "rebuildCanvas": 0.88
       }
     },
     {
       "name": "jehaduddin.vercel.app",
       "url": "https://jehaduddin.vercel.app",
-      "why": "Jehad's portfolio (loading screen over a full-screen WebGL layer). Round 25 numbers from the owner's PC (--own-assets --quick): kept (rebuild) page 84.8%, canvas 86.3%; replay canvas 94.7%, page 85.1%; rebuild vs replay 90.6%. Scored against the canvas copied at the recorded frame because the loader's overlay covers it",
+      "why": "Jehad's portfolio (loading screen over a full-screen WebGL layer). Round 25 numbers from the owner's PC (--own-assets --quick): kept (rebuild) page 84.8%, canvas 86.3%; replay canvas 94.7%, page 85.1%; rebuild vs replay 90.6%. Scored against the canvas copied at the recorded frame because the loader's overlay covers it. After PR #19 a fresh capture still kept the black '63' loader as the reference (the loader had no loader-like name, so the watch did not see it); Round 27 detects a bare counter on a full-screen layer",
       "targets": {
         "page": 0.84,
         "canvas": 0.85,
@@ -41,9 +42,10 @@
     {
       "name": "igloo.inc",
       "url": "https://www.igloo.inc",
-      "why": "heavy WebGL with scroll. Round 26 numbers from the owner's PC (PR #18, fresh capture, --own-assets --quick): the reference is now igloo's real wireframe intro (frame at 95.9 s, not flat), so the Round 25 grey-loader numbers are void. Replay 100% canvas / 100% page; rebuild canvas 50.6%, rebuild page 36.8%, rebuild vs replay 50.6% with 79 coarse stand-ins and 0 boxes (the stand-ins then had zero barycentrics, so the wireframe shader drew nothing; Round 26 averages every vertex attribute into the stand-in). Floors until the next PC run",
+      "why": "heavy WebGL with scroll. Owner's PC after PR #19 (fresh capture, --own-assets --quick): real reference (wireframe mug and constellation), replay 100% / 100%; rebuild canvas 62.4%, page 71.1%, 62.4% against the replay with 79 coarse stand-ins. Remaining gap was a global colour shift (mauve background, pink rim): Round 27 keeps lookup tables (LUTs, ramps, tiny data textures) as recorded. Floors until the next PC run",
       "targets": {
-        "rebuildCanvas": 0.5
+        "rebuildCanvas": 0.6,
+        "rebuildPage": 0.7
       }
     },
     {

@@ -958,6 +958,14 @@ export async function referenceShot(
       }
     }
     currentTimings()?.record('watch for the reference frame', watchStart, (currentTimings()?.now() ?? 0) - watchStart);
+    // every screenshot in the watch failed (or the watch never ran): one more try, so the reference is never an empty image
+    // (Round 27: --no-replay wrote a 0-byte original.png and the diff died on "image did not load")
+    if (!best.png) {
+      const buf = await page.screenshot({ type: 'png' }).catch(() => null);
+      if (!buf) throw new Error('could not take a screenshot of the page for the reference');
+      best = { png: `data:image/png;base64,${buf.toString('base64')}`, score: 0, atMs: Date.now() - t0, loader, flat: true };
+      layout = await page.evaluate(LAYOUT_READ(section)).catch(() => layout);
+    }
     if (record) {
       // record two frames, hold the page on the last one, and use that moment as the reference: the replay then has the
       // exact frame to match
@@ -1051,11 +1059,16 @@ export async function referenceShot(
             probe = await timed('input probe (pointer, scroll, resize)', () => probeInputs(ipage).catch(() => null));
             layoutScroll = await timed('first-screen boxes at a few scroll positions', () => readScrollLayouts(ipage, section).catch(() => null));
           }
+          // the screenshot at the recorded moment is the reference (the replay has that exact frame to match), unless it is a
+          // flat loader while the watch had kept a detailed frame (Round 27): then the watched frame is the better reference
+          const nowFlat = await thumbStats(page, `data:image/png;base64,${buf.toString('base64')}`).then(isFlat, () => best.flat);
+          const useBest = nowFlat && !best.flat && Boolean(best.png);
+          if (useBest) currentTimings()?.note('the screenshot after recording is flat (a loader came back?): the watched frame is the reference');
           return {
-            png: `data:image/png;base64,${buf.toString('base64')}`,
-            atMs,
-            loader: nowLoader,
-            flat: await thumbStats(page, `data:image/png;base64,${buf.toString('base64')}`).then(isFlat, () => best.flat),
+            png: useBest ? best.png : `data:image/png;base64,${buf.toString('base64')}`,
+            atMs: useBest ? best.atMs : atMs,
+            loader: useBest ? best.loader : nowLoader,
+            flat: useBest ? false : nowFlat,
             layout: (l ?? layout) as never,
             recording: canvasPng ? { ...recording, canvasPng } : recording,
             interaction,
