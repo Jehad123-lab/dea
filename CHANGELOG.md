@@ -11,6 +11,10 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 41: --own-assets stand-ins of batched meshes (many objects in one vertex buffer, multi-draw: igloo.inc's material 1,
+  70 stand-ins) take their cell grid from the vertices the draw uses, not the whole buffer, so a small piece keeps its own
+  16 cells per side. Id inputs (batchId, objectId, ...) keep one vertex's id per cell instead of an average (an average of two
+  ids is a third object's). The rebuild.md stand-in table shows how many other draws share each buffer.
 - Round 40: --own-assets stand-ins carry every float view of a vertex input (half floats and normalized or plain integers:
   the quantized normals and UVs of compressed meshes were dropped and read as 0); integer inputs are listed as lost.
   rebuild.md has a stand-in table (material, program, draw, instances, vertices site -> stand-in, inputs kept and lost) and

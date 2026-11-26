@@ -378,7 +378,8 @@ describe('replay: editable rebuild', () => {
     (big.snap.vaos[1].attrs[0] as { buf: number }).buf = 22;
     const r = rebuildPipeline(big, b, { data: 'data.bin', ownAssets: true });
     const mesh = r.pipeline.frames[0].steps.find((s) => s.op === 'draw' && s.target === 0) as { placeholder?: { min: number[]; max: number[] } };
-    expect(mesh.placeholder).toEqual({ min: [0, 2, 0], max: [6, 2, 6] });
+    // Round 41: the bounds of the vertices the draw uses (the buffer as a whole reaches z 0..6)
+    expect(mesh.placeholder).toEqual({ min: [0, 2, 1], max: [6, 2, 5] });
     expect(r.stats.placeholders).toBe(2);
     // every stand-in is a coarse shape or a box with a recorded reason
     const boxes = Object.values(r.stats.boxReasons).reduce((a, x) => a + x, 0);
