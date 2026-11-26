@@ -11,6 +11,10 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 42: --own-assets stand-in triangles keep the site's facing: a triangle that turned over when its corners moved to
+  their cell's average is turned back (with back-face culling it disappeared), and a thin shell whose front and back
+  collapse onto the same corners keeps both sides (the same corners in the other winding are no longer dropped as a
+  duplicate). Aimed at igloo.inc's dome panels (material 1), which drew dark and hollow.
 - Round 41: --own-assets stand-ins of batched meshes (many objects in one vertex buffer, multi-draw: igloo.inc's material 1,
   70 stand-ins) take their cell grid from the vertices the draw uses, not the whole buffer, so a small piece keeps its own
   16 cells per side. Id inputs (batchId, objectId, ...) keep one vertex's id per cell instead of an average (an average of two

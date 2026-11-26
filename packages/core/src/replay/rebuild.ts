@@ -541,6 +541,13 @@ export function standInTable(list: StandInInfo[], max = 40): string[] {
   return L;
 }
 
+/** a triangle's (unnormalized) face normal, by its winding */
+export function triNormal(p: number[], q: number[], r: number[]): number[] {
+  const u = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+  const v = [r[0] - p[0], r[1] - p[1], r[2] - p[2]];
+  return [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+}
+
 /** a normal's main direction: 1..6 for ±x, ±y, ±z (0 when unreadable) */
 export function normalBucket(n: number[]): number {
   let k = 0;
@@ -611,22 +618,42 @@ export function proxyMesh(
     vertCell.set(v, id);
     return id;
   };
-  const idx: number[] = [];
-  const seen = new Set<string>();
+  // each surviving triangle with the facing of the site's triangle it came from
+  const tri: number[] = [];
+  const facing: number[][] = [];
   for (let i = 0; i + 2 < tris.length; i += 3) {
     const a = cluster(tris[i]);
     const b = cluster(tris[i + 1]);
     const c = cluster(tris[i + 2]);
     if (a === b || b === c || a === c) continue;
-    // the same triangle twice (either winding) only once
-    const key = [a, b, c].sort((x, y) => x - y).join(',');
+    tri.push(a, b, c);
+    facing.push(triNormal(posOf(tris[i]), posOf(tris[i + 1]), posOf(tris[i + 2])));
+  }
+  const pos: number[] = [];
+  for (const s of sums) for (let k = 0; k < 3; k++) pos.push(Math.round((s[k] / s[3]) * 1e4) / 1e4);
+  const P = (v: number) => [pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]];
+  // Round 42: moving corners to their cell's average can turn a small triangle over; with back-face culling it then
+  // disappears (igloo.inc's dome panels drew dark and hollow). A triangle that faces away from the site's is turned back.
+  // And a thin shell (a panel one cell thick) has its front and back collapse onto the same corners: they used to count as
+  // one triangle (either winding), so one side of the panel was gone. The same corners in the other winding are now a
+  // different triangle: both sides stay.
+  const idx: number[] = [];
+  const seen = new Set<string>();
+  for (let t = 0; t < facing.length; t++) {
+    let a = tri[t * 3];
+    let b = tri[t * 3 + 1];
+    let c = tri[t * 3 + 2];
+    const n = triNormal(P(a), P(b), P(c));
+    const f = facing[t];
+    if (n[0] * f[0] + n[1] * f[1] + n[2] * f[2] < 0) [b, c] = [c, b];
+    // one key per winding: rotate so the smallest corner leads (a b c, b c a, c a b are the same triangle)
+    while (a > b || a > c) [a, b, c] = [b, c, a];
+    const key = `${a},${b},${c}`;
     if (seen.has(key)) continue;
     seen.add(key);
     idx.push(a, b, c);
   }
   if (idx.length < 12) return null;
-  const pos: number[] = [];
-  for (const s of sums) for (let k = 0; k < 3; k++) pos.push(Math.round((s[k] / s[3]) * 1e4) / 1e4);
   if (!extra.length) return { pos, idx };
   const attrs: Record<string, { size: number; data: number[] }> = {};
   extra.forEach((e, j) => {
