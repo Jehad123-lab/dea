@@ -195,6 +195,12 @@ export interface ExtractOptions extends InspectOptions {
    * out are listed as not scored, so the line still says what was measured.
    */
   ownAssetsCostBudget?: number;
+  /**
+   * Round 52: score only the --own-assets-cost variants, from the recording an earlier run with the same flags left in the
+   * cache: no new watch of the site, no text-layout judging, whole-page read, sweep, research, interaction or build check.
+   * lusion.co's base extract plus one variant ran past 300 s on a software GPU. Fails at once when nothing is cached.
+   */
+  ownAssetsCostOnly?: boolean;
   /** reuse earlier runs instead of opening the site again */
   from?: { design?: string; motion?: string; assets?: string; trace?: string };
   /** skip the live WebGL trace (uniform values and drivers) */
@@ -430,6 +436,10 @@ async function referenceFor(
       /* a damaged entry: take it again */
     }
   }
+  if (opts.ownAssetsCostOnly)
+    throw new Error(
+      `--own-assets-cost-only needs the recording of an earlier run with the same flags (--quick, --frames, --section, --browser) in the cache: run "dea extract ${url} --own-assets" with those flags first${cache ? '' : ' (the cache is off: drop --no-cache)'}`,
+    );
   say(
     smart
       ? `taking the reference screenshot: watching until the page settles (up to ${Math.round(ms / 1000)} s), the frame with the most detail`
@@ -642,6 +652,10 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   const texGrid = opts.ownAssetsGrid != null && Number.isFinite(opts.ownAssetsGrid) ? Math.max(2, Math.min(64, Math.round(opts.ownAssetsGrid))) : TEX_GRID;
   if (opts.ownAssetsGrid != null && !opts.ownAssets) say('--own-assets-grid does nothing without --own-assets: ignored');
   else if (opts.ownAssetsGrid != null && texGrid !== opts.ownAssetsGrid) say(`--own-assets-grid ${opts.ownAssetsGrid}: using ${texGrid} (2-64)`);
+  // Round 52: --own-assets-cost-only scores the cost variants alone (and implies --own-assets-cost)
+  const costOnly = Boolean(opts.ownAssetsCostOnly && opts.ownAssets);
+  if (opts.ownAssetsCostOnly && !opts.ownAssets) say('--own-assets-cost-only does nothing without --own-assets: ignored');
+  if (costOnly) say('--own-assets-cost-only: scoring the cost variants from the cached recording; the other stages are skipped');
   if (opts.ownAssetsCost && !opts.ownAssets)
     say('--own-assets-cost does nothing without --own-assets (it scores what the --own-assets placeholders cost): ignored');
   setDragStep(false);
@@ -1119,7 +1133,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           if (opts.ownAssets) await put('public/rebuild/data.bin', Buffer.from(rbBin.buffer, rbBin.byteOffset, rbBin.byteLength));
           await put('rebuild/rebuild.js', REBUILD_RUNNER);
           rebuildDoc = { pipeline: rb.pipeline, stats: rb.stats };
-          if (opts.ownAssets && opts.ownAssetsCost) {
+          if (opts.ownAssets && (opts.ownAssetsCost || costOnly)) {
             // built one at a time when scored (Round 40: up to 8 variants, each a full copy of the recording)
             const variant =
               (images: boolean, meshes: boolean, realMaterials?: number[], grid = texGrid) =>
@@ -1265,7 +1279,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
         };
         // rebuild the site's text in the project and the preview with the reading that matches the original best,
         // and only when it beats the plain heading
-        if (layoutCandidates.length) {
+        if (layoutCandidates.length && !costOnly) {
           // the text is judged over the site's own picture when DEA recorded it (the capture replay), so a stand-in
           // canvas does not decide which text layout reads closest
           const judge: Params = recDoc && replay ? { program: '__replay' } : {};
@@ -1290,11 +1304,11 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           // the whole page, not only the first screen: every element read at a series of scroll stops (fresh load, settled).
           // When no first-screen reading beat the plain heading, the page read can still stand on its own: it starts from no
           // first-screen items and the page supplies all of them, kept only when the first screen is not worse than the heading
-          if (!quick && !opts.noPage && !opts.reference && !opts.section && ref.loader) {
+          if (!quick && !costOnly && !opts.noPage && !opts.reference && !opts.section && ref.loader) {
             // a page read behind a loading screen copies the loading screen at every stop: better no page layer than a wrong one
             say('the original is still behind its loading screen: not reading the page below it (the read would copy the loader at every stop)');
           }
-          if (!quick && !opts.noPage && !opts.reference && !opts.section && !ref.loader && !budgetSkip('whole-page read')) {
+          if (!quick && !costOnly && !opts.noPage && !opts.reference && !opts.section && !ref.loader && !budgetSkip('whole-page read')) {
             fullPage = await timed('read the whole page (scroll stops)', () =>
               readFullPage(browser as Browser, url, vp, { shots: true, onProgress: say, reference: ref.loader ? null : ref.png }).catch((e) => {
                 say(`whole-page read failed: ${(e as Error).message.split('\n')[0]}`);
@@ -1469,7 +1483,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           ['text', palette],
         ];
         let skipped = 0;
-        for (const [k, vals] of quick ? [] : candidates.filter(([k]) => !replayKept || (k !== 'program' && k !== 'opacity'))) {
+        for (const [k, vals] of quick || costOnly ? [] : candidates.filter(([k]) => !replayKept || (k !== 'program' && k !== 'opacity'))) {
           // a knob whose first two values change nothing on screen (the background under an opaque full-screen canvas)
           // is not swept further
           let unseen = 0;
@@ -1490,7 +1504,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
         if (skipped) currentTimings()?.note(`sweep: ${skipped} renders skipped (knobs that changed nothing on screen)`);
         // a technique stand-in where the site runs a system DEA does not rebuild (a GPGPU particle simulation): try it,
         // keep it only when the diff improves
-        if (!quick && !replayKept && techniques.some((t) => t.id === 'gpgpu' || t.id === 'points')) {
+        if (!quick && !costOnly && !replayKept && techniques.some((t) => t.id === 'gpgpu' || t.id === 'points')) {
           await put('standins/particles.js', particlesStandin());
           const light = [...palette].sort((a, b) => lum(b) - lum(a))[0] ?? '#ffffff';
           let tp: Params = { ...params, standin: 'particles', spread: 0.8, standinX: 0, standinY: 0, standinColor: light };
@@ -1531,7 +1545,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           render,
           knobs,
           providers,
-          rounds: quick ? 0 : (opts.rounds ?? 3),
+          rounds: quick || costOnly ? 0 : (opts.rounds ?? 3),
           target: 0.92,
           onStep: say,
           relevant: (f) => {
@@ -1652,7 +1666,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           }
         }
         // live interaction: the same scripted pointer and scroll on the kit (replay and rebuild, running live) as on the site
-        if (!quick && replay && 'interaction' in ref && ref.interaction?.length && !budgetSkip('interaction check')) {
+        if (!quick && !costOnly && replay && 'interaction' in ref && ref.interaction?.length && !budgetSkip('interaction check')) {
           const doneI = mark('interaction check (scripted pointer + scroll, site vs kit)', doneScore);
           try {
             say('interaction check: the same pointer and scroll script on the kit, running live');
@@ -1738,14 +1752,14 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
 
   // 5. techniques behind it, researched in free sources (cited; values and pointers only, no code copied)
   const providersT = opts.providers ?? providersFromEnv();
-  if (techniques.length && providersT.length && !opts.noResearch && !quick && !budgetSkip('technique research')) {
+  if (techniques.length && providersT.length && !opts.noResearch && !quick && !costOnly && !budgetSkip('technique research')) {
     say(`researching ${techniques.length} technique(s) seen in the pipeline`);
     techniques = await timed('technique research', () => researchTechniques(techniques, providersT, { onStep: say }));
   }
 
   // 6. does the project build?
   let build: BuildCheck | null = null;
-  if (opts.verifyBuild && !quick && !budgetSkip('build check')) {
+  if (opts.verifyBuild && !quick && !costOnly && !budgetSkip('build check')) {
     if (target === 'framer') build = { ok: true, skipped: 'Framer components build inside Framer', ms: 0, log: '' };
     else {
       say('checking the project builds (npm install, npm run build)');

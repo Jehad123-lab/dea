@@ -305,6 +305,10 @@ common(
       'with --own-assets: also score real images + stand-in meshes and image grids + real meshes (never shipped), to show what each placeholder costs',
     )
     .option(
+      '--own-assets-cost-only',
+      'with --own-assets: score only the cost variants, from the recording an earlier run with the same flags cached (skips the other stages)',
+    )
+    .option(
       '--own-assets-cost-budget <s>',
       'with --own-assets-cost: seconds to spend scoring the variants (default 240, 30-3600); the rest are listed as not scored',
     )
@@ -349,6 +353,7 @@ common(
       ownAssetsCost?: boolean;
       ownAssetsGrid?: string;
       ownAssetsCostBudget?: string;
+      ownAssetsCostOnly?: boolean;
       frames?: string;
       from?: string;
       diff: boolean;
@@ -426,6 +431,7 @@ common(
                 ownAssetsCost: flags.ownAssetsCost,
                 ownAssetsGrid: flags.ownAssetsGrid != null ? Number(flags.ownAssetsGrid) : undefined,
                 ownAssetsCostBudget: flags.ownAssetsCostBudget != null ? Number(flags.ownAssetsCostBudget) : undefined,
+                ownAssetsCostOnly: flags.ownAssetsCostOnly,
                 frames: flags.frames != null ? Number(flags.frames) : undefined,
                 from: urls.length === 1 ? from : undefined,
                 noDiff: !flags.diff,
