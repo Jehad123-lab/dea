@@ -208,6 +208,19 @@ export interface StandInInfo {
   flipped?: number;
   /** Round 43: stand-in triangles kept in both windings (the two sides of a thin shell, Round 42) */
   bothSides?: number;
+  /** Round 45: an outline shell (culled, its visible faces point inward): stand-in corners pushed out to the outer edge of their cells */
+  shellPushed?: number;
+}
+
+/**
+ * Round 45: which way a culled material's visible faces are wound: 'ccw' when the faces wound counter-clockwise on screen
+ * show (back faces culled, the default), 'cw' for three.js BackSide (the clockwise ones show); null when nothing is culled
+ * (double-sided) or everything is.
+ */
+export function visibleWinding(cull: { face: number; front: number } | null | undefined): 'ccw' | 'cw' | null {
+  if (!cull || (cull.face !== 0x0405 && cull.face !== 0x0404)) return null;
+  const ccwFront = cull.front !== 0x0900;
+  return (cull.face === 0x0405) === ccwFront ? 'ccw' : 'cw';
 }
 
 /**
@@ -538,6 +551,12 @@ export function standInTable(list: StandInInfo[], max = 40): string[] {
     "- triangles turned back: stand-in triangles that turned over when their corners moved to the cell average and were turned back to face the way the site's did; kept both sides: triangles kept in both windings, the two sides of a thin shell",
     ...(rows.length > max ? [`- all ${list.length} stand-ins: extract.json, replay.rebuild.stats.standIns`] : []),
   );
+  const shells = list.filter((r) => r.shellPushed != null);
+  if (shells.length)
+    L.push(
+      '',
+      `- outline shells (culled, visible faces point inward): ${shells.length} stand-in(s), ${shells.reduce((a, r) => a + (r.shellPushed ?? 0), 0)} corner(s) pushed out to the outer edge of their cells so the shell stays outside the model, as on the site`,
+    );
   const lost = new Map<string, number>();
   for (const r of list) for (const d of r.dropped) lost.set(d, (lost.get(d) ?? 0) + 1);
   if (lost.size)
@@ -588,11 +607,19 @@ export function proxyMesh(
   max: number[],
   grid = PROXY_GRID,
   extra: Array<{ name: string; size: number; read: (v: number) => number[]; pick?: boolean }> = [],
-): { pos: number[]; idx: number[]; attrs?: Record<string, { size: number; data: number[] }>; flipped?: number; bothSides?: number } | null {
+  opts: { visible?: 'ccw' | 'cw' | null } = {},
+): {
+  pos: number[];
+  idx: number[];
+  attrs?: Record<string, { size: number; data: number[] }>;
+  flipped?: number;
+  bothSides?: number;
+  pushedOut?: number;
+} | null {
   const ext = [0, 1, 2].map((k) => Math.max(max[k] - min[k], 1e-9));
   const big = Math.max(...ext);
   const cells = ext.map((e) => Math.max(1, Math.round((grid * e) / big)));
-  const cellOf = new Map<number, number>();
+  const cellOf = new Map<number | string, number>();
   const sums: number[][] = [];
   const vertCell = new Map<number, number>();
   const xsums: Array<number[] & { size: number }> = extra.map((e) => Object.assign([] as number[], { size: e.size }));
@@ -605,7 +632,10 @@ export function proxyMesh(
   // shows depends only on which grid cell its UV falls in. Averaging the UVs of a cell that spans several islands of a texture
   // atlas (three.js keyframes' Littlest Tokyo: one baked atlas for the whole model) landed in a cell of some other part of the
   // model. The cell key now also carries the UV's grid cell: same position grid, so no more of the site's shape is shipped.
-  const uvi = extra.findIndex((e) => e.size === 2 && !e.pick && /uv|texcoord/i.test(e.name));
+  // Round 45: every UV set, not only the first. Littlest Tokyo's main material (normal #397) reads its baked colours through
+  // uv and its ambient-occlusion map through uv1, a different layout: a cell kept apart by uv still averaged uv1 across AO
+  // islands, so whole stand-in faces took the occlusion of some other part of the model.
+  const uvs = extra.flatMap((e, j) => (e.size === 2 && !e.pick && /uv|texcoord/i.test(e.name) ? [j] : []));
   const cluster = (v: number): number => {
     const known = vertCell.get(v);
     if (known != null) return known;
@@ -616,11 +646,13 @@ export function proxyMesh(
       key = key * (grid + 1) + c;
     }
     if (splitByNormal) key = key * 7 + normalBucket(extra[nrm].read(v));
-    if (uvi >= 0) key = key * (TEX_GRID * TEX_GRID + 1) + uvBucket(extra[uvi].read(v));
-    let id = cellOf.get(key);
+    let sub = '';
+    for (const j of uvs) sub += `,${uvBucket(extra[j].read(v))}`;
+    const ck = sub ? `${key}${sub}` : key;
+    let id = cellOf.get(ck);
     if (id == null) {
       id = sums.length;
-      cellOf.set(key, id);
+      cellOf.set(ck, id);
       sums.push([0, 0, 0, 0]);
       for (const x of xsums) x.push(...new Array(x.size).fill(0));
     }
@@ -655,6 +687,54 @@ export function proxyMesh(
   }
   const pos: number[] = [];
   for (const s of sums) for (let k = 0; k < 3; k++) pos.push(Math.round((s[k] / s[3]) * 1e4) / 1e4);
+  // Round 45: an outline shell. Littlest Tokyo draws its black outlines as copies of the model pushed out a little and wound
+  // inside out (the outline_0 meshes: their triangles face inward and back faces are culled, so only the far inside of the
+  // shell shows, as a rim around each part). Its stand-in covers the whole scene, so its cells are much larger than those of
+  // the parts it wraps, and a cell's average sits inside the curved surface it came from: the shell sank into the parts'
+  // finer stand-ins and the outlines were gone. A culled mesh whose visible faces point inward (its signed volume, from the
+  // site's triangles) is a shell: each corner goes out to the farthest of the site's vertices it stands for, along the cell's
+  // outward direction. A bigger shell can only show more rim, never cover the model (its outside faces are culled). Same
+  // corners and triangles: no more of the site's shape is shipped.
+  let pushedOut = 0;
+  if (opts.visible) {
+    let vol = 0;
+    for (let i = 0; i + 2 < tris.length; i += 3) {
+      const p = posOf(tris[i]);
+      const q = posOf(tris[i + 1]);
+      const r = posOf(tris[i + 2]);
+      vol += p[0] * (q[1] * r[2] - q[2] * r[1]) - p[1] * (q[0] * r[2] - q[2] * r[0]) + p[2] * (q[0] * r[1] - q[1] * r[0]);
+    }
+    // faces wound counter-clockwise point outward when the volume is positive; the visible faces point inward when the
+    // visible winding and the volume disagree
+    const inward = opts.visible === 'ccw' ? vol < 0 : vol > 0;
+    if (inward) {
+      const sign = vol < 0 ? -1 : 1;
+      const dirSum = sums.map(() => [0, 0, 0]);
+      for (let t = 0; t < facing.length; t++) {
+        const f = facing[t];
+        const l = Math.hypot(f[0], f[1], f[2]) || 1;
+        for (let c = 0; c < 3; c++) for (let k = 0; k < 3; k++) dirSum[tri[t * 3 + c]][k] += (sign * f[k]) / l;
+      }
+      const dir = dirSum.map((d) => {
+        const l = Math.hypot(d[0], d[1], d[2]);
+        return l > 1e-9 ? d.map((x) => x / l) : null;
+      });
+      const out = new Float64Array(sums.length);
+      for (const [v, id] of vertCell) {
+        const d = dir[id];
+        if (!d) continue;
+        const p = posOf(v);
+        const t = (p[0] - pos[id * 3]) * d[0] + (p[1] - pos[id * 3 + 1]) * d[1] + (p[2] - pos[id * 3 + 2]) * d[2];
+        if (t > out[id]) out[id] = t;
+      }
+      out.forEach((t, id) => {
+        const d = dir[id];
+        if (!d || !(t > 0)) return;
+        pushedOut++;
+        for (let k = 0; k < 3; k++) pos[id * 3 + k] = Math.round((pos[id * 3 + k] + d[k] * t) * 1e4) / 1e4;
+      });
+    }
+  }
   const P = (v: number) => [pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]];
   // Round 42: moving corners to their cell's average can turn a small triangle over; with back-face culling it then
   // disappears (igloo.inc's dome panels drew dark and hollow). A triangle that faces away from the site's is turned back.
@@ -688,7 +768,7 @@ export function proxyMesh(
     const [a, b, c] = k.split(',');
     if (seen.has(`${a},${c},${b}`)) bothSides++;
   }
-  if (!extra.length) return { pos, idx, flipped, bothSides };
+  if (!extra.length) return { pos, idx, flipped, bothSides, pushedOut };
   const attrs: Record<string, { size: number; data: number[] }> = {};
   extra.forEach((e, j) => {
     const X = xsums[j];
@@ -704,7 +784,7 @@ export function proxyMesh(
       }
     attrs[e.name] = { size: e.size, data };
   });
-  return { pos, idx, attrs, flipped, bothSides };
+  return { pos, idx, attrs, flipped, bothSides, pushedOut };
 }
 
 /**
@@ -1454,13 +1534,15 @@ export function rebuildPipeline(
         });
       info.kept = extra.map((e) => e.name);
       info.dropped = info.dropped.filter((n) => !info.kept.includes(n));
-      const px = proxyMesh(tris, (v) => [at(v, 0), at(v, 1), Math.min(3, pos.size) > 2 ? at(v, 2) : 0], min, max, PROXY_GRID, extra);
+      const visible = visibleWinding(materials[step.material]?.state?.cull);
+      const px = proxyMesh(tris, (v) => [at(v, 0), at(v, 1), Math.min(3, pos.size) > 2 ? at(v, 2) : 0], min, max, PROXY_GRID, extra, { visible });
       if (px) {
         step.proxy = px;
         stats.proxies++;
         info.standInVertices = px.pos.length / 3;
         info.flipped = px.flipped ?? 0;
         info.bothSides = px.bothSides ?? 0;
+        if (px.pushedOut) info.shellPushed = px.pushedOut;
       } else {
         info.box = 'too few triangles left after clustering';
         boxBecause(info.box);
