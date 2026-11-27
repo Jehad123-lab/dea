@@ -316,6 +316,7 @@ common(
     .option('--verify-build', 'run npm install and npm run build in the generated project and report it')
     .option('--no-trace', 'skip the live WebGL trace (uniform values and drivers)')
     .option('--no-replay', "do not record the site's WebGL frames (no capture replay, no editable rebuild)")
+    .option('--frames <n>', 'consecutive WebGL frames to record (default 2, 2-120): more frames record a motion loop (CPU animation) the rebuild plays')
     .option('--max-capture-mb <mb>', 'the largest recording kept, after compaction (default 64; 128 when the recording carries a scroll tape)')
     .option('--tape-mb <mb>', 'what the scroll tape may add to the recording (default 64): its stops are spread over the whole page within it')
     .option('--no-research', 'do not search free sources for the techniques found')
@@ -343,6 +344,7 @@ common(
       ownAssets?: boolean;
       ownAssetsCost?: boolean;
       ownAssetsGrid?: string;
+      frames?: string;
       from?: string;
       diff: boolean;
       rounds: string;
@@ -418,6 +420,7 @@ common(
                 ownAssets: flags.ownAssets,
                 ownAssetsCost: flags.ownAssetsCost,
                 ownAssetsGrid: flags.ownAssetsGrid != null ? Number(flags.ownAssetsGrid) : undefined,
+                frames: flags.frames != null ? Number(flags.frames) : undefined,
                 from: urls.length === 1 ? from : undefined,
                 noDiff: !flags.diff,
                 rounds: Number(flags.rounds),
@@ -786,7 +789,8 @@ common(
     .argument('<url>', 'site to record')
     .option('--section <selector>', 'the same --section you will give dea extract')
     .option('--reference-ms <ms>', 'watch the original this long (default: until the page settles, up to 45 s); give extract the same value')
-    .option('--quick', 'rough and fast: 1 recorded frame (give extract --quick too)')
+    .option('--quick', 'rough and fast (give extract --quick too)')
+    .option('--frames <n>', 'consecutive WebGL frames to record (default 2, 2-120; give extract the same value): more frames record a motion loop')
     .option('--no-replay', 'only the screenshot, no WebGL recording (no editable rebuild)')
     .option('--tape-mb <mb>', 'what the scroll tape may add to the recording (default 64); give extract the same value')
     .option('--cache-dir <dir>', 'where the content cache lives (default <home>/cache)')
@@ -794,7 +798,16 @@ common(
 ).action(
   (
     url: string,
-    flags: CommonFlags & { section?: string; referenceMs?: string; quick?: boolean; replay: boolean; tapeMb?: string; cacheDir?: string; cacheMaxMb: string },
+    flags: CommonFlags & {
+      section?: string;
+      referenceMs?: string;
+      quick?: boolean;
+      frames?: string;
+      replay: boolean;
+      tapeMb?: string;
+      cacheDir?: string;
+      cacheMaxMb: string;
+    },
   ) =>
     run(async () => {
       const r = await recordReference(url, {
@@ -802,6 +815,7 @@ common(
         section: flags.section,
         referenceMs: flags.referenceMs != null ? Number(flags.referenceMs) : undefined,
         quick: flags.quick,
+        frames: flags.frames != null ? Number(flags.frames) : undefined,
         noReplay: !flags.replay,
         tapeMb: Number(flags.tapeMb) || undefined,
         cacheDir: flags.cacheDir,

@@ -116,6 +116,11 @@ export function costMaterials(list: StandInInfo[], max = 6): Array<{ material: n
 }
 
 /** Round 46: the finer colour grids --own-assets-cost scores (never shipped): 16 and 32 cells per side, those finer than the shipped one */
+/** Round 47: frames to record: --frames clamped to 2-120, default 2 (quick too: one frame has no clocks, nothing animates) */
+export function recordFrameCount(n?: number): number {
+  return n != null && Number.isFinite(n) ? Math.max(2, Math.min(120, Math.round(n))) : 2;
+}
+
 export function costGrids(shipped: number): number[] {
   return [16, 32].filter((g) => g > shipped);
 }
@@ -188,6 +193,12 @@ export interface ExtractOptions extends InspectOptions {
   reference?: string;
   /** how long DEA watches the original for its reference screenshot (default 45 s) */
   referenceMs?: number;
+  /**
+   * Round 47: how many consecutive WebGL frames to record (default 2, also in --quick; 2-120). Two give the clocks (uTime
+   * follows real time); more give a motion loop: a CPU animation (three.js AnimationMixer: model matrices and bone textures set
+   * each frame) plays back frame by frame at the recorded timing in the rebuild.
+   */
+  frames?: number;
   /** do not record and replay the site's WebGL frames */
   noReplay?: boolean;
   /** the largest recording (after compaction) DEA keeps, in MB (default 64); a bigger one is dropped with a note */
@@ -329,7 +340,8 @@ async function referenceFor(
   // no --reference-ms: watch until the page settles (45 s cap, 20 s in quick mode); a given --reference-ms watches that long
   const smart = opts.referenceMs == null;
   const ms = opts.referenceMs ?? (quick ? 20_000 : 45_000);
-  const frames = quick ? 1 : 2;
+  // Round 47: two frames in quick mode too (one gave no clocks, so the live demos stood still); --frames records a motion loop
+  const frames = recordFrameCount(opts.frames);
   const record = !opts.noReplay;
   // the scripted pointer / scroll and the input probe run on the live site right after the recording (full mode)
   const interact = record && !quick;
@@ -1862,7 +1874,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   if (opts.library) await libraryAdd(out, { name: opts.library, tags: opts.tags });
   const driven = mods.flatMap((m) => m.uniforms.filter((u) => u.driverFrom === 'trace').map((u) => `${u.name} ← ${driverText(u.driver as Driver)}`));
   const summary = [
-    ...(quick ? ['QUICK MODE (rough): 1 frame, no motion/trace/sweep/research/build check; run without --quick for the full result'] : []),
+    ...(quick ? ['QUICK MODE (rough): 2 frames, no motion/trace/sweep/research/build check; run without --quick for the full result'] : []),
     ...(cache?.stats.reused.length
       ? [`reused from the cache: ${cache.stats.reused.map((r) => `${r.what} (${r.at})`).join(', ')} · --no-cache observes everything again`]
       : []),
@@ -2129,7 +2141,7 @@ function renderExtractMd(o: {
     '',
     ...(o.quick
       ? [
-          '> **QUICK MODE: a rough result.** One recorded frame, no motion decode, no live trace, no parameter sweep, no research, no build check. Run without `--quick` for the full extract and its scores.',
+          '> **QUICK MODE: a rough result.** Two recorded frames, no motion decode, no live trace, no parameter sweep, no research, no build check. Run without `--quick` for the full extract and its scores.',
           '',
         ]
       : []),

@@ -148,6 +148,12 @@ export interface PipelineDoc {
   cameras: RebuildCamera[];
   passes: Array<{ index: number; frame: number; role: string; why: string; target: string; programs: string[] }>;
   frames: Array<{ steps: Step[] }>;
+  /**
+   * Round 47: the recorded frames are a motion loop (--frames 3 or more): live, they play in order at the recorded timing
+   * (`ms[i]`: how long frame i stays up) and loop, so a CPU animation (model matrices, bone textures) moves instead of
+   * holding the last frame
+   */
+  loop?: { n: number; ms: number[] };
   /** the last `n` frames are the pointer tape (see tape.ts): played while the pointer moves, uploads re-anchored to the live pointer's path */
   tape?: { n: number; move: number; still: number; drag?: boolean; w: number; h: number; anchors: unknown[]; uniforms?: unknown[] };
   /** after the tape: the scroll tape (see scrolltape.ts), `n` frames, the stops with tape-relative frame indices */
@@ -554,6 +560,26 @@ export function standInTable(list: StandInInfo[], max = 40): string[] {
 }
 
 /** which cell of the TEX_GRID x TEX_GRID colour grid a UV falls in (the image repeats), 1-based; 0 when unreadable */
+/**
+ * Round 47: how long each recorded frame of a motion loop stays up, in ms: the gap to the next frame's timestamp (the last one
+ * takes the median gap), each kept within 4-250 ms; 1000/60 when the frames carry no timestamps.
+ */
+export function loopTiming(frames: Array<{ ts?: number; ms?: number }>): number[] {
+  const gaps: number[] = [];
+  for (let i = 0; i + 1 < frames.length; i++) {
+    const a = frames[i].ts;
+    const b = frames[i + 1].ts;
+    gaps.push(a != null && b != null && Number.isFinite(b - a) && b > a ? b - a : Number.NaN);
+  }
+  const ok = gaps.filter((g) => Number.isFinite(g)).sort((x, y) => x - y);
+  // the lower median: with few frames, one stall should not set the pace
+  const median = ok.length ? ok[Math.floor((ok.length - 1) / 2)] : 1000 / 60;
+  return frames.map((_, i) => {
+    const g = Number.isFinite(gaps[i]) ? gaps[i] : median;
+    return Math.round(Math.max(4, Math.min(250, g)) * 10) / 10;
+  });
+}
+
 export function uvBucket(uv: number[], grid = TEX_GRID): number {
   const [u, v] = uv;
   if (!Number.isFinite(u) || !Number.isFinite(v)) return 0;
@@ -1557,6 +1583,7 @@ export function rebuildPipeline(
       programs: ps.programs,
     })),
     frames,
+    ...(doc.frames.length >= 3 ? { loop: { n: doc.frames.length, ms: loopTiming(doc.frames) } } : {}),
     ...(doc.tape && doc.tapeFrames?.length
       ? {
           tape: {
@@ -1611,7 +1638,9 @@ export function rebuildMd(p: PipelineDoc, stats: RebuildStats, score: { canvas: 
   L.push('');
   if (score) L.push(`**Editable rebuild score: canvas ${pct(score.canvas)}, page ${pct(score.page)}** (against the original first screen).`, '');
   L.push('| | |', '|---|---|');
-  L.push(`| draws | ${stats.draws} (${p.frames.length} frames, alternating) |`);
+  L.push(
+    `| draws | ${stats.draws} (${p.frames.length} frames, ${p.loop ? `a motion loop of ${p.loop.n} frames, ${Math.round(p.loop.ms.reduce((a, b) => a + b, 0))} ms` : 'alternating'}) |`,
+  );
   L.push(`| materials | ${stats.materials} RawShaderMaterials from ${stats.programs} programs |`);
   L.push(`| render targets | ${stats.renderTargets} |`);
   L.push(`| cameras | ${stats.cameras} |`);
