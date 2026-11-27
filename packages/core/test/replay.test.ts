@@ -387,6 +387,28 @@ describe('replay: editable rebuild', () => {
     if (boxes) expect(rebuildMd(r.pipeline, r.stats, { canvas: 0.5, page: 0.5 }, true)).toMatch(/boxes, by reason: /);
     expect(b.subarray(o, o + n * 12).every((x) => x === 0)).toBe(true);
   });
+
+  it('Round 50: a real-meshes-for-one-material variant keeps that mesh, every draw of the same buffers, and their bytes', () => {
+    const big = structuredClone(d);
+    const n = 6000;
+    const b = new Uint8Array(BIN.length + n * 12 + 8);
+    b.set(BIN);
+    const o = Math.ceil(BIN.length / 8) * 8;
+    new Float32Array(b.buffer, o, n * 3).set(Array.from({ length: n * 3 }, (_, i) => (i % 3 === 1 ? 2 : i % 7)));
+    big.snap.buffers.push({ id: 22, kind: 'array', usage: 0x88e4, o, l: n * 12 });
+    (big.snap.vaos[1].attrs[0] as { buf: number }).buf = 22;
+    const probe = rebuildPipeline(structuredClone(big), new Uint8Array(b), { data: 'data.bin', ownAssets: true });
+    const meshes = probe.pipeline.frames[0].steps.filter((s) => s.op === 'draw' && (s as { placeholder?: unknown }).placeholder) as Array<{ material: number }>;
+    expect(meshes.length).toBeGreaterThan(0);
+    const r = rebuildPipeline(big, b, { data: 'data.bin', ownAssets: true, realMaterials: [meshes[0].material] });
+    // every draw that reads buffer 22 (whatever its material) stays real, and the buffer is not wiped
+    const on22 = r.pipeline.frames
+      .flatMap((f) => f.steps)
+      .filter((s) => s.op === 'draw' && (s as { attrs?: Array<{ buf: number }> }).attrs?.some((a) => a.buf === 22));
+    expect(on22.length).toBeGreaterThan(0);
+    for (const s of on22) expect((s as { placeholder?: unknown }).placeholder).toBeUndefined();
+    expect(b.subarray(o, o + n * 12).some((x) => x !== 0)).toBe(true);
+  });
 });
 
 describe('replay: --own-assets mesh stand-in', () => {

@@ -125,9 +125,26 @@ export function costGrids(shipped: number): number[] {
   return [16, 32].filter((g) => g > shipped);
 }
 
-export function ownCostLine(shipped: number | null, cost: Array<{ what: string; canvas: number | null; page: number }>): string {
+/** Round 50: default seconds --own-assets-cost may spend on its variants */
+export const OWN_COST_BUDGET_S = 240;
+
+/** Round 50: --own-assets-cost-budget clamped to 30-3600 s; the default when unset or not a number */
+export function ownCostBudget(s?: number): number {
+  return s != null && Number.isFinite(s) ? Math.max(30, Math.min(3600, Math.round(s))) : OWN_COST_BUDGET_S;
+}
+
+/**
+ * Round 50: whether one more variant fits: the time spent so far plus the slowest variant scored yet (the first one always
+ * runs, so the line has at least one number)
+ */
+export function costFits(spentMs: number, slowestMs: number, budgetS: number): boolean {
+  return spentMs === 0 || spentMs + slowestMs <= budgetS * 1000;
+}
+
+export function ownCostLine(shipped: number | null, cost: Array<{ what: string; canvas: number | null; page: number; skipped?: string }>): string {
   const p = (x: number) => `${Math.round(x * 1000) / 10}%`;
   const parts = cost.map((c) => {
+    if (c.skipped) return `${c.what}: not scored (${c.skipped})`;
     if (c.canvas == null) return `${c.what}: canvas n/a, page ${p(c.page)}`;
     const gain = shipped != null ? ` (${c.canvas >= shipped ? '+' : ''}${Math.round((c.canvas - shipped) * 1000) / 10} points)` : '';
     return `${c.what}: canvas ${p(c.canvas)}${gain}, page ${p(c.page)}`;
@@ -169,6 +186,12 @@ export interface ExtractOptions extends InspectOptions {
    * user's call, never DEA's default.
    */
   ownAssetsGrid?: number;
+  /**
+   * Round 50: seconds --own-assets-cost may spend scoring its variants (default OWN_COST_BUDGET_S = 240). Each variant is a full
+   * render and score: lusion.co (76 passes, 170 draws) ran past 300 s on a software GPU. Variants left when the budget runs
+   * out are listed as not scored, so the line still says what was measured.
+   */
+  ownAssetsCostBudget?: number;
   /** reuse earlier runs instead of opening the site again */
   from?: { design?: string; motion?: string; assets?: string; trace?: string };
   /** skip the live WebGL trace (uniform values and drivers) */
@@ -253,7 +276,7 @@ export interface ReplayInfo {
     /** canvas score of (b) against (a): what the translation to three.js itself loses */
     vsReplay?: number | null;
     /** Round 38 (--own-assets-cost): the score of each never-shipped variant, to show what each placeholder kind costs */
-    ownCost?: Array<{ what: string; canvas: number | null; page: number }>;
+    ownCost?: Array<{ what: string; canvas: number | null; page: number; skipped?: string }>;
   };
 }
 
@@ -1358,8 +1381,17 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             if (ownCostVariants.length) {
               // each variant gets its own folder: the preview browser caches /public/rebuild/ by URL, so rewriting the shipped
               // folder in place scored the shipped files again (first try: real images "+0 points" on keyframes)
-              const cost: Array<{ what: string; canvas: number | null; page: number }> = [];
+              const cost: Array<{ what: string; canvas: number | null; page: number; skipped?: string }> = [];
+              const budget = ownCostBudget(opts.ownAssetsCostBudget);
+              const costStart = Date.now();
+              let slowest = 0;
               for (const [i, v0] of ownCostVariants.entries()) {
+                const spent = Date.now() - costStart;
+                if (!costFits(spent, slowest, budget)) {
+                  cost.push({ what: v0.what, canvas: null, page: 0, skipped: `over the ${budget} s budget: --own-assets-cost-budget` });
+                  continue;
+                }
+                const vStart = Date.now();
                 const dir = `public/rebuild-cost-${i}`;
                 const v = { what: v0.what, files: v0.build() };
                 await put(`${dir}/pipeline.json`, v.files.pipeline);
@@ -1368,6 +1400,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
                 const sv = await render({ ...params, program: '__rebuild', rebuildBase: `../${dir}/` });
                 const cv = await compareCanvas(cmp, original, lastPng, canvasBox, textBoxes, vp, canvasRef);
                 cost.push({ what: v.what, canvas: cv?.score ?? null, page: sv });
+                slowest = Math.max(slowest, Date.now() - vStart);
                 // never shipped: the kit keeps only the real --own-assets rebuild
                 await rm(join(out, dir), { recursive: true, force: true }).catch(() => {});
                 // and out of the kit's file list (Round 38 left 120 entries that were not on disk)

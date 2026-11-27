@@ -305,6 +305,10 @@ common(
       'with --own-assets: also score real images + stand-in meshes and image grids + real meshes (never shipped), to show what each placeholder costs',
     )
     .option(
+      '--own-assets-cost-budget <s>',
+      'with --own-assets-cost: seconds to spend scoring the variants (default 240, 30-3600); the rest are listed as not scored',
+    )
+    .option(
       '--own-assets-grid <n>',
       "with --own-assets: cells per side of each image's colour grid (default 8, 2-64). Finer keeps more of the site's artwork: your call",
     )
@@ -344,6 +348,7 @@ common(
       ownAssets?: boolean;
       ownAssetsCost?: boolean;
       ownAssetsGrid?: string;
+      ownAssetsCostBudget?: string;
       frames?: string;
       from?: string;
       diff: boolean;
@@ -420,6 +425,7 @@ common(
                 ownAssets: flags.ownAssets,
                 ownAssetsCost: flags.ownAssetsCost,
                 ownAssetsGrid: flags.ownAssetsGrid != null ? Number(flags.ownAssetsGrid) : undefined,
+                ownAssetsCostBudget: flags.ownAssetsCostBudget != null ? Number(flags.ownAssetsCostBudget) : undefined,
                 frames: flags.frames != null ? Number(flags.frames) : undefined,
                 from: urls.length === 1 ? from : undefined,
                 noDiff: !flags.diff,

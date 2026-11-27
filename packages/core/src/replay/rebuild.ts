@@ -1616,8 +1616,18 @@ export function rebuildPipeline(
   // site's meshes, only for --own-assets-cost's never-shipped variant)
   if (opts.ownAssets && opts.standIns !== false) {
     const realMats = new Set(opts.realMaterials ?? []);
+    // Round 50: the same mesh drawn by another material (a shadow or depth pass, an outline) reads the same buffers. Those
+    // draws stay real too, and the buffers a real draw reads are never zeroed below: on threejs.org's skinning example the
+    // body's shadow pass was a stand-in, its buffers were wiped, and the "real meshes for VanguardBodyMat" variant drew the
+    // body from zeros (-19 points)
+    const realBufs = new Set<number>();
+    for (const { step, pos } of meshDraws) if (realMats.has(step.material)) realBufs.add(pos.buf);
     for (const { step, pos } of meshDraws) {
-      if (realMats.has(step.material)) continue;
+      if (realMats.has(step.material) || realBufs.has(pos.buf)) {
+        for (const at of step.attrs) realBufs.add(at.buf);
+        if (step.index) realBufs.add(step.index.buf);
+        continue;
+      }
       const B = doc.snap.buffers.find((b) => b.id === pos.buf);
       // anything bigger than a few hundred vertices is a model of the site's, not a helper quad or a gizmo
       if (!B || B.l < 16384) continue;
@@ -1701,11 +1711,11 @@ export function rebuildPipeline(
       if (!step.placeholder) continue;
       for (const at of step.attrs) {
         const B = doc.snap.buffers.find((b) => b.id === at.buf);
-        if (B && !bufUse.get(at.buf)?.other) bin.fill(0, B.o, B.o + B.l);
+        if (B && !bufUse.get(at.buf)?.other && !realBufs.has(at.buf)) bin.fill(0, B.o, B.o + B.l);
       }
       if (step.index) {
         const B = doc.snap.buffers.find((b) => b.id === step.index?.buf);
-        if (B && !bufUse.get(step.index.buf)?.other) bin.fill(0, B.o, B.o + B.l);
+        if (B && !bufUse.get(step.index.buf)?.other && !realBufs.has(step.index.buf)) bin.fill(0, B.o, B.o + B.l);
       }
     }
   }
