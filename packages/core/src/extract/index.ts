@@ -20,7 +20,7 @@ import { REPLAY_CAPTURE_SCRIPT } from '../replay/capture.ts';
 import { animateEntries, buildGraph, type CaptureDoc, compactCapture, fitCapture, placeholderTextures, renderGraphMd, TEX_GRID } from '../replay/graph.ts';
 import { fitInputs, type InputMap, inferInputs, inputsSummary, type ProbeData, type ProbeReport } from '../replay/inputs.ts';
 import { REPLAY_PLAYER } from '../replay/player.ts';
-import { type RebuildStats, rebuildMd, rebuildPipeline, type StandInInfo, standinSummary } from '../replay/rebuild.ts';
+import { compactFrames, type RebuildStats, rebuildMd, rebuildPipeline, type StandInInfo, standinSummary } from '../replay/rebuild.ts';
 import { REBUILD_RUNNER } from '../replay/runner.ts';
 import { recoverScene, sceneGlb, sceneMd, sceneModule } from '../replay/scene.ts';
 import { buildPageMap, fitScrollTape, pageMapMd, type ScrollTapeFit, tapeMoved } from '../replay/scrolltape.ts';
@@ -1082,7 +1082,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             sceneNodes,
             texGrid,
           });
-          await put('public/rebuild/pipeline.json', JSON.stringify(rb.pipeline));
+          await put('public/rebuild/pipeline.json', JSON.stringify(compactFrames(rb.pipeline)));
           for (const [f, s2] of Object.entries(rb.shaders)) await put(`public/rebuild/${f}`, s2);
           if (opts.ownAssets) await put('public/rebuild/data.bin', Buffer.from(rbBin.buffer, rbBin.byteOffset, rbBin.byteLength));
           await put('rebuild/rebuild.js', REBUILD_RUNNER);
@@ -1096,7 +1096,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
                 const b = new Uint8Array(binU8);
                 if (!images) placeholderTextures(d, b, { lookups: 0 }, grid);
                 const v = rebuildPipeline(d, b, { data: 'data.bin', ownAssets: true, standIns: !meshes, realMaterials, sceneNodes, texGrid: grid });
-                return { pipeline: JSON.stringify(v.pipeline), shaders: v.shaders, data: b };
+                return { pipeline: JSON.stringify(compactFrames(v.pipeline)), shaders: v.shaders, data: b };
               };
             ownCostVariants = [
               { what: "the site's real images, stand-in meshes", build: variant(true, false) },

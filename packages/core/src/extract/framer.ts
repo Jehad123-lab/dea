@@ -1,3 +1,4 @@
+import { expandFrames } from '../replay/rebuild.ts';
 // Round 13: turn an extract's editable rebuild into one Framer code component. The component carries the rebuild
 // runner (three.js from esm.sh) and loads the kit's rebuild files from a URL you host; the files cannot live in
 // Framer. Shader uniforms that read as numbers or colours become property controls.
@@ -292,7 +293,7 @@ export async function writeFramerExport(
   const manifest = JSON.parse(await readFile(join(kit, 'dea-kit.json'), 'utf8')) as { url: string; title?: string; ownAssets?: boolean };
   let pipeline: PipelineDoc;
   try {
-    pipeline = JSON.parse(await readFile(join(kit, 'public', 'rebuild', 'pipeline.json'), 'utf8')) as PipelineDoc;
+    pipeline = expandFrames(JSON.parse(await readFile(join(kit, 'public', 'rebuild', 'pipeline.json'), 'utf8')) as PipelineDoc);
   } catch {
     throw new Error(
       `This kit has no editable rebuild (public/rebuild/pipeline.json). Extract a page with a WebGL canvas first: dea extract <url> --own-assets`,

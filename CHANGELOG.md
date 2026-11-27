@@ -11,6 +11,15 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 48: clocks in uniform blocks and compact motion loops. igloo.inc keeps its time in a WebGL2 uniform block ("Global",
+  binding 0) uploaded with bufferSubData each frame, so --quick still found 0 clocks and the live demo stood still.
+  uboClocksOf matches the n-th uniform-block upload to a buffer in frame 0 with the n-th in frame 1; a float that moved like a
+  clock (isClockStep: seconds at 0.1-10x real time, ms, or a +1 frame counter) and is not part of a run of more than two
+  neighbouring floats that moved (a matrix or vector) goes to pipeline.json uboClocks { buf, byte, base, rate }; the rebuild
+  runner writes base + rate x elapsed ms into the uploaded bytes live. pipeline.json frames are compacted (compactFrames): frame
+  0 in full, a later frame's step as { $from } plus only what differs ($uni: changed uniforms only); the runner and the Framer
+  export expand them (expandFrames). A --frames 30 loop of three.js keyframes wrote 89 MB of repeated draw steps.
+  compactCapture also writes byte ranges with the same content once (sha1, 64 bytes and up), for data a loop re-uploads.
 - Round 47: motion that plays. The live demos stood still: --quick recorded one frame, and one frame has no clocks (uTime
   needs two to get a rate). Two frames are now recorded by default, in --quick too (no pointer or scroll tape there, so
   SwiftShader boxes stay fast). --frames <n> (2-120, extract and record) records a motion loop: with 3 or more frames
