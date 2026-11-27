@@ -11,6 +11,14 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 45: --own-assets stand-ins for three.js keyframes (Littlest Tokyo). Outline shells: a culled mesh whose visible faces
+  point inward (its signed volume from the site's triangles disagrees with the visible winding; the outline_0 meshes, material 1
+  outline #379) is an outline shell, and each stand-in corner moves out to the farthest of the site's vertices it stands for,
+  along the cell's outward direction. The scene-wide shell has larger cells than the parts it wraps, and cell averages sit
+  inside a curved surface, so the shell sank into the parts and the outlines were gone; a bigger shell only shows more rim,
+  since its outside faces are culled. Every UV set splits a cell, not only the first: material 5 (normal #397) reads its colour
+  atlas through uv and its AO map through uv1, a different layout, and uv1 was averaged across AO islands. Same position grid
+  and triangles: no more of the site's shape is shipped. rebuild.md counts the pushed shell corners. visibleWinding(cull).
 - Round 44: live demo. vercel.json builds demo/ (the dea-framer-hero builds failed with no output directory): demo/build.mjs
   builds every --own-assets kit in demo/kits/<slug> with Vite under /<slug>/ (a kit with public/replay/, the site's own
   bytes, is never published) and writes a landing page with the scores from demo/demos.json. Generated kits load
