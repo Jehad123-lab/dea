@@ -208,10 +208,16 @@ export interface Similarity {
  * Similarity of two images (data URLs) at 96×60. Colour distance alone calls two mostly-black pages 99% alike, so the
  * score also compares where light and edges are: 0.3 colour + 0.35 brightness layout + 0.35 edges.
  */
-export async function compareImages(page: Page, a: string, b: string): Promise<Similarity> {
+export async function compareImages(
+  page: Page,
+  a: string,
+  b: string,
+  /** Round 51: regions (fractions of the image) painted the same grey in both before comparing: debug UI overlays */
+  mask: Array<{ x: number; y: number; w: number; h: number }> = [],
+): Promise<Similarity> {
   await page.evaluate(NAME_SHIM);
   return page.evaluate(
-    async ([x, y]) => {
+    async ([x, y, m]) => {
       const load = (src: string) =>
         new Promise<HTMLImageElement>((res, rej) => {
           const im = new Image();
@@ -227,6 +233,8 @@ export async function compareImages(page: Page, a: string, b: string): Promise<S
         c.height = H;
         const ctx = c.getContext('2d') as CanvasRenderingContext2D;
         ctx.drawImage(await load(src), 0, 0, W, H);
+        ctx.fillStyle = '#808080';
+        for (const r of m) ctx.fillRect(Math.floor(r.x * W), Math.floor(r.y * H), Math.ceil(r.w * W) + 1, Math.ceil(r.h * H) + 1);
         return ctx.getImageData(0, 0, W, H).data;
       };
       const [p, q] = [await px(x), await px(y)];
@@ -290,7 +298,7 @@ export async function compareImages(page: Page, a: string, b: string): Promise<S
           .join('')}`;
       return { similarity: 0.3 * colour + 0.35 * layout + 0.35 * edges, colour, layout, edges, meanA: hex(ma), meanB: hex(mb) };
     },
-    [a, b] as const,
+    [a, b, mask] as const,
   );
 }
 
@@ -298,6 +306,30 @@ export async function compareImages(page: Page, a: string, b: string): Promise<S
  * The original's first screen as a person sees it after the intro: screenshots over `ms`, keeping the one with the
  * most detail (a loading screen is mostly flat).
  */
+/** Round 51: a debug panel the page lays over its canvas (viewport pixels) */
+export interface UiOverlay {
+  kind: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Round 51: overlays as fractions of the viewport (the shape compareImages masks), dropping empty ones */
+export function overlayMask(
+  overlays: UiOverlay[] | null | undefined,
+  vp: { width: number; height: number },
+): Array<{ x: number; y: number; w: number; h: number }> {
+  return (overlays ?? []).filter((o) => o.w > 0 && o.h > 0).map((o) => ({ x: o.x / vp.width, y: o.y / vp.height, w: o.w / vp.width, h: o.h / vp.height }));
+}
+
+/** Round 51: one line naming what was left out of the scores, or null when nothing was */
+export function overlayNote(overlays: UiOverlay[] | null | undefined): string | null {
+  if (!overlays?.length) return null;
+  const list = overlays.map((o) => `${o.kind} ${Math.round(o.w)}x${Math.round(o.h)} at ${Math.round(o.x)},${Math.round(o.y)}`).join(', ');
+  return `debug UI left out of the page and canvas scores (not part of the design, never rebuilt): ${list}`;
+}
+
 /** A text block on the first screen, as the browser laid it out (viewport pixels and computed styles). */
 export interface LayoutBox {
   tag: string;
@@ -664,7 +696,34 @@ export const LAYOUT_READ = (section: string | null, o: LayoutReadOptions = {}) =
       return d[3] === 255 ? 'rgb(' + d[0] + ', ' + d[1] + ', ' + d[2] + ')' : 'rgba(' + d[0] + ', ' + d[1] + ', ' + d[2] + ', ' + Math.round((d[3] / 255) * 1000) / 1000 + ')';
     } catch { return c; }
   };
-  return { viewport: { width: W, height: H }, boxes, canvas, background: plain(background), shapes, graphics };
+  // Round 51: debug panels a page lays over its canvas (lil-gui, dat.gui, Tweakpane, Leva, Stats.js): not part of the design
+  // and never rebuilt, so the scores leave them out (threejs.org examples: the Controls panel and the FPS box cost ~12 page points)
+  const overlays = [];
+  const seenUi = new Set();
+  const addUi = (el, kind) => {
+    if (!el || seenUi.has(el)) return;
+    for (let a = el.parentElement; a; a = a.parentElement) if (seenUi.has(a)) return;
+    const r = el.getBoundingClientRect();
+    const x = Math.max(0, r.left), y = Math.max(0, r.top);
+    const w = Math.min(W, r.right) - x, h = Math.min(H, r.bottom) - y;
+    if (w < 8 || h < 8 || w * h > W * H * 0.5) return;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
+    seenUi.add(el);
+    overlays.push({ kind, x, y, w, h });
+  };
+  const UI = [['.lil-gui.root, .lil-gui.autoPlace', 'lil-gui'], ['.dg.ac > .dg, .dg.main', 'dat.gui'], ['.tp-dfwv, .tp-rotv', 'Tweakpane'], ['#leva__root > div', 'Leva'], ['#stats, .stats', 'Stats.js']];
+  for (const [sel, kind] of UI) { try { for (const el of document.querySelectorAll(sel)) addUi(el, kind); } catch (e) {} }
+  // Stats.js without an id: a small fixed box holding only canvases (about 80x48 each)
+  for (const el of document.querySelectorAll('body > div')) {
+    const cs = getComputedStyle(el);
+    if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
+    const kids = [...el.children];
+    if (!kids.length || !kids.every((k) => k.tagName === 'CANVAS')) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.width <= 120 && r.height <= 80) addUi(el, 'Stats.js');
+  }
+  return { viewport: { width: W, height: H }, boxes, canvas, background: plain(background), shapes, graphics, overlays };
 })()`;
 
 /** Where each first-screen element sits at a few scroll positions: a box that moves, scales or fades with scroll gets keyframes. */

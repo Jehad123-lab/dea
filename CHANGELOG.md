@@ -11,6 +11,11 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 51: debug UI left out of the scores. threejs.org's skinning example scored 78.6% on the page against 91% on the
+  canvas: the lil-gui Controls panel and the Stats.js FPS box are drawn over the page, and DEA never rebuilds them. The
+  layout read now finds debug panels (lil-gui, dat.gui, Tweakpane, Leva, Stats.js by its id or as a small fixed box of
+  canvases; never anything over half the screen). The page score paints them the same grey in both pictures, the canvas
+  score hides them like text, and the run says what was left out and where.
 - Round 50: real-mesh cost variants keep shared buffers, and --own-assets-cost has a time budget. On threejs.org's skinning
   example, "the site's meshes for VanguardBodyMat only" scored -19 points: the body's shadow pass draws the same buffers with
   another material, stayed a stand-in, and its buffers were zeroed, so the real body drew from zeros. Now every draw that reads

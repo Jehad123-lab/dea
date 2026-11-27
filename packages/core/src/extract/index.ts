@@ -67,6 +67,8 @@ import {
   kitInteraction,
   kitSteadiness,
   LAYOUT_READ,
+  overlayMask,
+  overlayNote,
   placeholderPng,
   previewHtml,
   type RefEnv,
@@ -76,6 +78,7 @@ import {
   type Similarity,
   serveDir,
   sideBySide,
+  type UiOverlay,
 } from './preview.ts';
 import {
   detectTechniques,
@@ -949,6 +952,12 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       say('taking the reference screenshot (after the intro, the frame with the most detail)');
       const ref = await (refP as Promise<RefShot>);
       const original = ref.png;
+      // Round 51: debug panels over the page (lil-gui, Stats.js, ...): masked in both pictures, so the scores measure the design
+      // (layout.overlays, read with the layout; not in the layout's declared type, which the hero layout code narrows)
+      const uiOverlays = (ref.layout as { overlays?: UiOverlay[] } | null)?.overlays ?? [];
+      const uiMask = overlayMask(uiOverlays, vp);
+      const uiNote = overlayNote(uiOverlays);
+      if (uiNote) say(uiNote);
       await put('preview/original.png', Buffer.from(original.slice(original.indexOf(',') + 1), 'base64'));
       // the site's own frames, recorded right before that screenshot: the render graph, the replay, the 3D scene
       const recording = 'recording' in ref ? ref.recording : null;
@@ -1237,7 +1246,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
         renderError ??= r.error;
         lastErr = r.error;
         lastPng = r.png;
-        lastCmp = await compareImages(cmp, original, r.png);
+        lastCmp = await compareImages(cmp, original, r.png, uiMask);
         return lastCmp.similarity;
       };
       try {
@@ -1331,7 +1340,8 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
         }
         const start = await render(params);
         // the canvas-only score: the WebGL picture alone, with the site's text hidden
-        const textBoxes = (layout ?? layoutCandidates[0] ?? null)?.boxes ?? [];
+        // Round 51: the debug panels are hidden like text in the canvas score too
+        const textBoxes = [...((layout ?? layoutCandidates[0] ?? null)?.boxes ?? []), ...uiOverlays];
         const canvasBox =
           (layout ?? layoutCandidates[0] ?? null)?.canvas ??
           (recDoc ? { x: recDoc.canvas.x, y: recDoc.canvas.y, w: recDoc.canvas.cssW, h: recDoc.canvas.cssH } : null);
