@@ -148,21 +148,19 @@ function createScrollTape(info) {
 
 export async function loadPipeline(base = './rebuild/') {
   const root = new URL(base, location.href);
-  const pipeline = await fetch(new URL('pipeline.json', root)).then((r) => r.json());
+  const fetchGz = async (name) => {
+    if (typeof DecompressionStream !== 'undefined') {
+      const gz = await fetch(new URL(`${name}.gz`, root)).catch(() => null);
+      if (gz && gz.ok && gz.body) return new Response(gz.body.pipeThrough(new DecompressionStream('gzip')));
+    }
+    return fetch(new URL(name, root));
+  };
+  const pipeline = await fetchGz('pipeline.json').then((r) => r.json());
   const files = [];
   for (const m of pipeline.materials) files.push(m.vertex, m.fragment);
   const uniq = [...new Set(files)];
-  const loadBin = async () => {
-    if (typeof DecompressionStream !== 'undefined') {
-      const gz = await fetch(new URL(`${pipeline.data}.gz`, root)).catch(() => null);
-      if (gz && gz.ok && gz.body) {
-        return await new Response(gz.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-      }
-    }
-    return await fetch(new URL(pipeline.data, root)).then((r) => r.arrayBuffer());
-  };
   const [bin, ...texts] = await Promise.all([
-    loadBin(),
+    fetchGz(pipeline.data).then((r) => r.arrayBuffer()),
     ...uniq.map((f) => fetch(new URL(f, root)).then((r) => r.text())),
   ]);
   const shaders = {};
@@ -879,7 +877,11 @@ export function createRebuild(canvas, data, options = {}) {
   // two (a camera mid-move, an intro fading in) would flip back and forth every frame and the picture would shake. Live,
   // every frame takes those values from the last recorded frame (the one DEA scored); clocks still follow real time and
   // the simulation passes still run forward on the live render targets.
-  if (options.animate !== false && options.steady !== false && RF > 1) {
+  // Round 47: a motion loop (--frames 3 or more: pipeline.json "loop") plays its frames in order at the recorded timing, so a CPU
+  // animation (three.js AnimationMixer: model matrices and bone textures set each frame) moves; options.loop false holds it
+  const looping = Boolean(p.loop && options.loop !== false && options.animate !== false && RF === p.loop.n && RF > 2);
+  let loopNext = 0; // when the frame on screen gives way to the next one (performance.now ms)
+  if (!looping && options.animate !== false && options.steady !== false && RF > 1) {
     const last = p.frames[RF - 1].steps;
     const keyed = (steps) => { const seen = new Map(); return steps.map((s) => { if (s.op !== 'draw') return null; const k = s.material + '#' + (seen.get(s.material) || 0); seen.set(s.material, (seen.get(s.material) || 0) + 1); return k; }); };
     const lastKeys = keyed(last);
@@ -1032,7 +1034,16 @@ export function createRebuild(canvas, data, options = {}) {
         runFrame(f, false, blend);
         bl = null;
         lastAbs = f;
-        frame = f >= SB ? frame : (f + 1) % RF;
+        if (looping && f < RF) {
+          // the next frame once this one has been up as long as it was on the site (a slow display skips none: each frame's
+          // uploads run in order); a fast one shows it again meanwhile
+          const now = performance.now();
+          if (!loopNext) loopNext = now + p.loop.ms[f];
+          if (now >= loopNext) {
+            frame = (f + 1) % RF;
+            loopNext = Math.max(loopNext + p.loop.ms[frame], now);
+          }
+        } else frame = f >= SB ? frame : (f + 1) % RF;
       }
     },
     tape,

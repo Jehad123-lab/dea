@@ -1,6 +1,6 @@
 # Extracted from https://www.igloo.inc (react)
 
-> **QUICK MODE: a rough result.** One recorded frame, no motion decode, no live trace, no parameter sweep, no research, no build check. Run without `--quick` for the full extract and its scores.
+> **QUICK MODE: a rough result.** Two recorded frames, no motion decode, no live trace, no parameter sweep, no research, no build check. Run without `--quick` for the full extract and its scores.
 
 Made by DEA from what the site actually rendered. ✔ Verified = read from the live page. ≈ Inferred = DEA filled a gap.
 
@@ -40,30 +40,29 @@ Two different things, scored separately. **(a) Capture replay**: the recorded ca
 | | canvas | page | in the kit |
 |---|---|---|---|
 | (a) capture replay | 100% | 100% | no (--own-assets): scored, then removed |
-| (b) editable rebuild (99.5% against (a)) | 99.5% | 99.6% | `rebuild/rebuild.js` + `public/rebuild/` (what the project runs) |
+| (b) editable rebuild (99.5% against (a)) | 99.5% | 99.5% | `rebuild/rebuild.js` + `public/rebuild/` (what the project runs) |
 
-- ✔ (b) `public/rebuild/pipeline.json`: 117 draws in the site's order as 29 RawShaderMaterials (GLSL in `public/rebuild/shaders/`), 4 camera(s), 19 render targets, 12 raw WebGL step(s). three.js reproduces the site's matrices from the camera and model matrix on 98 draw(s).
-- recorded in (b): 0.2 MB of vertex/index buffers and 7.1 MB of texture pixels and simulation start state; --own-assets: images are coarse colour grids and large meshes are stand-ins, 79 mesh(es) are stand-ins (79 coarse shapes, 0 boxes); their bytes are not in the kit. See `rebuild.md`.
-- --own-assets cost (variants scored, never shipped; shipped canvas 99.5%): the site's real images, stand-in meshes: canvas 99.5% (+0 points), page 99.6% · image colour grids, the site's real meshes: canvas 99.9% (+0.4 points), page 100% · the site's meshes for material 1 only (program #260, 70 stand-ins): canvas 99.9% (+0.4 points), page 100% · the site's meshes for material 4 only (program #268, 5 stand-ins): canvas 99.5% (0 points), page 99.5% · the site's meshes for material 3 only (program #266, 3 stand-ins): canvas 99.5% (+0 points), page 99.6% · the site's meshes for material 6 only (program #272, 1 stand-in): canvas 99.4% (-0.1 points), page 99.5%
+- ✔ (b) `public/rebuild/pipeline.json`: 234 draws in the site's order as 29 RawShaderMaterials (GLSL in `public/rebuild/shaders/`), 6 camera(s), 20 render targets, 24 raw WebGL step(s). three.js reproduces the site's matrices from the camera and model matrix on 196 draw(s).
+- recorded in (b): 0.2 MB of vertex/index buffers and 7.1 MB of texture pixels and simulation start state; --own-assets: images are coarse colour grids and large meshes are stand-ins, 158 mesh(es) are stand-ins (158 coarse shapes, 0 boxes); their bytes are not in the kit. See `rebuild.md`.
 
-✔ DEA recorded 1 consecutive frames of the site's WebGL right before the reference screenshot: every call with its arguments, and every buffer, texture, shader program and render target as it was when the frames began (read back from the GPU). 45.8 MB in `public/replay/`.
+✔ DEA recorded 2 consecutive frames of the site's WebGL right before the reference screenshot: every call with its arguments, and every buffer, texture, shader program and render target as it was when the frames began (read back from the GPU). 45.8 MB in `public/replay/`.
 
-- ✔ `replay/replay.js` runs exactly those calls with the site's own GLSL, geometry and textures: 21 passes, 47 draws, 28 programs. Passes seen (≈ roles read from the facts): meshes, downsample, points (particles), full-screen pass, bloom / blur, bloom (downsample), SMAA anti-aliasing, composite to screen.
+- ✔ `replay/replay.js` runs exactly those calls with the site's own GLSL, geometry and textures: 42 passes, 94 draws, 28 programs. Passes seen (≈ roles read from the facts): meshes, downsample, points (particles), full-screen pass, bloom / blur, bloom (downsample), SMAA anti-aliasing, composite to screen.
 - ✔ `render-graph.md`: every pass in order, its target, programs, draws, the textures it reads, blend and depth.
 - ≈ Clock uniforms (a value named like time that grew between the frames) advance with real time; everything else replays as recorded, frame after frame. `replay.setUniform(program, name, value)` overrides a value, `replay.setPassEnabled(i, false)` switches a pass off.
 - (a) alone: canvas 100%, page 100%. The project does not run it: it is the reference.
-- ✔ `public/scene/scene.glb` + `scene/scene.js`: 18 mesh(es) read back from the GPU buffers with their model matrices and the camera (from the view and projection uniforms); see `scene/scene.md`. Rendered with a plain material it scores canvas 26.9%: the placement is the site's, the look is in the replay.
-- ≈ --own-assets: 6 uploaded texture(s) in the replay are an 8×8 grid of their own average colours at the same size (tones, no detail); 6 lookup table(s) (colour LUTs, ramps, tiny data textures: the site's code tables, not artwork) are kept as recorded; render targets and geometry are the frames' own.
+- ✔ `public/scene/scene.glb` + `scene/scene.js`: 18 mesh(es) read back from the GPU buffers with their model matrices and the camera (from the view and projection uniforms); see `scene/scene.md`. Rendered with a plain material it scores canvas 27.1%: the placement is the site's, the look is in the replay.
+- ≈ --own-assets: 6 uploaded texture(s) in the replay are an 8×8 grid of their own average colours at the same size (tones, no detail); 4 lookup table(s) (colour LUTs, ramps, tiny data textures: the site's code tables, not artwork) are kept as recorded; render targets and geometry are the frames' own.
 
 ## How close the rebuild is
 
 DEA rendered `preview/index.html` and compared it with the original first screen after its intro (`preview/original.png` vs `preview/final.png`, side by side in `preview/side-by-side.png`). The score is 0.3 colour + 0.35 brightness layout + 0.35 edges, at 96×60.
 
 - Start: 29.2% similar
-- After DEA's own analysis (palette, screen colour, each shader, opacity): 99.6%
-- After research and retry: 99.6% (already 99.6% similar (target 92%))
+- After DEA's own analysis (palette, screen colour, each shader, opacity): 99.5%
+- After research and retry: 99.5% (already 99.5% similar (target 92%))
 - Final parts: colour 99.8%, brightness layout 99.4%, edges 99.4%
-- **Canvas only** (the WebGL picture alone, the site's text hidden; 0.6 × SSIM at three scales + 0.2 × edges + 0.2 × tones): 56.2% at the start → 99.5%; canvas 99.5% (SSIM 99.7%, edges 98.8%, tones 99.5%)
+- **Canvas only** (the WebGL picture alone, the site's text hidden; 0.6 × SSIM at three scales + 0.2 × edges + 0.2 × tones): 56.7% at the start → 99.5%; canvas 99.5% (SSIM 99.7%, edges 98.8%, tones 99.5%)
 - Kept parameters: background #a0a5b1, text #111111, font system-ui, size 64, program __rebuild, opacity 1
 - Page environment: DEA answered 8 CPU cores and 8 GB (navigator.hardwareConcurrency, deviceMemory).
 
@@ -115,6 +114,6 @@ What DEA could not fully decode yet, what it knows anyway, its best reconstructi
 
 - design run: 20261127-111954-igloo-inc-e89271cf
 - motion run: skipped (quick mode)
-- reused from the cache (not observed again in this run): reference + capture (2026-11-27T11:19:54.104Z), design (2026-11-27T11:21:24.029Z), assets (2026-11-27T11:22:17.196Z)
+- reused from the cache (not observed again in this run): reference + capture (2026-11-27T15:13:24.594Z), design (2026-11-27T11:21:24.029Z), assets (2026-11-27T11:22:17.196Z)
 - assets run: 20261127-112124-igloo-inc-8db37312
 

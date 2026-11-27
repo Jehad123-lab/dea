@@ -1,10 +1,10 @@
 {
   "schema": "dea.evidence/1",
   "url": "https://www.igloo.inc",
-  "runId": "20261127-112319-igloo-inc-fec19f73",
-  "madeAt": "2026-11-27T11:25:02.574Z",
+  "runId": "20261127-151958-igloo-inc-b392a639",
+  "madeAt": "2026-11-27T15:20:53.990Z",
   "mode": "quick",
-  "machine": "linux · 2 CPUs · 4 GB",
+  "machine": "linux · 2 CPUs · 3 GB",
   "counts": {
     "Verified": 4,
     "Inferred": 0,
@@ -17,7 +17,7 @@
       "area": "run",
       "claim": "The reference screenshot is the settled site (no loader visible).",
       "label": "Verified",
-      "measurement": "no loader element was visible at the reference (96 s after load)",
+      "measurement": "no loader element was visible at the reference (99 s after load)",
       "coverage": "complete",
       "limitations": [
         "a loader that does not use a recognisable element would not be seen"
@@ -28,7 +28,7 @@
       "area": "scene",
       "claim": "The capture replay draws the recorded frame the site drew.",
       "label": "Verified",
-      "measurement": "canvas 100%, page 100% against the reference; 1 recorded frame(s), 21 passes, 47 draws, 28 programs, 45.8 MB",
+      "measurement": "canvas 100%, page 100% against the reference; 2 recorded frame(s), 42 passes, 94 draws, 28 programs, 45.8 MB",
       "coverage": "partial",
       "limitations": [
         "a replay of one held frame scores near 100% by construction: it shows the recording plays back, not that motion or input is understood",
@@ -37,9 +37,9 @@
       "data": {
         "canvas": 1,
         "page": 0.9999999999999999,
-        "frames": 1,
-        "passes": 21,
-        "draws": 47,
+        "frames": 2,
+        "passes": 42,
+        "draws": 94,
         "programs": 28
       }
     },
@@ -48,16 +48,16 @@
       "area": "scene",
       "claim": "The editable three.js rebuild draws the same picture as the capture replay.",
       "label": "Verified",
-      "measurement": "canvas 99.5%, page 99.6% against the reference; 99.5% against the replay",
+      "measurement": "canvas 99.5%, page 99.5% against the reference; 99.5% against the replay",
       "coverage": "partial",
       "limitations": [
         "one frame: the same caveat as the replay",
         "--own-assets: images are placeholders and big meshes are coarse stand-ins (or boxes), so this score is lower by design"
       ],
       "data": {
-        "canvas": 0.9948223142527273,
-        "page": 0.9955218128804135,
-        "vsReplay": 0.9948223142527273
+        "canvas": 0.9948558284905932,
+        "page": 0.9953814506690573,
+        "vsReplay": 0.9948558284905932
       }
     },
     {
@@ -75,15 +75,15 @@
       "area": "boot",
       "claim": "No shader was being linked just before the reference.",
       "label": "Verified",
-      "measurement": "first canvas 886 ms, first draw 910 ms, last link 4784 ms, 90 programs",
+      "measurement": "first canvas 723 ms, first draw 745 ms, last link 4162 ms, 90 programs",
       "coverage": "complete",
       "limitations": [
         "timings are from a machine with a software renderer; their order is real, their size is not a desktop's"
       ],
       "data": {
-        "firstCanvasMs": 886,
-        "firstDrawMs": 910,
-        "lastLinkMs": 4784,
+        "firstCanvasMs": 723,
+        "firstDrawMs": 745,
+        "lastLinkMs": 4162,
         "programs": 90,
         "linkingNearReference": 0
       }
@@ -208,8 +208,8 @@
     },
     {
       "path": "src/Scene.jsx",
-      "bytes": 1079,
-      "sha256": "86032979fbc774472e1a11a393840c4c170574f58d9437288c0451a8034439bf"
+      "bytes": 1113,
+      "sha256": "5152770268dafebfa8b2c05d2c6852002098d6fabbd3bd81c13cc6ef64f44146"
     },
     {
       "path": "src/App.jsx",
@@ -248,181 +248,181 @@
     },
     {
       "path": "render-graph.md",
-      "bytes": 14001,
-      "sha256": "5611a7d02802fd9b02dce70b95180185b03b0569eca600d3b5e01d4f8a9e84a5"
+      "bytes": 24002,
+      "sha256": "6773a295e0e7facd695fb28489047a83b230b342cc6a662d65edbcf932b18cfb"
     },
     {
       "path": "public/rebuild/pipeline.json",
-      "bytes": 1488403,
-      "sha256": "87ef42468dec3ef835ff074f0ffe285fa6b61965925f97ebd01087335f37f3ea"
+      "bytes": 2905626,
+      "sha256": "9e1a26a0342ebb8332e315de276b1d42b12f521bb838123b54fb8252498075ae"
     },
     {
-      "path": "public/rebuild/shaders/program-258.vert",
+      "path": "public/rebuild/shaders/program-227.vert",
       "bytes": 1994,
       "sha256": "f550817468dfa69be346f3d894755d8d805207493638e6a467537482dddd060f"
     },
     {
-      "path": "public/rebuild/shaders/program-258.frag",
+      "path": "public/rebuild/shaders/program-227.frag",
       "bytes": 3222,
       "sha256": "51a1dc4711571840c1d1a57029e09352414e7979736ea6440b4a3ebc88b17aef"
     },
     {
-      "path": "public/rebuild/shaders/program-260.vert",
+      "path": "public/rebuild/shaders/program-229.vert",
       "bytes": 3797,
       "sha256": "0099a079ac1d0872c7a462f87a62129468ac6028dfc86d4af501595b1a7b7bdf"
     },
     {
-      "path": "public/rebuild/shaders/program-260.frag",
+      "path": "public/rebuild/shaders/program-229.frag",
       "bytes": 6396,
       "sha256": "f15d1414fc4130ab5f31e0137e18fbf42cf83ddc2030f0b122317827ee9183e1"
     },
     {
-      "path": "public/rebuild/shaders/program-264.vert",
+      "path": "public/rebuild/shaders/program-233.vert",
       "bytes": 2216,
       "sha256": "60ea0bc2ea910adc38d797cbfc4c9e00cec41af5851407b5aa481eae971b9a27"
     },
     {
-      "path": "public/rebuild/shaders/program-264.frag",
+      "path": "public/rebuild/shaders/program-233.frag",
       "bytes": 7674,
       "sha256": "3ecf1b3778a277e32874a5c7b1e30bacdcd92e19e216bbb3313befde15c154d4"
     },
     {
-      "path": "public/rebuild/shaders/program-266.vert",
+      "path": "public/rebuild/shaders/program-235.vert",
       "bytes": 2607,
       "sha256": "51be4af545b01376105e2db40cc2fcaec39d8689804fad0a3f1ce10847c5a16d"
     },
     {
-      "path": "public/rebuild/shaders/program-266.frag",
+      "path": "public/rebuild/shaders/program-235.frag",
       "bytes": 8324,
       "sha256": "5317c1414e2714cd229e7adbd4531f5660abe2402aa2602d3f953c9670c49081"
     },
     {
-      "path": "public/rebuild/shaders/program-268.vert",
+      "path": "public/rebuild/shaders/program-237.vert",
       "bytes": 2753,
       "sha256": "b9bbaf50f530fab99e4e89d4fe9dc1762297d323e3831bedf7597a0f695ef93e"
     },
     {
-      "path": "public/rebuild/shaders/program-268.frag",
+      "path": "public/rebuild/shaders/program-237.frag",
       "bytes": 7683,
       "sha256": "406f8fce3cccc9b4b9b3b5d01ff7ecd7c812408a156a7c85fb7f2d7531901b3a"
     },
     {
-      "path": "public/rebuild/shaders/program-270.vert",
+      "path": "public/rebuild/shaders/program-239.vert",
       "bytes": 2083,
       "sha256": "20a58687c37c2329d3265f1bdb04066c9ad8eaaf24f58fab7aa24cff876069be"
     },
     {
-      "path": "public/rebuild/shaders/program-270.frag",
+      "path": "public/rebuild/shaders/program-239.frag",
       "bytes": 3565,
       "sha256": "1e0bf4de92cd5a0de570310108b8cc109f704b66fa214bc4dd3c34c6b71b3b74"
     },
     {
-      "path": "public/rebuild/shaders/program-272.vert",
+      "path": "public/rebuild/shaders/program-241.vert",
       "bytes": 2677,
       "sha256": "a35c77b3f7ef4d5293ebe66ca8d28549e91df009e26df09b4238f5f19ea9afdd"
     },
     {
-      "path": "public/rebuild/shaders/program-272.frag",
+      "path": "public/rebuild/shaders/program-241.frag",
       "bytes": 8142,
       "sha256": "c30a31d9e77fa39b6aa40fbee2d702b89eaaa438f461a4a5af8affedd79b2060"
     },
     {
-      "path": "public/rebuild/shaders/program-273.vert",
+      "path": "public/rebuild/shaders/program-242.vert",
       "bytes": 1722,
       "sha256": "c842cc1a17632e1b898ce9416a3438d44b8acc9e5f097c5692f1b8fe672ba7b9"
     },
     {
-      "path": "public/rebuild/shaders/program-273.frag",
+      "path": "public/rebuild/shaders/program-242.frag",
       "bytes": 5493,
       "sha256": "47dc18beddb22a299d10b1f87970064d89200331d4790397c339b9eeccb9eca1"
     },
     {
-      "path": "public/rebuild/shaders/program-274.vert",
+      "path": "public/rebuild/shaders/program-243.vert",
       "bytes": 4479,
       "sha256": "f453c0cf7fffca9ef6313d06219ae277d28da63a051a52770d24774cd6cf8fe5"
     },
     {
-      "path": "public/rebuild/shaders/program-274.frag",
+      "path": "public/rebuild/shaders/program-243.frag",
       "bytes": 6233,
       "sha256": "a4dba55d868a60eaf05f215348637c72d43aa414513f2be5cc55e45fa3c7f4a6"
     },
     {
-      "path": "public/rebuild/shaders/program-282.vert",
+      "path": "public/rebuild/shaders/program-248.vert",
       "bytes": 6009,
       "sha256": "fae4dad1c3a3a15d92d19712c17c9de3a150a1b35dcd472279609d1bd7cfe4de"
     },
     {
-      "path": "public/rebuild/shaders/program-282.frag",
-      "bytes": 5779,
-      "sha256": "be274ffa2a29d063ff05bd9324448bfdbceaa466a681e44a6f0ad7ae7fbfe53e"
-    },
-    {
-      "path": "public/rebuild/shaders/program-277.vert",
-      "bytes": 6009,
-      "sha256": "fae4dad1c3a3a15d92d19712c17c9de3a150a1b35dcd472279609d1bd7cfe4de"
-    },
-    {
-      "path": "public/rebuild/shaders/program-277.frag",
-      "bytes": 5843,
-      "sha256": "97fccf4014f4781885983fe774c9fba8c34ac7c806585868943f44ab7ccd7640"
-    },
-    {
-      "path": "public/rebuild/shaders/program-279.vert",
-      "bytes": 6009,
-      "sha256": "fae4dad1c3a3a15d92d19712c17c9de3a150a1b35dcd472279609d1bd7cfe4de"
-    },
-    {
-      "path": "public/rebuild/shaders/program-279.frag",
+      "path": "public/rebuild/shaders/program-248.frag",
       "bytes": 5779,
       "sha256": "41d73530a3c803ae807097599cf08f159ea02bebc5ef8e3c8c3f8daf41259541"
     },
     {
-      "path": "public/rebuild/shaders/program-284.vert",
+      "path": "public/rebuild/shaders/program-251.vert",
+      "bytes": 6009,
+      "sha256": "fae4dad1c3a3a15d92d19712c17c9de3a150a1b35dcd472279609d1bd7cfe4de"
+    },
+    {
+      "path": "public/rebuild/shaders/program-251.frag",
+      "bytes": 5779,
+      "sha256": "be274ffa2a29d063ff05bd9324448bfdbceaa466a681e44a6f0ad7ae7fbfe53e"
+    },
+    {
+      "path": "public/rebuild/shaders/program-246.vert",
+      "bytes": 6009,
+      "sha256": "fae4dad1c3a3a15d92d19712c17c9de3a150a1b35dcd472279609d1bd7cfe4de"
+    },
+    {
+      "path": "public/rebuild/shaders/program-246.frag",
+      "bytes": 5843,
+      "sha256": "97fccf4014f4781885983fe774c9fba8c34ac7c806585868943f44ab7ccd7640"
+    },
+    {
+      "path": "public/rebuild/shaders/program-253.vert",
       "bytes": 17494,
       "sha256": "cb32a8e052af4078198d024ec5808bd15cace4cb79b13ca4eaf97cb7226e1406"
     },
     {
-      "path": "public/rebuild/shaders/program-284.frag",
+      "path": "public/rebuild/shaders/program-253.frag",
       "bytes": 16234,
       "sha256": "8d3f3c2093bea59fa8cc5de4ae60a590282cbccd3165ea1740da559849be7f9f"
     },
     {
-      "path": "public/rebuild/shaders/program-286.vert",
+      "path": "public/rebuild/shaders/program-255.vert",
       "bytes": 17497,
       "sha256": "7af6078f642098c830537ea6c618f1adff89ac0585a68cf92f61bac7b806df12"
     },
     {
-      "path": "public/rebuild/shaders/program-286.frag",
+      "path": "public/rebuild/shaders/program-255.frag",
       "bytes": 16555,
       "sha256": "0aee83b867c38b56b359b4b98f00a842dcb02571fe6821bf1f301dd3892daef3"
     },
     {
-      "path": "public/rebuild/shaders/program-287.vert",
+      "path": "public/rebuild/shaders/program-256.vert",
       "bytes": 5085,
       "sha256": "03ed1b6268ac3f0cef87183a880961f64ca39d98f8e6f739d060dcc9603e46df"
     },
     {
-      "path": "public/rebuild/shaders/program-287.frag",
+      "path": "public/rebuild/shaders/program-256.frag",
       "bytes": 3682,
       "sha256": "8f5a48269845206893f6b1c2164de2b3877e98efff56e2b3e25c47804a09ac48"
     },
     {
-      "path": "public/rebuild/shaders/program-288.vert",
+      "path": "public/rebuild/shaders/program-257.vert",
       "bytes": 2057,
       "sha256": "73f2defcf06bcbae6be8dc73069c7471faddac65aa3b8eb91adfaef8ff7a819b"
     },
     {
-      "path": "public/rebuild/shaders/program-288.frag",
+      "path": "public/rebuild/shaders/program-257.frag",
       "bytes": 5125,
       "sha256": "a467879400dc2e0a19b25b9d0ac5cb89a184d0f9d27636e46ce2822097968d27"
     },
     {
-      "path": "public/rebuild/shaders/program-289.vert",
+      "path": "public/rebuild/shaders/program-258.vert",
       "bytes": 8133,
       "sha256": "4043056b7957e2078c223e9bc1c71ebf05befc6b21dfa15282c012dc0fe22252"
     },
     {
-      "path": "public/rebuild/shaders/program-289.frag",
+      "path": "public/rebuild/shaders/program-258.frag",
       "bytes": 3726,
       "sha256": "1e3d6c6ec397595fb7b3947649026a115ac0e481c221f5a6b0c4890812b9b510"
     },
@@ -447,32 +447,32 @@
       "sha256": "1a1971f0433e80bfd3bf3ce976385a334b85950f7343c8db6f9f8e72320add18"
     },
     {
-      "path": "public/rebuild/shaders/program-85.vert",
+      "path": "public/rebuild/shaders/program-121.vert",
       "bytes": 4197,
       "sha256": "db1ad7072fc5a691b290cdc71ddb21fd5bfbf59d1893bde6316db9b740ce4c99"
     },
     {
-      "path": "public/rebuild/shaders/program-85.frag",
+      "path": "public/rebuild/shaders/program-121.frag",
       "bytes": 4854,
       "sha256": "61c6b25e531c9a65dbd7de9f8b378371624fb657fabeb80826f68e3e83637310"
     },
     {
-      "path": "public/rebuild/shaders/program-89.vert",
+      "path": "public/rebuild/shaders/program-125.vert",
       "bytes": 6009,
       "sha256": "fae4dad1c3a3a15d92d19712c17c9de3a150a1b35dcd472279609d1bd7cfe4de"
     },
     {
-      "path": "public/rebuild/shaders/program-89.frag",
+      "path": "public/rebuild/shaders/program-125.frag",
       "bytes": 5705,
       "sha256": "e6ee8ab022cd57c3a59ecec823b522566955f86446c1052261a2b6e45de96a76"
     },
     {
-      "path": "public/rebuild/shaders/program-94.vert",
+      "path": "public/rebuild/shaders/program-130.vert",
       "bytes": 4197,
       "sha256": "db1ad7072fc5a691b290cdc71ddb21fd5bfbf59d1893bde6316db9b740ce4c99"
     },
     {
-      "path": "public/rebuild/shaders/program-94.frag",
+      "path": "public/rebuild/shaders/program-130.frag",
       "bytes": 4038,
       "sha256": "4bdc5a9e5ed8d3d9257c4f388a5b2783e749b22ac7d3636965dbce997b0a1b24"
     },
@@ -548,28 +548,28 @@
     },
     {
       "path": "public/rebuild/data.bin",
-      "bytes": 45755976,
-      "sha256": "60881139a62716012f5dee010274a1de034ee69a810daad50760eb5ac165112a"
+      "bytes": 45765784,
+      "sha256": "2a9881aa7ede5236854f5ad84b25d72eb2f0d6bf1e8348103273e7b06cf947db"
     },
     {
       "path": "rebuild/rebuild.js",
-      "bytes": 59067,
-      "sha256": "a63b01377ea4c51079368f12c92e2b143d7e8dde32982424f6069d3430d012ea"
+      "bytes": 60029,
+      "sha256": "a398a552ec59d9f2dd7b75d313696621a9d0a3c556f52fcb13c1d739c8d13caa"
     },
     {
       "path": "public/scene/scene.glb",
       "bytes": 15892,
-      "sha256": "99150eb64f308507dcdf65b4519abb81d2ddeaeae9afc8a87d98a2269f23f63d"
+      "sha256": "4ae8382b82600c1b936269318846c4dab51886f480523e9ba65a35346cdcce60"
     },
     {
       "path": "scene/scene.js",
-      "bytes": 2220,
-      "sha256": "8bed7421813a15e9a7fc94d3568e15953d1fbc2a4b548ee193c881cc30750baa"
+      "bytes": 2254,
+      "sha256": "2e0bf79bcea61ee6f251107b72634838e3fbc11344572366f435aafad1f1f81b"
     },
     {
       "path": "scene/scene.md",
       "bytes": 1873,
-      "sha256": "d9378351a85f3e6d3cc3effaf55bb417a0b03e2f7e933c9ad548d4adf5811641"
+      "sha256": "3840683b729ce2a2da956b9e58ac27f84e6094a6d890ccfa96efacdac52e7cfb"
     },
     {
       "path": "layout.json",
@@ -583,8 +583,8 @@
     },
     {
       "path": "rebuild.md",
-      "bytes": 8768,
-      "sha256": "f860e9e908f271f5929d37763634f3a36b0b684f966169794670711970447304"
+      "bytes": 8652,
+      "sha256": "d931e898bf7c0ef8f1eee847de8c08d1793a0f6d2437b7fa65a2c0eb5dd3d6a7"
     }
   ]
 }

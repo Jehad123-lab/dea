@@ -1,7 +1,3 @@
-// The editable rebuild: the site's render graph as three.js objects (rebuild/rebuild.js reads public/rebuild/pipeline.json).
-// Each draw is a RawShaderMaterial with the site's GLSL (public/rebuild/shaders/), cameras and model matrices are three.js
-// matrices, framebuffers are WebGLRenderTargets. rb.uniforms[i].name.value, rb.setPassEnabled(i, false) and the shader
-// files change it. Vertex and texture bytes are recorded from the site (see rebuild.md for where).
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { mountRebuild } from '../rebuild/rebuild.js';
@@ -30,15 +26,6 @@ function attachOrbit(rb) {
   let dragging = false;
   let lx = 0;
   let ly = 0;
-  let raf = 0;
-
-  const scheduleRender = () => {
-    if (raf) return;
-    raf = requestAnimationFrame(() => {
-      raf = 0;
-      rb.renderFrames(1);
-    });
-  };
 
   const apply = () => {
     for (const c of cams) {
@@ -52,7 +39,6 @@ function attachOrbit(rb) {
       c.cam.matrix.copy(m);
       c.cam.matrixWorldInverse.copy(m).invert();
     }
-    scheduleRender();
   };
 
   const onDown = (e) => {
@@ -90,16 +76,13 @@ function attachOrbit(rb) {
   window.addEventListener('pointercancel', onUp);
   window.addEventListener('wheel', onWheel, { passive: false });
   window.addEventListener('dblclick', onDbl);
-  window.addEventListener('resize', scheduleRender);
   return () => {
-    if (raf) cancelAnimationFrame(raf);
     window.removeEventListener('pointerdown', onDown);
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onUp);
     window.removeEventListener('wheel', onWheel);
     window.removeEventListener('dblclick', onDbl);
-    window.removeEventListener('resize', scheduleRender);
   };
 }
 
@@ -110,14 +93,12 @@ export default function Scene() {
     let rb = null;
     let dead = false;
     let detach = () => {};
-    mountRebuild(ref.current, { base: `${import.meta.env?.BASE_URL ?? '/'}rebuild/`, once: true }).then((r) => {
+    mountRebuild(ref.current, { base: `${import.meta.env?.BASE_URL ?? '/'}rebuild/` }).then((r) => {
       rb = r;
       if (dead) {
         r.stop();
         return;
       }
-      r.fit();
-      r.renderFrames(1);
       detach = attachOrbit(r);
       setReady(true);
     });

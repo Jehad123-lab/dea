@@ -1,10 +1,10 @@
 {
   "url": "https://www.igloo.inc",
-  "extractedAt": "2026-11-27T11:25:02.571Z",
+  "extractedAt": "2026-11-27T15:20:53.987Z",
   "target": "react",
   "title": "Igloo Inc.",
-  "score": 0.9955218128804135,
-  "canvasScore": 0.9948223142527273,
+  "score": 0.9953814506690573,
+  "canvasScore": 0.9948558284905932,
   "shaders": [
     {
       "name": "MousePosProgressProgress2Shader",

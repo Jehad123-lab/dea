@@ -33,9 +33,11 @@ precision highp float;
 #define HIGH_PRECISION
 #define SHADER_TYPE ShaderMaterial
 #define SHADER_NAME 
+#define FLIP_SIDED
 uniform mat4 viewMatrix;
 uniform vec3 cameraPosition;
 uniform bool isOrthographic;
+#define OPAQUE
 
 const mat3 LINEAR_SRGB_TO_LINEAR_DISPLAY_P3 = mat3(
 	vec3( 0.8224621, 0.177538, 0.0 ),
@@ -70,24 +72,28 @@ vec4 linearToOutputTexel( vec4 value ) { return ( LinearTransferOETF( value ) );
 
                 //- edit
                 uniform Global{vec2 resolution;vec2 resolutionUI;float aspect;float time;float dtRatio;};
-                float median(sampler2D tMap,vec2 uv){vec3 tex=texture2D(tMap,uv).rgb;return max(min(tex.r,tex.g),min(max(tex.r,tex.g),tex.b))-0.5;}float msdf(sampler2D tMap,vec2 uv){float signedDist=median(tMap,uv);float d=fwidth(signedDist);return smoothstep(-d,d,signedDist);}float msdfOpaque(sampler2D tMap,vec2 uv){return step(0.0,median(tMap,uv));}float msdf(sampler2D tMap,vec2 uv,float outlineWidth){float signedDist=median(tMap,uv);float d=max(10e-6,fwidth(signedDist));return smoothstep(-d-outlineWidth,d-outlineWidth,signedDist)*smoothstep(outlineWidth+d,outlineWidth-d,signedDist);}float msdfOpaque(sampler2D tMap,vec2 uv,float outlineWidth){float signedDist=median(tMap,uv);return step(-outlineWidth,signedDist)*step(signedDist,outlineWidth);}
 
-                flat varying float vProgress;
-                flat varying int vSide;
-                flat varying ivec2 vNums;
-
-                uniform sampler2D tNums;
-                uniform vec3 uColor;
                 varying vec2 vUv;
+                varying vec3 vPos;
+
+                uniform vec3 uColor1;
+                uniform vec3 uColor2;
+                uniform vec3 uIntroColor;
+                uniform float uProgress;
 
                 void main() {
 
-                    float numStep = 1.0 / 10.0;
-                    float num = float(vSide < 0 ? vNums.x : vNums.y);
+                    // light to dark gradient
+                    vec2 screenUv = gl_FragCoord.xy / resolution;
+                    float grad = (screenUv.x + screenUv.y) * 0.5;
+                    grad = pow(grad, 2.0);
+                    vec3 color1 = uColor1;
+                    vec3 color2 = uColor2;
+                    vec3 color = mix(color2, color1, grad);
 
-                    vec2 uv = vec2(numStep * vUv.x + num * numStep, vUv.y);
-                    float a = msdf(tNums, uv);
+                    // intro animation
+                    color = mix(uIntroColor, color, uProgress);
 
-                    gl_FragColor = vec4(uColor, a);
+                    gl_FragColor = vec4(color, 1.0);
                 }
             

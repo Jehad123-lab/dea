@@ -57,6 +57,16 @@ for (const d of demos) {
     rmSync(binOut);
     console.log(`demo ${d.slug}: compressed data.bin ${(raw.length / 1e6).toFixed(2)} MB -> ${(gz.length / 1e6).toFixed(2)} MB`);
   }
+  const pipeOut = join(out, d.slug, 'rebuild', 'pipeline.json');
+  if (existsSync(pipeOut)) {
+    const raw = readFileSync(pipeOut);
+    if (raw.length > 1_000_000) {
+      const gz = gzipSync(raw, { level: 9 });
+      writeFileSync(`${pipeOut}.gz`, gz);
+      rmSync(pipeOut);
+      console.log(`demo ${d.slug}: compressed pipeline.json ${(raw.length / 1e6).toFixed(2)} MB -> ${(gz.length / 1e6).toFixed(2)} MB`);
+    }
+  }
   if (existsSync(join(dir, 'preview'))) {
     mkdirSync(join(out, d.slug, 'preview'), { recursive: true });
     for (const f of readdirSync(join(dir, 'preview'))) if (f.endsWith('.png')) cpSync(join(dir, 'preview', f), join(out, d.slug, 'preview', f));

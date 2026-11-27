@@ -1,10 +1,10 @@
 {
   "schema": "dea.evidence/1",
   "url": "https://threejs.org/examples/webgl_animation_keyframes.html",
-  "runId": "20261127-112511-threejs-org-9f009804",
-  "madeAt": "2026-11-27T11:27:18.322Z",
+  "runId": "20261127-153353-threejs-org-4c5df8d6",
+  "madeAt": "2026-11-27T15:35:58.230Z",
   "mode": "quick",
-  "machine": "linux · 2 CPUs · 4 GB",
+  "machine": "linux · 2 CPUs · 3 GB",
   "counts": {
     "Verified": 4,
     "Inferred": 0,
@@ -17,7 +17,7 @@
       "area": "run",
       "claim": "The reference screenshot is the settled site (no loader visible).",
       "label": "Verified",
-      "measurement": "no loader element was visible at the reference (76 s after load)",
+      "measurement": "no loader element was visible at the reference (81 s after load)",
       "coverage": "complete",
       "limitations": [
         "a loader that does not use a recognisable element would not be seen"
@@ -28,18 +28,18 @@
       "area": "scene",
       "claim": "The capture replay draws the recorded frame the site drew.",
       "label": "Verified",
-      "measurement": "canvas 100%, page 98.8% against the reference; 1 recorded frame(s), 1 passes, 79 draws, 14 programs, 47.2 MB",
+      "measurement": "canvas 100%, page 98.8% against the reference; 10 recorded frame(s), 10 passes, 790 draws, 14 programs, 47.2 MB",
       "coverage": "partial",
       "limitations": [
         "a replay of one held frame scores near 100% by construction: it shows the recording plays back, not that motion or input is understood",
         "scored, but the recorded bytes are not in the kit (--own-assets)"
       ],
       "data": {
-        "canvas": 0.9999584661787496,
-        "page": 0.9880863957849643,
-        "frames": 1,
-        "passes": 1,
-        "draws": 79,
+        "canvas": 0.9999550323853736,
+        "page": 0.9882210500910851,
+        "frames": 10,
+        "passes": 10,
+        "draws": 790,
         "programs": 14
       }
     },
@@ -48,16 +48,16 @@
       "area": "scene",
       "claim": "The editable three.js rebuild draws the same picture as the capture replay.",
       "label": "Verified",
-      "measurement": "canvas 80.2%, page 87.9% against the reference; 80.2% against the replay",
+      "measurement": "canvas 79.9%, page 87.4% against the reference; 79.9% against the replay",
       "coverage": "partial",
       "limitations": [
         "one frame: the same caveat as the replay",
         "--own-assets: images are placeholders and big meshes are coarse stand-ins (or boxes), so this score is lower by design"
       ],
       "data": {
-        "canvas": 0.8024681711476129,
-        "page": 0.8790114895886625,
-        "vsReplay": 0.8024463995482098
+        "canvas": 0.7990479434386032,
+        "page": 0.8740040149207219,
+        "vsReplay": 0.7990199652330267
       }
     },
     {
@@ -75,15 +75,15 @@
       "area": "boot",
       "claim": "No shader was being linked just before the reference.",
       "label": "Verified",
-      "measurement": "first canvas 1686 ms, first draw 1743 ms, last link 5952 ms, 17 programs",
+      "measurement": "first canvas 413 ms, first draw 446 ms, last link 2810 ms, 17 programs",
       "coverage": "complete",
       "limitations": [
         "timings are from a machine with a software renderer; their order is real, their size is not a desktop's"
       ],
       "data": {
-        "firstCanvasMs": 1686,
-        "firstDrawMs": 1743,
-        "lastLinkMs": 5952,
+        "firstCanvasMs": 413,
+        "firstDrawMs": 446,
+        "lastLinkMs": 2810,
         "programs": 17,
         "linkingNearReference": 0
       }
@@ -92,6 +92,22 @@
   "unknowns": [
     {
       "id": "unknown.1",
+      "topic": "The first screen of the rebuild is 24.4% similar",
+      "missing": "Layout, meshes or images outside the shader are not rebuilt.",
+      "follows": [],
+      "next": [
+        {
+          "why": "wait longer for the intro before the reference screenshot",
+          "command": "dea extract https://threejs.org/examples/webgl_animation_keyframes.html --reference-ms 120000"
+        },
+        {
+          "why": "read the values and drivers of every uniform",
+          "command": "dea trace https://threejs.org/examples/webgl_animation_keyframes.html --ms 30000"
+        }
+      ]
+    },
+    {
+      "id": "unknown.2",
       "topic": "No live GSAP timelines were captured",
       "missing": "Either the site animates without GSAP, or its intro tweens had finished before DEA read the GSAP instance.",
       "follows": [
@@ -132,8 +148,8 @@
     },
     {
       "path": "src/Scene.jsx",
-      "bytes": 1079,
-      "sha256": "86032979fbc774472e1a11a393840c4c170574f58d9437288c0451a8034439bf"
+      "bytes": 1113,
+      "sha256": "5152770268dafebfa8b2c05d2c6852002098d6fabbd3bd81c13cc6ef64f44146"
     },
     {
       "path": "src/App.jsx",
@@ -172,13 +188,13 @@
     },
     {
       "path": "render-graph.md",
-      "bytes": 6064,
-      "sha256": "0b989ed51dc706a9e00b81d7301b28c207d2a8bed03fbffd3dae47350bd40e99"
+      "bytes": 20390,
+      "sha256": "914acc825e1be58fec1084697166d6278e6d7e8eb567f3b568768eb71da7d5dd"
     },
     {
       "path": "public/rebuild/pipeline.json",
-      "bytes": 2040408,
-      "sha256": "46598bb7efb1ca50caed1ff2fc013270654de6926af44215528447682e84cb08"
+      "bytes": 30929902,
+      "sha256": "6e9ffe1d3be0af17e9682aad05272c000afcb69efdee2993167e1dcb82896353"
     },
     {
       "path": "public/rebuild/shaders/SkyShader-378.vert",
@@ -201,34 +217,34 @@
       "sha256": "c5616d4ecda3cfac817de4a8321fb6c79e9ef55323fb33a65c414eaa1aed7b83"
     },
     {
-      "path": "public/rebuild/shaders/interiors-384.vert",
-      "bytes": 19867,
-      "sha256": "6dfec2c0f3f37b9e6c19ebe8c69df995613f22bded9ba50a350093d0bf43d22d"
-    },
-    {
-      "path": "public/rebuild/shaders/interiors-384.frag",
-      "bytes": 81903,
-      "sha256": "a52f8a272418f3f22385dae23af40e3aa44d0f4c0d4edac07f65aaee45eaeb30"
-    },
-    {
-      "path": "public/rebuild/shaders/alpha-0-387.vert",
+      "path": "public/rebuild/shaders/alpha-0-384.vert",
       "bytes": 19815,
       "sha256": "da14d869b693f6af23739c69505ac7d4afc9f620f26622cab300b859540f1b99"
     },
     {
-      "path": "public/rebuild/shaders/alpha-0-387.frag",
+      "path": "public/rebuild/shaders/alpha-0-384.frag",
       "bytes": 81899,
       "sha256": "e9085ce76cb510acfdebd26862f4216fd05942d102a09355e42735c9935d3640"
     },
     {
-      "path": "public/rebuild/shaders/alpha-393.vert",
+      "path": "public/rebuild/shaders/alpha-390.vert",
       "bytes": 19868,
       "sha256": "31cb879e2440abc38f1561b4feb09d950ca880b8d82565666d30e5a148200631"
     },
     {
-      "path": "public/rebuild/shaders/alpha-393.frag",
+      "path": "public/rebuild/shaders/alpha-390.frag",
       "bytes": 81931,
       "sha256": "90ec402d117c451d627a5fe1f82f86ac684ce47cef71f097a572283422a73843"
+    },
+    {
+      "path": "public/rebuild/shaders/interiors-394.vert",
+      "bytes": 19867,
+      "sha256": "6dfec2c0f3f37b9e6c19ebe8c69df995613f22bded9ba50a350093d0bf43d22d"
+    },
+    {
+      "path": "public/rebuild/shaders/interiors-394.frag",
+      "bytes": 81903,
+      "sha256": "a52f8a272418f3f22385dae23af40e3aa44d0f4c0d4edac07f65aaee45eaeb30"
     },
     {
       "path": "public/rebuild/shaders/normal-397.vert",
@@ -322,28 +338,28 @@
     },
     {
       "path": "public/rebuild/data.bin",
-      "bytes": 47159580,
-      "sha256": "551405123244b9338f13a47ea065d983d09f8093a1ad45239e3df98a84c0a82c"
+      "bytes": 47239012,
+      "sha256": "ee67249329ad45d769c0f6d2da3278f63f8083c058b6b26333257bb1ca340da5"
     },
     {
       "path": "rebuild/rebuild.js",
-      "bytes": 59067,
-      "sha256": "a63b01377ea4c51079368f12c92e2b143d7e8dde32982424f6069d3430d012ea"
+      "bytes": 60029,
+      "sha256": "a398a552ec59d9f2dd7b75d313696621a9d0a3c556f52fcb13c1d739c8d13caa"
     },
     {
       "path": "public/scene/scene.glb",
-      "bytes": 65464,
-      "sha256": "9d8777940d998d791c72d0934e2007c7deb35cc5febefd71d39c1ade7ee9e4de"
+      "bytes": 65516,
+      "sha256": "79fb09e86129e7aa095a5acb0a1c8e09bba1d9d1041589bdea2db297731a0993"
     },
     {
       "path": "scene/scene.js",
-      "bytes": 2220,
-      "sha256": "8bed7421813a15e9a7fc94d3568e15953d1fbc2a4b548ee193c881cc30750baa"
+      "bytes": 2254,
+      "sha256": "2e0bf79bcea61ee6f251107b72634838e3fbc11344572366f435aafad1f1f81b"
     },
     {
       "path": "scene/scene.md",
-      "bytes": 8078,
-      "sha256": "f13000ab54cc863caa3e2069b1e18804886bd864c0be9c5b7b5f84ac23a23c76"
+      "bytes": 8077,
+      "sha256": "6116f7cd5cef4a15a7b9de389c42804810a7ebe1b5a5f926b51573a81fc76a0a"
     },
     {
       "path": "layout.json",
@@ -357,8 +373,8 @@
     },
     {
       "path": "rebuild.md",
-      "bytes": 3236,
-      "sha256": "8d785dc367a901bc6619ec04f49c82a6ddf93b90036d59b2c6b429202c270b71"
+      "bytes": 6354,
+      "sha256": "b89d5c401c8aed5ad12a3c4356c0dadcafcf774dda5bc192b92aff848c493d1e"
     }
   ]
 }
