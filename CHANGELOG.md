@@ -11,6 +11,11 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 54: debug panels left out of the text layout, and their full painted extent masked. On threejs.org's skinning
+  example the layout read kept 40-odd lil-gui labels next to the one real info line, so the site's text layout lost to the
+  plain heading. The layout read now keys each panel and drops every box, shape and graphic inside it (`withoutUi` does the
+  same for a cached read, by key or by being at least half inside a panel). The panel box also follows what the page still
+  hits below its last row (a pseudo-element or a scroll area's background), which Round 53's descendant boxes did not see.
 - Round 53: cost material variants grouped by shared vertex buffers, and debug panels masked to their full extent. Since
   Round 50 a real material keeps every draw of its buffers real, so on lusion.co materials 4, 6 and 5 each scored exactly like
   the real-meshes variant (91.6%) and used up the budget the colour grids needed. Stand-ins now record their position buffer;

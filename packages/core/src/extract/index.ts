@@ -79,6 +79,7 @@ import {
   serveDir,
   sideBySide,
   type UiOverlay,
+  withoutUi,
 } from './preview.ts';
 import {
   detectTechniques,
@@ -1280,6 +1281,8 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           : [ref.layout]
       )
         .filter((l): l is HeroLayout => Boolean(l?.boxes.length || l?.canvas || l?.background))
+        // Round 54: the debug panels' rows are not the site's text (a cached read from before Round 54 still has them)
+        .map((l) => withoutUi(l, (ref.layout as { overlays?: UiOverlay[] } | null)?.overlays))
         // --own-assets: the site's logos and images on the first screen become placeholders of the same size
         .map((l) =>
           opts.ownAssets

@@ -313,6 +313,28 @@ export interface UiOverlay {
   y: number;
   w: number;
   h: number;
+  /** Round 54: the panel root's element key, so the layout can leave out everything inside it */
+  k?: string;
+}
+
+/** Round 54: a layout without the debug panels' own text, shapes and graphics (a layout read before Round 54 still has them):
+ * by element key when the panel has one, else anything at least half inside a panel's box */
+export function withoutUi<L extends { boxes?: unknown[]; shapes?: unknown[]; graphics?: unknown[] }>(l: L, overlays: UiOverlay[] | null | undefined): L {
+  const ui = (overlays ?? []).filter((o) => o.w > 0 && o.h > 0);
+  if (!ui.length) return l;
+  const inside = (it: unknown): boolean => {
+    const b = it as { k?: string; x?: number; y?: number; w?: number; h?: number };
+    for (const o of ui) {
+      if (o.k && typeof b.k === 'string' && (b.k === o.k || b.k.startsWith(`${o.k}>`) || b.k.startsWith(`${o.k}::`))) return true;
+      if (typeof b.x !== 'number' || typeof b.y !== 'number' || !b.w || !b.h || b.w <= 0 || b.h <= 0) continue;
+      const iw = Math.min(b.x + b.w, o.x + o.w) - Math.max(b.x, o.x);
+      const ih = Math.min(b.y + b.h, o.y + o.h) - Math.max(b.y, o.y);
+      if (iw > 0 && ih > 0 && iw * ih >= b.w * b.h * 0.5) return true;
+    }
+    return false;
+  };
+  const keep = (list: unknown[] | undefined) => (Array.isArray(list) ? list.filter((it) => !inside(it)) : list);
+  return { ...l, boxes: keep(l.boxes), shapes: keep(l.shapes), graphics: keep(l.graphics) };
 }
 
 /** Round 51: overlays as fractions of the viewport (the shape compareImages masks), dropping empty ones */
@@ -713,13 +735,21 @@ export const LAYOUT_READ = (section: string | null, o: LayoutReadOptions = {}) =
       if (q.width < 1 || q.height < 1) continue;
       L = Math.min(L, q.left); T = Math.min(T, q.top); R = Math.max(R, q.right); B = Math.max(B, q.bottom);
     }
+    // Round 54: what the panel paints that no box reports (a pseudo-element, a scroll area's background): walk down from the
+    // bottom at the panel's middle while the page still hits the panel there
+    const mx = Math.min(W - 1, Math.max(0, (L + R) / 2));
+    for (let yy = B + 4; yy < H; yy += 8) {
+      const hit = document.elementFromPoint(mx, yy);
+      if (!hit || !(hit === el || el.contains(hit))) break;
+      B = yy + 4;
+    }
     const x = Math.max(0, L), y = Math.max(0, T);
     const w = Math.min(W, R) - x, h = Math.min(H, B) - y;
     if (w < 8 || h < 8 || w * h > W * H * 0.5) return;
     const cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
     seenUi.add(el);
-    overlays.push({ kind, x, y, w, h });
+    overlays.push({ kind, x, y, w, h, k: keyOf(el) });
   };
   const UI = [['.lil-gui.root, .lil-gui.autoPlace', 'lil-gui'], ['.dg.ac > .dg, .dg.main', 'dat.gui'], ['.tp-dfwv, .tp-rotv', 'Tweakpane'], ['#leva__root > div', 'Leva'], ['#stats, .stats', 'Stats.js']];
   for (const [sel, kind] of UI) { try { for (const el of document.querySelectorAll(sel)) addUi(el, kind); } catch (e) {} }
@@ -736,7 +766,11 @@ export const LAYOUT_READ = (section: string | null, o: LayoutReadOptions = {}) =
     const r = el.getBoundingClientRect();
     if (r.width > 0 && r.width <= 120 && r.height <= 80) addUi(el, 'Stats.js');
   }
-  return { viewport: { width: W, height: H }, boxes, canvas, background: plain(background), shapes, graphics, overlays };
+  // Round 54: a debug panel is never part of the design: its rows are not rebuilt as the site's text, shapes or graphics
+  // (threejs.org's skinning example: 40-odd lil-gui labels sat in the layout next to the one real info line)
+  const inUi = (it) => !!it && typeof it.k === 'string' && overlays.some((o) => it.k === o.k || it.k.startsWith(o.k + '>') || it.k.startsWith(o.k + '::'));
+  const keep = (list) => (Array.isArray(list) ? list.filter((it) => !inUi(it)) : list);
+  return { viewport: { width: W, height: H }, boxes: keep(boxes), canvas, background: plain(background), shapes: keep(shapes), graphics: keep(graphics), overlays };
 })()`;
 
 /** Where each first-screen element sits at a few scroll positions: a box that moves, scales or fades with scroll gets keyframes. */
