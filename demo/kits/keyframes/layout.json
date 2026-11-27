@@ -1,0 +1,43 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "boxes": [
+    {
+      "k": "body:2>div:2",
+      "zp": [
+        1
+      ],
+      "o": 6,
+      "tag": "div",
+      "text": "three.js webgl - animation - keyframes\nModel: Littlest Tokyo by Glen Fox, CC Attribution.",
+      "rich": "<span style=\"color:rgb(41, 131, 255)\">three.js</span> webgl - animation - keyframes<br> Model: <span style=\"color:rgb(41, 131, 255)\">Littlest Tokyo</span> by <span style=\"color:rgb(41, 131, 255)\">Glen Fox</span>, CC Attribution.",
+      "deco": "",
+      "fstyle": "normal",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 68,
+      "fontFamily": "monospace",
+      "fontSize": 13,
+      "fontWeight": "400",
+      "letterSpacing": "normal",
+      "lineHeight": "24px",
+      "color": "rgb(0, 0, 0)",
+      "textTransform": "none",
+      "textAlign": "center",
+      "opacity": 1
+    }
+  ],
+  "canvas": {
+    "x": 0,
+    "y": 0,
+    "w": 1440,
+    "h": 900,
+    "radius": "0px"
+  },
+  "background": "rgb(226, 224, 224)",
+  "shapes": [],
+  "graphics": []
+}

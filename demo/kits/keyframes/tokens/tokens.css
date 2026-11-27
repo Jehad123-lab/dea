@@ -1,0 +1,15 @@
+/* Design tokens extracted by DEA. Values were read from the rendered page (Verified); names are DEA's. */
+:root {
+  --color-background: #e2e0e0;
+  --color-text: #000000;
+  --color-neutral-1: #e2e0e0;
+  --color-neutral-2: #000000;
+  --font-primary: monospace, system-ui, sans-serif;
+  --text-13: 13px;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-text);
+  font-family: var(--font-primary);
+}
