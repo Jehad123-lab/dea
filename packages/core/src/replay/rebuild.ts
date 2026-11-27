@@ -204,6 +204,10 @@ export interface StandInInfo {
   box?: string;
   /** Round 41: how many mesh draws read the same position buffer (above 1: a batched or shared mesh) */
   sharedBuffer?: number;
+  /** Round 43: stand-in triangles turned back to the site's facing (Round 42) */
+  flipped?: number;
+  /** Round 43: stand-in triangles kept in both windings (the two sides of a thin shell, Round 42) */
+  bothSides?: number;
 }
 
 /**
@@ -521,13 +525,19 @@ export function standInTable(list: StandInInfo[], max = 40): string[] {
   const L = [
     `### Stand-ins (${list.length}, most vertices first${rows.length > max ? `, first ${max}` : ''})`,
     '',
-    '| material | program | draw | instances | shares its buffer with | vertices: site → stand-in | inputs kept | inputs lost (read as 0) |',
-    '|---|---|---|---|---|---|---|---|',
+    '| material | program | draw | instances | shares its buffer with | vertices: site → stand-in | triangles turned back / kept both sides | inputs kept | inputs lost (read as 0) |',
+    '|---|---|---|---|---|---|---|---|---|',
   ];
   for (const r of rows.slice(0, max))
     L.push(
-      `| ${r.material} | ${r.program.replace(/\|/g, '/')} | ${MODE_NAME[r.mode] ?? `mode ${r.mode}`} | ${r.instances || '-'} | ${(r.sharedBuffer ?? 1) > 1 ? `${(r.sharedBuffer ?? 1) - 1} other draw(s)` : '-'} | ${r.vertices} → ${r.box ? `box (${r.box})` : r.standInVertices} | ${r.kept.join(', ') || '-'} | ${r.dropped.join(', ') || '-'} |`,
+      `| ${r.material} | ${r.program.replace(/\|/g, '/')} | ${MODE_NAME[r.mode] ?? `mode ${r.mode}`} | ${r.instances || '-'} | ${(r.sharedBuffer ?? 1) > 1 ? `${(r.sharedBuffer ?? 1) - 1} other draw(s)` : '-'} | ${r.vertices} → ${r.box ? `box (${r.box})` : r.standInVertices} | ${r.box ? '-' : `${r.flipped ?? 0} / ${r.bothSides ?? 0}`} | ${r.kept.join(', ') || '-'} | ${r.dropped.join(', ') || '-'} |`,
     );
+  L.push(
+    '',
+    '- instances: how many copies one draw makes (instanced drawing); "-" is a single copy, also for a batched mesh drawn piece by piece (multi-draw)',
+    "- triangles turned back: stand-in triangles that turned over when their corners moved to the cell average and were turned back to face the way the site's did; kept both sides: triangles kept in both windings, the two sides of a thin shell",
+    ...(rows.length > max ? [`- all ${list.length} stand-ins: extract.json, replay.rebuild.stats.standIns`] : []),
+  );
   const lost = new Map<string, number>();
   for (const r of list) for (const d of r.dropped) lost.set(d, (lost.get(d) ?? 0) + 1);
   if (lost.size)
@@ -539,6 +549,14 @@ export function standInTable(list: StandInInfo[], max = 40): string[] {
         .join(', ')}`,
     );
   return L;
+}
+
+/** which cell of the TEX_GRID x TEX_GRID colour grid a UV falls in (the image repeats), 1-based; 0 when unreadable */
+export function uvBucket(uv: number[], grid = TEX_GRID): number {
+  const [u, v] = uv;
+  if (!Number.isFinite(u) || !Number.isFinite(v)) return 0;
+  const f = (x: number) => Math.min(grid - 1, Math.floor((x - Math.floor(x)) * grid));
+  return 1 + f(u) * grid + f(v);
 }
 
 /** a triangle's (unnormalized) face normal, by its winding */
@@ -570,7 +588,7 @@ export function proxyMesh(
   max: number[],
   grid = PROXY_GRID,
   extra: Array<{ name: string; size: number; read: (v: number) => number[]; pick?: boolean }> = [],
-): { pos: number[]; idx: number[]; attrs?: Record<string, { size: number; data: number[] }> } | null {
+): { pos: number[]; idx: number[]; attrs?: Record<string, { size: number; data: number[] }>; flipped?: number; bothSides?: number } | null {
   const ext = [0, 1, 2].map((k) => Math.max(max[k] - min[k], 1e-9));
   const big = Math.max(...ext);
   const cells = ext.map((e) => Math.max(1, Math.round((grid * e) / big)));
@@ -583,6 +601,11 @@ export function proxyMesh(
   // also carries the normal's main direction (6 buckets): same positions grid, so no more of the site's shape is shipped.
   const nrm = extra.findIndex((e) => e.size === 3 && /normal/i.test(e.name));
   const splitByNormal = nrm >= 0;
+  // Round 43: with --own-assets each image is a ${TEX_GRID}x${TEX_GRID} grid of its own colours, so what colour a stand-in vertex
+  // shows depends only on which grid cell its UV falls in. Averaging the UVs of a cell that spans several islands of a texture
+  // atlas (three.js keyframes' Littlest Tokyo: one baked atlas for the whole model) landed in a cell of some other part of the
+  // model. The cell key now also carries the UV's grid cell: same position grid, so no more of the site's shape is shipped.
+  const uvi = extra.findIndex((e) => e.size === 2 && !e.pick && /uv|texcoord/i.test(e.name));
   const cluster = (v: number): number => {
     const known = vertCell.get(v);
     if (known != null) return known;
@@ -593,6 +616,7 @@ export function proxyMesh(
       key = key * (grid + 1) + c;
     }
     if (splitByNormal) key = key * 7 + normalBucket(extra[nrm].read(v));
+    if (uvi >= 0) key = key * (TEX_GRID * TEX_GRID + 1) + uvBucket(extra[uvi].read(v));
     let id = cellOf.get(key);
     if (id == null) {
       id = sums.length;
@@ -639,13 +663,17 @@ export function proxyMesh(
   // different triangle: both sides stay.
   const idx: number[] = [];
   const seen = new Set<string>();
+  let flipped = 0;
   for (let t = 0; t < facing.length; t++) {
     let a = tri[t * 3];
     let b = tri[t * 3 + 1];
     let c = tri[t * 3 + 2];
     const n = triNormal(P(a), P(b), P(c));
     const f = facing[t];
-    if (n[0] * f[0] + n[1] * f[1] + n[2] * f[2] < 0) [b, c] = [c, b];
+    if (n[0] * f[0] + n[1] * f[1] + n[2] * f[2] < 0) {
+      [b, c] = [c, b];
+      flipped++;
+    }
     // one key per winding: rotate so the smallest corner leads (a b c, b c a, c a b are the same triangle)
     while (a > b || a > c) [a, b, c] = [b, c, a];
     const key = `${a},${b},${c}`;
@@ -654,7 +682,13 @@ export function proxyMesh(
     idx.push(a, b, c);
   }
   if (idx.length < 12) return null;
-  if (!extra.length) return { pos, idx };
+  // triangles whose corners also stand in the other winding: the two sides of a thin shell (Round 42), counted for rebuild.md
+  let bothSides = 0;
+  for (const k of seen) {
+    const [a, b, c] = k.split(',');
+    if (seen.has(`${a},${c},${b}`)) bothSides++;
+  }
+  if (!extra.length) return { pos, idx, flipped, bothSides };
   const attrs: Record<string, { size: number; data: number[] }> = {};
   extra.forEach((e, j) => {
     const X = xsums[j];
@@ -670,7 +704,7 @@ export function proxyMesh(
       }
     attrs[e.name] = { size: e.size, data };
   });
-  return { pos, idx, attrs };
+  return { pos, idx, attrs, flipped, bothSides };
 }
 
 /**
@@ -1425,6 +1459,8 @@ export function rebuildPipeline(
         step.proxy = px;
         stats.proxies++;
         info.standInVertices = px.pos.length / 3;
+        info.flipped = px.flipped ?? 0;
+        info.bothSides = px.bothSides ?? 0;
       } else {
         info.box = 'too few triangles left after clustering';
         boxBecause(info.box);

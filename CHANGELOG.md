@@ -11,6 +11,11 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 43: --own-assets stand-in cells also split by the colour-grid cell their UV falls in (8x8, the image repeats), so a cell
+  that spans several islands of a texture atlas no longer averages its UVs into some other part of the atlas (aimed at three.js
+  keyframes' material 5, normal #397, +7.9 points with real meshes). Same position grid: no more of the site's shape. The
+  rebuild.md stand-in table shows per row how many triangles were turned back and kept on both sides, explains the instances
+  column ("-" also for a batched mesh drawn piece by piece) and points to extract.json for every row when it shows only 40.
 - Round 42: --own-assets stand-in triangles keep the site's facing: a triangle that turned over when its corners moved to
   their cell's average is turned back (with back-face culling it disappeared), and a thin shell whose front and back
   collapse onto the same corners keeps both sides (the same corners in the other winding are no longer dropped as a
