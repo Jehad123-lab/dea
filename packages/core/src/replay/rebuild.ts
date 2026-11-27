@@ -202,6 +202,8 @@ export interface RebuildStats {
   skipped: Record<string, number>;
   /** Round 40: each --own-assets stand-in, so the kit says what it kept and lost (rebuild.md table, extract.json) */
   standIns?: StandInInfo[];
+  /** Round 57: outline shells rebuilt from their body's stand-in */
+  shellsFromBody?: number;
 }
 
 /** one --own-assets stand-in: which material, how it is drawn, how much of it is left, which vertex inputs it kept */
@@ -228,6 +230,8 @@ export interface StandInInfo {
   flipped?: number;
   /** Round 43: stand-in triangles kept in both windings (the two sides of a thin shell, Round 42) */
   bothSides?: number;
+  /** Round 57: an outline shell rebuilt from this material's stand-in (the body it wraps), pushed out by this much */
+  shellOf?: { material: number; offset: number };
 }
 
 /**
@@ -784,6 +788,119 @@ export function normalBucket(n: number[]): number {
   return 1 + k * 2 + (x < 0 ? 1 : 0);
 }
 
+/** Round 57: a stand-in made this run, with the bounds of the site's mesh it stands in for */
+export interface ShellCandidate {
+  step: { proxy?: { pos: number[]; idx: number[]; attrs?: Record<string, { size: number; data: number[] }> } };
+  info: Pick<StandInInfo, 'material' | 'program'> & { shellOf?: StandInInfo['shellOf'] };
+  min: number[];
+  max: number[];
+}
+
+/** a material that draws an outline shell (an inverted hull: the same shape pushed out a little, its back faces drawn dark) */
+export const isOutlineProgram = (name: string) => /outline|silhouette|inverted.?hull|contour/i.test(name);
+
+/**
+ * Round 57: the body an outline shell wraps: a stand-in of another (non-outline) material whose site bounds sit inside the
+ * shell's, each side within 5% of the shell's size, the closest fit first; with the shell's offset (the median gap of the six
+ * sides). Null when none fits.
+ */
+export function bodyOfShell(shell: ShellCandidate, list: ShellCandidate[]): { body: ShellCandidate; offset: number } | null {
+  const size = Math.max(...[0, 1, 2].map((k) => shell.max[k] - shell.min[k]));
+  if (!(size > 0)) return null;
+  const tol = size * 0.05;
+  let best: { body: ShellCandidate; offset: number; err: number } | null = null;
+  for (const b of list) {
+    if (b === shell || !b.step.proxy || isOutlineProgram(b.info.program)) continue;
+    const gaps: number[] = [];
+    let ok = true;
+    for (let k = 0; k < 3 && ok; k++) {
+      const lo = b.min[k] - shell.min[k];
+      const hi = shell.max[k] - b.max[k];
+      if (lo < -tol * 0.2 || hi < -tol * 0.2 || lo > tol || hi > tol) ok = false;
+      gaps.push(lo, hi);
+    }
+    if (!ok) continue;
+    gaps.sort((x, y) => x - y);
+    const offset = Math.max(0, (gaps[2] + gaps[3]) / 2);
+    const err = gaps.reduce((n, g) => n + Math.abs(g - offset), 0);
+    if (!best || err < best.err) best = { body: b, offset, err };
+  }
+  return best ? { body: best.body, offset: best.offset } : null;
+}
+
+/**
+ * Round 57: an outline shell's stand-in rebuilt from its body's: the body's corners pushed out along their normals by the
+ * shell's offset, triangles in the other winding (an inverted hull faces in, like the site's shell). Clustered on its own, a
+ * shell thinner than a cell landed inside the body in some cells and through it in others (three.js keyframes: material 1,
+ * outline #379, +3.6 canvas points with the site's meshes). Attributes the shell reads come from the body when it has the
+ * same input, else the normals computed here, else the shell's own cell average (one value: an outline is one colour).
+ */
+export function shellFromBody(
+  shell: { pos: number[]; idx: number[]; attrs?: Record<string, { size: number; data: number[] }> },
+  body: { pos: number[]; idx: number[]; attrs?: Record<string, { size: number; data: number[] }> },
+  offset: number,
+): { pos: number[]; idx: number[]; attrs?: Record<string, { size: number; data: number[] }> } {
+  const n = body.pos.length / 3;
+  const nrm = new Float64Array(n * 3);
+  for (let t = 0; t + 2 < body.idx.length; t += 3) {
+    const [a, b, c] = [body.idx[t], body.idx[t + 1], body.idx[t + 2]];
+    const P = (v: number) => [body.pos[v * 3], body.pos[v * 3 + 1], body.pos[v * 3 + 2]];
+    const [pa, pb, pc] = [P(a), P(b), P(c)];
+    const u = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+    const w = [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]];
+    const cr = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    for (const v of [a, b, c]) for (let k = 0; k < 3; k++) nrm[v * 3 + k] += cr[k];
+  }
+  const pos: number[] = [];
+  const normals: number[] = [];
+  for (let v = 0; v < n; v++) {
+    const l = Math.hypot(nrm[v * 3], nrm[v * 3 + 1], nrm[v * 3 + 2]) || 1;
+    for (let k = 0; k < 3; k++) {
+      const d = nrm[v * 3 + k] / l;
+      normals.push(Math.round(d * 1e4) / 1e4);
+      pos.push(Math.round((body.pos[v * 3 + k] + d * offset) * 1e4) / 1e4);
+    }
+  }
+  const idx: number[] = [];
+  for (let t = 0; t + 2 < body.idx.length; t += 3) idx.push(body.idx[t], body.idx[t + 2], body.idx[t + 1]);
+  let attrs: Record<string, { size: number; data: number[] }> | undefined;
+  if (shell.attrs) {
+    attrs = {};
+    for (const [name, a] of Object.entries(shell.attrs)) {
+      const from = body.attrs?.[name];
+      if (from && from.size === a.size && from.data.length === n * a.size) attrs[name] = { size: a.size, data: from.data.slice() };
+      else if (a.size === 3 && /normal/i.test(name)) attrs[name] = { size: 3, data: normals.slice() };
+      else {
+        const m = a.data.length / a.size || 1;
+        const mean = Array.from({ length: a.size }, (_, k) => {
+          let s = 0;
+          for (let i = k; i < a.data.length; i += a.size) s += a.data[i];
+          return s / m;
+        });
+        const data: number[] = [];
+        for (let v = 0; v < n; v++) data.push(...mean);
+        attrs[name] = { size: a.size, data };
+      }
+    }
+  }
+  return attrs ? { pos, idx, attrs } : { pos, idx };
+}
+
+/** Round 57: every outline shell with a body that fits gets its stand-in from that body's; how many did */
+export function shellsFromBodies(list: ShellCandidate[]): number {
+  let done = 0;
+  for (const s of list) {
+    if (!s.step.proxy || !isOutlineProgram(s.info.program)) continue;
+    const m = bodyOfShell(s, list);
+    const bp = m?.body.step.proxy;
+    if (!m || !bp) continue;
+    s.step.proxy = { ...s.step.proxy, ...shellFromBody(s.step.proxy, bp, m.offset) };
+    s.info.shellOf = { material: m.body.info.material, offset: Math.round(m.offset * 1e4) / 1e4 };
+    done++;
+  }
+  return done;
+}
+
 /** Round 56: where a stand-in cell's one corner goes: the average of its vertices (the default), the point that best fits
  * the site's triangle planes touching the cell, or halfway between the two */
 export type StandInPlace = 'average' | 'surface' | 'blend';
@@ -1043,6 +1160,8 @@ export function rebuildPipeline(
     texGrid?: number;
     /** Round 56: where stand-in corners go (--own-assets-cost measures 'surface' and 'blend' against the default 'average') */
     standInPlace?: StandInPlace;
+    /** Round 57: outline shells built from the stand-in of the body they wrap (default true; false clusters them on their own) */
+    shellsFromBody?: boolean;
     sceneNodes?: Map<string, string>;
   } = { data: 'data.bin' },
 ): { pipeline: PipelineDoc; shaders: Record<string, string>; stats: RebuildStats } {
@@ -1716,6 +1835,7 @@ export function rebuildPipeline(
     // body's shadow pass was a stand-in, its buffers were wiped, and the "real meshes for VanguardBodyMat" variant drew the
     // body from zeros (-19 points)
     const realBufs = new Set<number>();
+    const made: ShellCandidate[] = [];
     for (const { step, pos } of meshDraws) if (realMats.has(step.material)) realBufs.add(pos.buf);
     for (const { step, pos } of meshDraws) {
       if (realMats.has(step.material) || realBufs.has(pos.buf)) {
@@ -1795,6 +1915,7 @@ export function rebuildPipeline(
       });
       if (px) {
         step.proxy = px;
+        made.push({ step, info, min, max });
         stats.proxies++;
         info.standInVertices = px.pos.length / 3;
         info.flipped = px.flipped ?? 0;
@@ -1804,6 +1925,8 @@ export function rebuildPipeline(
         boxBecause(info.box);
       }
     }
+    // Round 57: outline shells follow their body's stand-in
+    if (opts.shellsFromBody !== false) stats.shellsFromBody = shellsFromBodies(made);
     for (const { step } of meshDraws) {
       if (!step.placeholder) continue;
       for (const at of step.attrs) {

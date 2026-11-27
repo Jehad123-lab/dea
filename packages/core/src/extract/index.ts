@@ -1188,7 +1188,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           if (opts.ownAssets && (opts.ownAssetsCost || costOnly)) {
             // built one at a time when scored (Round 40: up to 8 variants, each a full copy of the recording)
             const variant =
-              (images: boolean, meshes: boolean, realMaterials?: number[], grid = texGrid, standInPlace?: StandInPlace) =>
+              (images: boolean, meshes: boolean, realMaterials?: number[], grid = texGrid, standInPlace?: StandInPlace, shellsFromBody = true) =>
               (): RbFiles => {
                 const d = structuredClone(recDoc as CaptureDoc);
                 const b = new Uint8Array(binU8);
@@ -1201,6 +1201,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
                   sceneNodes,
                   texGrid: grid,
                   standInPlace,
+                  shellsFromBody,
                 });
                 return { pipeline: JSON.stringify(compactFrames(v.pipeline)), shaders: v.shaders, data: b };
               };
@@ -1216,6 +1217,15 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
                     : `the site's meshes for materials ${g.materials.join(', ')} (they share vertex buffers; ${g.n} stand-ins)`,
                 build: variant(false, false, g.materials),
               })),
+              // Round 57: outline shells clustered on their own (before Round 57), so the shell-from-body gain has a number
+              ...((rb.stats.shellsFromBody ?? 0) > 0
+                ? [
+                    {
+                      what: `outline shells clustered on their own (before Round 57; ${rb.stats.shellsFromBody} now follow their body)`,
+                      build: variant(false, false, undefined, texGrid, undefined, false),
+                    },
+                  ]
+                : []),
               // Round 56: stand-in corners on the site's surface instead of their cell's average (same cells, same shape kept)
               { what: 'stand-in corners halfway to the surface (blend), image colour grids', build: variant(false, false, undefined, texGrid, 'blend') },
               { what: 'stand-in corners on the surface (plane fit), image colour grids', build: variant(false, false, undefined, texGrid, 'surface') },

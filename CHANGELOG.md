@@ -11,6 +11,14 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 57: outline shells follow their body's stand-in. On three.js keyframes material 1 (outline #379, 6 stand-ins) is
+  worth 3.6 canvas points with the site's meshes, and Round 56's corner placement bought only +0.7 (blend). An outline
+  shell is the body pushed out a little and drawn inside out; clustered on its own, a shell thinner than a cell landed
+  inside the body in some cells and through it in others. A stand-in of an outline material (`isOutlineProgram`) now finds
+  the body it wraps (`bodyOfShell`: another material's stand-in whose site bounds sit inside the shell's, each side within
+  5% of its size), and `shellFromBody` rebuilds it as the body's stand-in pushed out along its normals by the median gap,
+  in the other winding. Inputs come from the body when it has the same one, else computed normals, else the shell's own
+  average. On by default (`shellsFromBody`); --own-assets-cost scores the old own clustering next to it.
 - Round 56: where a stand-in's corners go, measured. On three.js keyframes the site's real meshes are worth 8.6 canvas
   points, mostly material 5 (normal #397, +5.4) and material 1 (outline #379, +3.6). Each stand-in cell's one corner is the
   average of its vertices, which lies inside a curved patch, so stand-ins shrink, and an outline shell and the body it
