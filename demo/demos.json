@@ -16,7 +16,7 @@
       "round": 43,
       "canvas": 0.802,
       "page": 0.879,
-      "note": "Editable three.js rebuild with --own-assets: 13 stand-in meshes and 8x8 colour-grid images, none of the site's own models or images."
+      "note": "Editable three.js rebuild with --own-assets: 13 stand-in meshes and 8x8 colour-grid images, none of the site's own models or images (full-asset rebuild scores 100% canvas / 98.8% page)."
     }
   ]
 }
