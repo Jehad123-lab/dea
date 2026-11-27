@@ -17,6 +17,7 @@ const ubo = (buf: number, o: number, n: number, dst = 0) =>
 describe('Round 48: clocks in uniform blocks, compact motion loops', () => {
   it('isClockStep: seconds, ms and frame counters are clocks; a jump or a fall is not', () => {
     expect(isClockStep(10, 10.25, 250)).toBe(true); // seconds
+    expect(isClockStep(5.346, 5.379, 500)).toBe(true); // clamped 33ms delta on slow software GPU
     expect(isClockStep(1000, 1250, 250)).toBe(true); // ms
     expect(isClockStep(41, 42, 250)).toBe(true); // frame counter
     expect(isClockStep(1, 0.5, 250)).toBe(false);

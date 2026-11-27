@@ -574,6 +574,8 @@ export function isClockStep(a: number, b: number, dt: number): boolean {
   if (!(Number.isFinite(a) && Number.isFinite(b) && b > a && dt > 0)) return false;
   const rate = (b - a) / dt;
   if (rate >= 1e-4 && rate <= 1e-2) return true;
+  // Engines that clamp per-frame delta (e.g. <= 0.033s) on slow software GPUs (dt > 100ms) still step ~4..60ms per frame
+  if (dt > 100 && b - a >= 0.004 && b - a <= 0.06) return true;
   if (rate >= 0.3 && rate <= 3) return true;
   return b - a === 1 && Number.isInteger(a);
 }
@@ -625,7 +627,8 @@ export function uboClocksOf(steps0: Step[], steps1: Step[], bin: Uint8Array, dt:
       while (hi + 1 < n && moved(hi + 1)) hi++;
       if (hi - lo + 1 > 2) continue;
       const byte = a.dst + j * 4;
-      const rate = (b.f[j] - a.f[j]) / dt;
+      const rawRate = (b.f[j] - a.f[j]) / dt;
+      const rate = rawRate < 1e-4 && dt > 100 && b.f[j] - a.f[j] <= 0.06 ? 0.001 : rawRate;
       // live time starts at the scored (last) frame's value
       found.set(`${a.buf}:${byte}`, { buf: a.buf, byte, base: b.f[j], rate });
     }

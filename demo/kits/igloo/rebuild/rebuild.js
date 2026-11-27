@@ -176,6 +176,20 @@ const TYPED = { 5126: Float32Array, 5131: Uint16Array, 5120: Int8Array, 5121: Ui
 export function createRebuild(canvas, data, options = {}) {
   const THREE = options.THREE || THREE_NS;
   const p = data.pipeline;
+  // Round 48: frames after the first are stored as changes to frame 0's steps (pipeline.json "framesCompact"): expanded here
+  if (p.framesCompact) {
+    const base0 = p.frames[0].steps;
+    for (const fr of p.frames.slice(1))
+      fr.steps = fr.steps.map((d) => {
+        if (d.$from == null) return d;
+        const out = JSON.parse(JSON.stringify(base0[d.$from]));
+        for (const k of Object.keys(d)) if (k !== '$from' && k !== '$uni' && k !== '$del') out[k] = d[k];
+        if (d.$uni) out.uniforms = Object.assign(out.uniforms || {}, d.$uni);
+        for (const k of d.$del || []) delete out[k];
+        return out;
+      });
+    delete p.framesCompact;
+  }
   const bin = data.bin;
   const errors = [];
   const fail = (m) => { if (errors.length < 50) errors.push(m); };
@@ -961,6 +975,11 @@ export function createRebuild(canvas, data, options = {}) {
         const next = dst + len > cur.byteLength ? (() => { const n = new Uint8Array(dst + len); n.set(cur); return n; })() : cur;
         next.set(bytes, dst);
         raw.set(b.buf, next);
+      }
+      // Round 48: clocks inside uniform blocks (pipeline.json "uboClocks"): the recorded time is replaced by real time
+      if (animate && p.uboClocks) {
+        const cur2 = raw.get(b.buf);
+        for (const c of p.uboClocks) if (c.buf === b.buf && cur2 && c.byte + 4 <= cur2.byteLength) new DataView(cur2.buffer, cur2.byteOffset, cur2.byteLength).setFloat32(c.byte, c.base + c.rate * (performance.now() - t0), true);
       }
       uboDirty.add(b.buf);
       bufferChanged(b.buf);
