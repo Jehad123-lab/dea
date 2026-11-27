@@ -222,6 +222,8 @@ export interface StandInInfo {
   box?: string;
   /** Round 41: how many mesh draws read the same position buffer (above 1: a batched or shared mesh) */
   sharedBuffer?: number;
+  /** Round 53: the position buffer it reads (draws of materials that share one become real together in a cost variant) */
+  buf?: number;
   /** Round 43: stand-in triangles turned back to the site's facing (Round 42) */
   flipped?: number;
   /** Round 43: stand-in triangles kept in both windings (the two sides of a thin shell, Round 42) */
@@ -1655,6 +1657,7 @@ export function rebuildPipeline(
       };
       stats.standIns?.push(info);
       info.sharedBuffer = meshDraws.filter((m) => m.pos.buf === pos.buf).length;
+      info.buf = pos.buf;
       // a coarse stand-in of the shape instead of the box: triangle lists, strips and fans, instanced or not (the runner keeps
       // the instance attributes and count, so every instance still draws)
       if (!tris) {

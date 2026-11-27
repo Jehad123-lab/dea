@@ -11,6 +11,12 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 53: cost material variants grouped by shared vertex buffers, and debug panels masked to their full extent. Since
+  Round 50 a real material keeps every draw of its buffers real, so on lusion.co materials 4, 6 and 5 each scored exactly like
+  the real-meshes variant (91.6%) and used up the budget the colour grids needed. Stand-ins now record their position buffer;
+  materials that share one are scored once together (`costMaterialGroups`), and a group holding every stand-in is left out.
+  On threejs.org's skinning example the lil-gui root is 607 px tall while its rows run on to the bottom of the screen: a
+  debug panel now covers every visible box inside it, so that 310x293 strip is masked too.
 - Round 52: `--own-assets-cost-only`, and Stats.js found at any depth. lusion.co's base extract plus one cost variant ran past
   300 s on a software GPU. `--own-assets-cost-only` (implies `--own-assets-cost`) takes the recording an earlier run with
   the same flags left in the cache, and scores the shipped rebuild and the cost variants only: no new watch of the site, no

@@ -703,9 +703,18 @@ export const LAYOUT_READ = (section: string | null, o: LayoutReadOptions = {}) =
   const addUi = (el, kind) => {
     if (!el || seenUi.has(el)) return;
     for (let a = el.parentElement; a; a = a.parentElement) if (seenUi.has(a)) return;
-    const r = el.getBoundingClientRect();
-    const x = Math.max(0, r.left), y = Math.max(0, r.top);
-    const w = Math.min(W, r.right) - x, h = Math.min(H, r.bottom) - y;
+    // Round 53: the panel's own box and every visible box inside it: a long lil-gui (threejs.org's skinning example) has a
+    // 607 px root while its rows run on to the bottom of the screen, and that 310x293 dark strip was left in the page score
+    const r0 = el.getBoundingClientRect();
+    let L = r0.left, T = r0.top, R = r0.right, B = r0.bottom;
+    const inner = el.querySelectorAll('*');
+    for (let i = 0; i < inner.length && i < 3000; i++) {
+      const q = inner[i].getBoundingClientRect();
+      if (q.width < 1 || q.height < 1) continue;
+      L = Math.min(L, q.left); T = Math.min(T, q.top); R = Math.max(R, q.right); B = Math.max(B, q.bottom);
+    }
+    const x = Math.max(0, L), y = Math.max(0, T);
+    const w = Math.min(W, R) - x, h = Math.min(H, B) - y;
     if (w < 8 || h < 8 || w * h > W * H * 0.5) return;
     const cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) return;
