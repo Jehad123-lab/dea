@@ -504,7 +504,7 @@ export function createRebuild(canvas, data, options = {}) {
     obj.frustumCulled = false;
     obj.matrixAutoUpdate = false;
     obj.matrixWorldAutoUpdate = false;
-    if (step.model) obj.matrixWorld.fromArray(bl && bl.step.model ? lerpV(step.model, bl.step.model, bl.w) : step.model);
+    if (step.model) obj.matrixWorld.fromArray(bl && bl.step.model ? lerpM(step.model, bl.step.model, bl.w) : step.model);
     obj.matrix.copy(obj.matrixWorld);
     obj.name = (step.sceneNode || 'draw') + ' (frame ' + step.frame + ', call ' + step.cmd + ')';
     step._obj = obj;
@@ -759,6 +759,26 @@ export function createRebuild(canvas, data, options = {}) {
   const scrollTape = options.scroll !== false && SN > 0 ? createScrollTape(options.blend === false ? Object.assign({}, p.scroll, { aligned: false }) : p.scroll) : null;
   let bl = null; // the same step in the next stop's frame and the weight, while a live scroll sits between two stops
   const lerpV = (a, b, w) => (typeof a === 'number' && typeof b === 'number' ? a + (b - a) * w : Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x) => typeof x === 'number') ? a.map((x, j) => x + (b[j] - x) * w) : a);
+  // Round 49: in-between values. A 4x4 block that is an affine matrix in both frames (0, 0, 0 in the last row except a 1)
+  // turns as a rotation (position lerp, quaternion slerp, scale lerp) instead of averaging its numbers, so a bone or a model
+  // half-way through a turn keeps its size; anything else blends number by number
+  const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), pa = new THREE.Vector3(), pb = new THREE.Vector3(), sa = new THREE.Vector3(), sb = new THREE.Vector3(), ma = new THREE.Matrix4(), mb = new THREE.Matrix4();
+  const affine = (a, o) => Math.abs(a[o + 3]) < 1e-6 && Math.abs(a[o + 7]) < 1e-6 && Math.abs(a[o + 11]) < 1e-6 && Math.abs(a[o + 15] - 1) < 1e-6;
+  const lerpMats = (a, b, w, out) => {
+    for (let o = 0; o + 16 <= a.length; o += 16) {
+      let same = true;
+      for (let j = o; j < o + 16; j++) if (a[j] !== b[j]) { same = false; break; }
+      if (same) { for (let j = o; j < o + 16; j++) out[j] = a[j]; continue; }
+      if (affine(a, o) && affine(b, o)) {
+        ma.fromArray(a, o).decompose(pa, qa, sa);
+        mb.fromArray(b, o).decompose(pb, qb, sb);
+        ma.compose(pa.lerp(pb, w), qa.slerp(qb, w), sa.lerp(sb, w)).toArray(out, o);
+      } else for (let j = o; j < o + 16; j++) out[j] = a[j] + (b[j] - a[j]) * w;
+    }
+    for (let j = a.length - (a.length % 16); j < a.length; j++) out[j] = a[j] + (b[j] - a[j]) * w;
+    return out;
+  };
+  const lerpM = (a, b, w) => (Array.isArray(a) && Array.isArray(b) && a.length === 16 && b.length === 16 ? lerpMats(a, b, w, new Array(16)) : lerpV(a, b, w));
   let scrollFrame = false; // the frame being run was recorded with the page scrolled: its values already carry the scroll
   // ---- live mode holds the recorded moment still --------------------------------------------------------------------
   // The recording has two frames so ping-pong simulations keep their read/write order; but values that differ between the
@@ -869,6 +889,11 @@ export function createRebuild(canvas, data, options = {}) {
     for (const [k, v] of Object.entries(step.store || {})) gl.pixelStorei(+k, v);
     try {
       let args = step.args.map(arg);
+      // Round 49: float texture data (three.js bone textures, data textures) between two loop frames: blended, matrices as rotations
+      if (bl && bl.step.fn === step.fn && /^tex(Sub)?Image[23]D$/.test(step.fn) && bl.step.args.length === args.length) {
+        const o = bl.step.args.map(arg);
+        args = args.map((x, j) => (x instanceof Float32Array && o[j] instanceof Float32Array && o[j].length === x.length ? lerpMats(x, o[j], bl.w, new Float32Array(x.length)) : x));
+      }
       if (webgl1 && (step.fn === 'texImage2D') && args.length === 9) { const [i, f, ty] = sized(args[2], args[6], args[7]); args[2] = i; args[6] = f; args[7] = ty; }
       if (step.fn === 'texImage2D' && args.length === 6) { /* (target, level, ifmt, format, type, source) */ }
       gl[step.fn](...args);
@@ -923,6 +948,17 @@ export function createRebuild(canvas, data, options = {}) {
         if (scrollTape && f < RF) {
           const sel = scrollTape.step(live.wheelSeen ? live.wheel : live.scroll, lastAbs, SB);
           if (sel) { for (const cf of sel.catchUp) runFrame(SB + cf, true); f = SB + sel.frame; if (sel.blend) blend = { frame: SB + sel.blend.frame, w: sel.blend.w }; }
+        }
+        // Round 49: a motion loop recorded at a few frames a second plays smoothly: between two recorded frames every value
+        // the two share (uniforms, model matrices, uniform-block and vertex floats, bone textures) is blended by the time
+        // already spent on this frame. The jump from the last frame back to the first is blended only when the loop closes
+        // on itself (pipeline.json loop.closed, or options.smoothWrap); options.smooth false shows the frames as recorded
+        if (looping && f < RF && !blend && options.smooth !== false) {
+          const now = performance.now();
+          if (!loopNext) loopNext = now + p.loop.ms[f];
+          const nx = (f + 1) % RF;
+          const w = 1 - (loopNext - now) / p.loop.ms[f];
+          if ((nx !== 0 || p.loop.closed || options.smoothWrap) && w > 0) blend = { frame: nx, w: Math.min(1, w) };
         }
         runFrame(f, false, blend);
         bl = null;

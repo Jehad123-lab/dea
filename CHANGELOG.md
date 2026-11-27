@@ -11,6 +11,14 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 49: smooth motion-loop playback. A loop recorded on a slow machine holds each frame for up to 250 ms (keyframes:
+  30 frames at about 4 per second), so the live kit stepped. Live, the runner now blends each recorded frame into the next by
+  the time already spent on it: uniforms, model matrices, uniform-block and vertex floats, and float texture uploads (three.js
+  bone textures). A 4x4 block that is an affine matrix in both frames turns as a rotation (position lerp, quaternion slerp,
+  scale lerp), so a bone half-way through a turn keeps its size; other floats blend number by number. The jump from the
+  last frame back to the first is blended only when the loop closes on itself: pipeline.json `loop.closed` (`loopClosed`:
+  the wrap is no bigger than 1.5x the median step between frames) or `options.smoothWrap`; a slice cut out of a longer
+  animation shows that jump as recorded. `options.smooth: false` plays the frames as recorded.
 - Round 48: clocks in uniform blocks and compact motion loops. igloo.inc keeps its time in a WebGL2 uniform block ("Global",
   binding 0) uploaded with bufferSubData each frame, so --quick still found 0 clocks and the live demo stood still.
   uboClocksOf matches the n-th uniform-block upload to a buffer in frame 0 with the n-th in frame 1; a float that moved like a
