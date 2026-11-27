@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 // The render graph of a recorded WebGL frame sequence (dea extract's replay): every draw with the program, target,
 // inputs and state it ran with, grouped into passes; the clock uniforms to animate; and the meshes, model matrices and
 // camera of the 3D draws, so the scene can be rebuilt as a glTF. Everything here is read from the recording (Verified);
@@ -845,11 +846,17 @@ export function compactCapture(doc: CaptureDoc, bin: Uint8Array, opts: { drop?: 
   const slice = (o: number, l: number) => bin.subarray(o, o + l);
   // the same bytes referenced twice (the recorder stores a re-upload once) are written once
   const written = new Map<string, number>();
+  // Round 48: and the same bytes at different places (a motion loop re-uploads unchanged data every frame) once, by content
+  const byContent = new Map<string, number>();
   const putRef = (o: number, l: number): number => {
     const k = `${o}:${l}`;
     const w = written.get(k);
     if (w !== undefined) return w;
-    const n = put(slice(o, l));
+    const bytes = slice(o, l);
+    const h = l >= 64 ? `${l}:${createHash('sha1').update(bytes).digest('hex')}` : null;
+    const same = h != null ? byContent.get(h) : undefined;
+    const n = same ?? put(bytes);
+    if (h != null && same === undefined) byContent.set(h, n);
     written.set(k, n);
     return n;
   };

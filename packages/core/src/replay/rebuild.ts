@@ -159,6 +159,11 @@ export interface PipelineDoc {
   /** after the tape: the scroll tape (see scrolltape.ts), `n` frames, the stops with tape-relative frame indices */
   scroll?: { n: number; k: number; ratio: number; aligned: boolean; stops: Array<{ sc: number; wh: number; f0: number; f1: number }> };
   clocks: Array<{ program: number; uniform: string; base: number; rate: number }>;
+  /**
+   * Round 48: clocks inside uniform blocks (WebGL2 UBOs: igloo.inc keeps its time in block "Global"): a float the frame's
+   * upload to buffer `buf` puts at byte `byte`, driven live as base + rate x ms since the start
+   */
+  uboClocks?: Array<{ buf: number; byte: number; base: number; rate: number }>;
   /** uniforms that follow the pointer, scroll or window size: value = scale × eased input + offset */
   inputs: import('./inputs.ts').InputMap[];
   /** the window size (CSS px) when the recording was made */
@@ -560,6 +565,129 @@ export function standInTable(list: StandInInfo[], max = 40): string[] {
 }
 
 /** which cell of the TEX_GRID x TEX_GRID colour grid a UV falls in (the image repeats), 1-based; 0 when unreadable */
+/**
+ * Round 48: is a float that went from `a` to `b` in `dt` ms a clock? Time in seconds (a rate of 0.1 to 10 x real time),
+ * time in ms (0.3 to 3 per ms) or a frame counter (+1). A value easing toward a target (a camera mid-move) rarely moves at
+ * one of those rates; a matrix is ruled out by its neighbours (see uboClocksOf).
+ */
+export function isClockStep(a: number, b: number, dt: number): boolean {
+  if (!(Number.isFinite(a) && Number.isFinite(b) && b > a && dt > 0)) return false;
+  const rate = (b - a) / dt;
+  if (rate >= 1e-4 && rate <= 1e-2) return true;
+  if (rate >= 0.3 && rate <= 3) return true;
+  return b - a === 1 && Number.isInteger(a);
+}
+
+type BinRef = { $: 'bin'; o: number; l: number; t?: string };
+
+/**
+ * Round 48: the clocks inside uniform blocks. three.js and most WebGL2 engines keep per-frame values (time, delta, frame) in a
+ * uniform buffer uploaded with bufferSubData each frame, not in uniform1f calls, so the uniform clocks (animateEntries) never
+ * saw igloo.inc's time and its live rebuild stood still. The n-th uniform-block upload to a buffer in frame 0 is matched to
+ * the n-th in frame 1; a float that moved like a clock (isClockStep) becomes one, unless it is part of a run of more than two
+ * neighbouring floats that moved (a matrix or a vector: a camera, a model), which replay as recorded.
+ */
+export function uboClocksOf(steps0: Step[], steps1: Step[], bin: Uint8Array, dt: number): Array<{ buf: number; byte: number; base: number; rate: number }> {
+  const uploads = (steps: Step[]) => {
+    const seen = new Map<number, number>();
+    const out = new Map<string, { buf: number; dst: number; f: Float32Array }>();
+    for (const st of steps) {
+      const g = st as Step & { fn?: string; args?: unknown[]; bind?: { buf?: number; bufTarget?: number } };
+      if (g.op !== 'gl' || g.fn !== 'bufferSubData' || g.bind?.bufTarget !== 0x8a11 || g.bind.buf == null || !g.args) continue;
+      const ref = g.args[2] as BinRef | undefined;
+      if (ref?.$ !== 'bin' || (ref.t && ref.t !== 'Float32Array' && ref.t !== 'Uint8Array' && ref.t !== 'ArrayBuffer')) continue;
+      const E = ref.t === 'Float32Array' ? 4 : 1;
+      const so = g.args[3] != null ? Number(g.args[3]) * E : 0;
+      const len = g.args[4] != null ? Number(g.args[4]) * E : ref.l - so;
+      if (!(len >= 4) || ref.o + so + len > bin.byteLength || (ref.o + so) % 4 !== 0) continue;
+      const n = seen.get(g.bind.buf) ?? 0;
+      seen.set(g.bind.buf, n + 1);
+      const f = new Float32Array(bin.buffer.slice(bin.byteOffset + ref.o + so, bin.byteOffset + ref.o + so + Math.floor(len / 4) * 4));
+      out.set(`${g.bind.buf}#${n}`, { buf: g.bind.buf, dst: Number(g.args[1]) || 0, f });
+    }
+    return out;
+  };
+  const A = uploads(steps0);
+  const B = uploads(steps1);
+  const found = new Map<string, { buf: number; byte: number; base: number; rate: number }>();
+  for (const [k, a] of A) {
+    const b = B.get(k);
+    if (!b || b.dst !== a.dst) continue;
+    const n = Math.min(a.f.length, b.f.length);
+    const moved = (j: number) => a.f[j] !== b.f[j] && !(Number.isNaN(a.f[j]) && Number.isNaN(b.f[j]));
+    for (let j = 0; j < n; j++) {
+      if (!moved(j) || !isClockStep(a.f[j], b.f[j], dt)) continue;
+      // the run of neighbouring floats that moved with it: a clock stands alone (or beside one other value, a delta), a matrix
+      // or a vector moves as a block
+      let lo = j;
+      let hi = j;
+      while (lo > 0 && moved(lo - 1)) lo--;
+      while (hi + 1 < n && moved(hi + 1)) hi++;
+      if (hi - lo + 1 > 2) continue;
+      const byte = a.dst + j * 4;
+      const rate = (b.f[j] - a.f[j]) / dt;
+      // live time starts at the scored (last) frame's value
+      found.set(`${a.buf}:${byte}`, { buf: a.buf, byte, base: b.f[j], rate });
+    }
+  }
+  return [...found.values()];
+}
+
+/**
+ * Round 48: pipeline.json with its frames compacted. A --frames 30 motion loop repeated all 79 draws of three.js keyframes in
+ * every frame (89 MB). Frame 0 is written in full; a later frame's step that matches frame 0's step at the same index (same
+ * op) is written as { $from: index } plus only the fields that differ (uniforms: only the changed names, in $uni). The
+ * rebuild runner expands it on load (expandFrames); the pointer and scroll tapes are compacted the same way.
+ */
+export function compactFrames<P extends { frames: Array<{ steps: unknown[] }> }>(p: P): P {
+  if (p.frames.length < 2) return p;
+  const base = p.frames[0].steps as Array<Record<string, unknown>>;
+  const same = (x: unknown, y: unknown) => JSON.stringify(x) === JSON.stringify(y);
+  const frames = p.frames.map((fr, fi) => {
+    if (fi === 0) return fr;
+    const steps = (fr.steps as Array<Record<string, unknown>>).map((st, k) => {
+      const b = base[k];
+      if (!b || b.op !== st.op) return st;
+      const d: Record<string, unknown> = { $from: k };
+      for (const [key, v] of Object.entries(st)) {
+        if (key === 'uniforms' && b.uniforms && v && typeof v === 'object') {
+          const bu = b.uniforms as Record<string, unknown>;
+          const cu = v as Record<string, unknown>;
+          const ch: Record<string, unknown> = {};
+          for (const [n, x] of Object.entries(cu)) if (!same(x, bu[n])) ch[n] = x;
+          const gone = Object.keys(bu).filter((n) => !(n in cu));
+          if (gone.length) d.uniforms = cu;
+          else if (Object.keys(ch).length) d.$uni = ch;
+          continue;
+        }
+        if (!same(v, b[key])) d[key] = v;
+      }
+      const dropped = Object.keys(b).filter((key) => !(key in st));
+      if (dropped.length) d.$del = dropped;
+      return d;
+    });
+    return { ...fr, steps };
+  });
+  return { ...p, frames, framesCompact: 1 };
+}
+
+/** Round 48: undo compactFrames (pipeline.json "framesCompact"); a pipeline that is not compacted is returned as it is. */
+export function expandFrames<P extends { frames: Array<{ steps: unknown[] }> }>(p: P): P {
+  if (!(p as { framesCompact?: number }).framesCompact) return p;
+  const base = p.frames[0].steps as Array<Record<string, unknown>>;
+  for (const fr of p.frames.slice(1))
+    fr.steps = (fr.steps as Array<Record<string, unknown>>).map((d) => {
+      if (d.$from == null) return d;
+      const out = JSON.parse(JSON.stringify(base[d.$from as number])) as Record<string, unknown>;
+      for (const [key, v] of Object.entries(d)) if (key !== '$from' && key !== '$uni' && key !== '$del') out[key] = v;
+      if (d.$uni) out.uniforms = Object.assign((out.uniforms as object) ?? {}, d.$uni);
+      for (const key of (d.$del as string[] | undefined) ?? []) delete out[key];
+      return out;
+    });
+  delete (p as { framesCompact?: number }).framesCompact;
+  return p;
+}
+
 /**
  * Round 47: how long each recorded frame of a motion loop stays up, in ms: the gap to the next frame's timestamp (the last one
  * takes the median gap), each kept within 4-250 ms; 1000/60 when the frames carry no timestamps.
@@ -1610,6 +1738,13 @@ export function rebuildPipeline(
         }
       : {}),
     clocks,
+    ...(() => {
+      const ts0 = doc.frames[0]?.ts;
+      const ts1 = doc.frames[1]?.ts;
+      const dt = ts0 != null && ts1 != null && ts1 > ts0 ? ts1 - ts0 : 16.7;
+      const u = doc.frames.length >= 2 ? uboClocksOf(frames[0]?.steps ?? [], frames[1]?.steps ?? [], bin, dt) : [];
+      return u.length ? { uboClocks: u } : {};
+    })(),
     inputs: (doc.inputs ?? []).filter((m) => m.kind !== 'clock'),
     viewport: doc.viewport ?? null,
     toneMappingExposure: exposure,
