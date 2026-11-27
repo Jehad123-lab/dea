@@ -118,6 +118,50 @@ export function costMaterials(list: StandInInfo[], max = 6): Array<{ material: n
   return [...by.values()].sort((a, b) => b.n - a.n || b.vertices - a.vertices).slice(0, max);
 }
 
+/**
+ * Round 53: the --own-assets-cost material variants, one per group of materials whose stand-ins share a position buffer.
+ * Since Round 50 a real material keeps every draw of its buffers real, so on lusion.co materials 4, 6 and 5 each scored exactly
+ * like "the site's real meshes" (91.6%) and used up the budget the colour grids needed. Materials that share buffers are
+ * scored once together; a group holding every stand-in is left out (it is the real-meshes variant again). Largest first.
+ */
+export function costMaterialGroups(list: StandInInfo[], max = 6): Array<{ materials: number[]; programs: string[]; n: number; vertices: number }> {
+  const parent = new Map<number, number>();
+  const find = (m: number): number => {
+    let r = m;
+    while (parent.get(r) !== r) r = parent.get(r) as number;
+    parent.set(m, r);
+    return r;
+  };
+  for (const r of list) if (!parent.has(r.material)) parent.set(r.material, r.material);
+  const byBuf = new Map<number, number>();
+  for (const r of list) {
+    if (r.buf == null) continue;
+    const other = byBuf.get(r.buf);
+    if (other == null) byBuf.set(r.buf, r.material);
+    else {
+      const a = find(other);
+      const b = find(r.material);
+      if (a !== b) parent.set(b, a);
+    }
+  }
+  const groups = new Map<number, { materials: number[]; programs: string[]; n: number; vertices: number }>();
+  for (const r of list) {
+    const k = find(r.material);
+    const g = groups.get(k) ?? { materials: [], programs: [], n: 0, vertices: 0 };
+    if (!g.materials.includes(r.material)) {
+      g.materials.push(r.material);
+      g.programs.push(r.program);
+    }
+    g.n++;
+    g.vertices += r.vertices;
+    groups.set(k, g);
+  }
+  return [...groups.values()]
+    .filter((g) => g.n < list.length)
+    .sort((a, b) => b.n - a.n || b.vertices - a.vertices)
+    .slice(0, max);
+}
+
 /** Round 46: the finer colour grids --own-assets-cost scores (never shipped): 16 and 32 cells per side, those finer than the shipped one */
 /** Round 47: frames to record: --frames clamped to 2-120, default 2 (quick too: one frame has no clocks, nothing animates) */
 export function recordFrameCount(n?: number): number {
@@ -1148,9 +1192,13 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
               { what: "the site's real images, stand-in meshes", build: variant(true, false) },
               { what: "image colour grids, the site's real meshes", build: variant(false, true) },
               // Round 40: which material's stand-ins cost the points: the site's meshes for one material at a time
-              ...costMaterials(rb.stats.standIns ?? []).map((m) => ({
-                what: `the site's meshes for material ${m.material} only (${m.program}, ${m.n} stand-in${m.n === 1 ? '' : 's'})`,
-                build: variant(false, false, [m.material]),
+              // Round 53: materials that share vertex buffers are one variant; a group of every stand-in is the real-meshes one
+              ...costMaterialGroups(rb.stats.standIns ?? []).map((g) => ({
+                what:
+                  g.materials.length === 1
+                    ? `the site's meshes for material ${g.materials[0]} only (${g.programs[0]}, ${g.n} stand-in${g.n === 1 ? '' : 's'})`
+                    : `the site's meshes for materials ${g.materials.join(', ')} (they share vertex buffers; ${g.n} stand-ins)`,
+                build: variant(false, false, g.materials),
               })),
               // Round 46: what finer colour grids would buy (stand-in meshes, grids only), so the --own-assets-grid choice has numbers
               ...costGrids(texGrid).map((g) => ({
