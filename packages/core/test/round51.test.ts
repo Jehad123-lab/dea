@@ -32,7 +32,7 @@ describe('Round 51: debug UI overlays left out of the scores', () => {
   it('the layout read looks for lil-gui, dat.gui, Tweakpane, Leva and Stats.js and returns them as overlays', () => {
     const src = LAYOUT_READ(null);
     for (const sel of ['.lil-gui.root', '.dg.main', '.tp-dfwv', '#leva__root', '#stats']) expect(src).toContain(sel);
-    expect(src).toContain('graphics, overlays }');
+    expect(src).toContain('graphics: keep(graphics), overlays }');
     // a full-screen element is never treated as a panel
     expect(src).toContain('W * H * 0.5');
     // still a plain script: no template holes left from the new code
