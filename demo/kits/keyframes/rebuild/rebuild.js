@@ -152,8 +152,17 @@ export async function loadPipeline(base = './rebuild/') {
   const files = [];
   for (const m of pipeline.materials) files.push(m.vertex, m.fragment);
   const uniq = [...new Set(files)];
+  const loadBin = async () => {
+    if (typeof DecompressionStream !== 'undefined') {
+      const gz = await fetch(new URL(`${pipeline.data}.gz`, root)).catch(() => null);
+      if (gz && gz.ok && gz.body) {
+        return await new Response(gz.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+      }
+    }
+    return await fetch(new URL(pipeline.data, root)).then((r) => r.arrayBuffer());
+  };
   const [bin, ...texts] = await Promise.all([
-    fetch(new URL(pipeline.data, root)).then((r) => r.arrayBuffer()),
+    loadBin(),
     ...uniq.map((f) => fetch(new URL(f, root)).then((r) => r.text())),
   ]);
   const shaders = {};

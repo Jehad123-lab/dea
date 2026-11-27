@@ -4,6 +4,7 @@ import { execSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const kits = join(here, 'kits');
@@ -48,6 +49,14 @@ for (const d of demos) {
   rebase(dir);
   execSync('npm install --no-audit --no-fund --loglevel=error', { cwd: dir, stdio: 'inherit' });
   execSync(`npx vite build --base /${d.slug}/ --outDir ${JSON.stringify(join(out, d.slug))} --emptyOutDir`, { cwd: dir, stdio: 'inherit' });
+  const binOut = join(out, d.slug, 'rebuild', 'data.bin');
+  if (existsSync(binOut)) {
+    const raw = readFileSync(binOut);
+    const gz = gzipSync(raw, { level: 9 });
+    writeFileSync(`${binOut}.gz`, gz);
+    rmSync(binOut);
+    console.log(`demo ${d.slug}: compressed data.bin ${(raw.length / 1e6).toFixed(2)} MB -> ${(gz.length / 1e6).toFixed(2)} MB`);
+  }
   if (existsSync(join(dir, 'preview'))) {
     mkdirSync(join(out, d.slug, 'preview'), { recursive: true });
     for (const f of readdirSync(join(dir, 'preview'))) if (f.endsWith('.png')) cpSync(join(dir, 'preview', f), join(out, d.slug, 'preview', f));
