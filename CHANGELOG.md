@@ -11,6 +11,13 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 50: real-mesh cost variants keep shared buffers, and --own-assets-cost has a time budget. On threejs.org's skinning
+  example, "the site's meshes for VanguardBodyMat only" scored -19 points: the body's shadow pass draws the same buffers with
+  another material, stayed a stand-in, and its buffers were zeroed, so the real body drew from zeros. Now every draw that reads
+  the position buffer of a real-material draw stays real, and the buffers a real draw reads are never zeroed (shipped kits are
+  unchanged: they have no real materials). lusion.co's cost run (76 passes, 170 draws) ran past 300 s on a software GPU:
+  `--own-assets-cost-budget <s>` (default 240, 30-3600) stops before a variant that would not fit, judged by the slowest one
+  so far, and lists the rest as not scored.
 - Round 49: smooth motion-loop playback. A loop recorded on a slow machine holds each frame for up to 250 ms (keyframes:
   30 frames at about 4 per second), so the live kit stepped. Live, the runner now blends each recorded frame into the next by
   the time already spent on it: uniforms, model matrices, uniform-block and vertex floats, and float texture uploads (three.js
