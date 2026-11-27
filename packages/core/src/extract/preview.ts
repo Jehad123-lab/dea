@@ -714,12 +714,16 @@ export const LAYOUT_READ = (section: string | null, o: LayoutReadOptions = {}) =
   };
   const UI = [['.lil-gui.root, .lil-gui.autoPlace', 'lil-gui'], ['.dg.ac > .dg, .dg.main', 'dat.gui'], ['.tp-dfwv, .tp-rotv', 'Tweakpane'], ['#leva__root > div', 'Leva'], ['#stats, .stats', 'Stats.js']];
   for (const [sel, kind] of UI) { try { for (const el of document.querySelectorAll(sel)) addUi(el, kind); } catch (e) {} }
-  // Stats.js without an id: a small fixed box holding only canvases (about 80x48 each)
-  for (const el of document.querySelectorAll('body > div')) {
+  // Stats.js without an id: a small fixed box holding only canvases (about 80x48 each), at any depth (Round 52: threejs.org
+  // examples append it inside #container, which body > div missed); the cheap child check runs before the style read
+  for (const el of document.querySelectorAll('div')) {
+    const kids = el.children;
+    if (!kids.length || kids.length > 4) continue;
+    let onlyCanvas = true;
+    for (const k of kids) if (k.tagName !== 'CANVAS') { onlyCanvas = false; break; }
+    if (!onlyCanvas) continue;
     const cs = getComputedStyle(el);
     if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
-    const kids = [...el.children];
-    if (!kids.length || !kids.every((k) => k.tagName === 'CANVAS')) continue;
     const r = el.getBoundingClientRect();
     if (r.width > 0 && r.width <= 120 && r.height <= 80) addUi(el, 'Stats.js');
   }

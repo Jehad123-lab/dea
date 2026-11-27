@@ -11,6 +11,12 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 52: `--own-assets-cost-only`, and Stats.js found at any depth. lusion.co's base extract plus one cost variant ran past
+  300 s on a software GPU. `--own-assets-cost-only` (implies `--own-assets-cost`) takes the recording an earlier run with
+  the same flags left in the cache, and scores the shipped rebuild and the cost variants only: no new watch of the site, no
+  text-layout judging, whole-page read, sweep, research, interaction check or build check. With nothing cached it stops at
+  once and says which run to make first. Round 51 missed threejs.org's Stats.js box, which the examples append inside
+  #container: the canvas-only fixed box is now looked for in every div, not only under body.
 - Round 51: debug UI left out of the scores. threejs.org's skinning example scored 78.6% on the page against 91% on the
   canvas: the lil-gui Controls panel and the Stats.js FPS box are drawn over the page, and DEA never rebuilds them. The
   layout read now finds debug panels (lil-gui, dat.gui, Tweakpane, Leva, Stats.js by its id or as a small fixed box of
