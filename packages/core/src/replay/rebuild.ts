@@ -153,7 +153,12 @@ export interface PipelineDoc {
    * (`ms[i]`: how long frame i stays up) and loop, so a CPU animation (model matrices, bone textures) moves instead of
    * holding the last frame
    */
-  loop?: { n: number; ms: number[] };
+  loop?: {
+    n: number;
+    ms: number[];
+    /** Round 49: the last frame leads back into the first (see loopClosed): live, that jump is blended like any other step */
+    closed?: boolean;
+  };
   /** the last `n` frames are the pointer tape (see tape.ts): played while the pointer moves, uploads re-anchored to the live pointer's path */
   tape?: { n: number; move: number; still: number; drag?: boolean; w: number; h: number; anchors: unknown[]; uniforms?: unknown[] };
   /** after the tape: the scroll tape (see scrolltape.ts), `n` frames, the stops with tape-relative frame indices */
@@ -709,6 +714,49 @@ export function loopTiming(frames: Array<{ ts?: number; ms?: number }>): number[
     const g = Number.isFinite(gaps[i]) ? gaps[i] : median;
     return Math.round(Math.max(4, Math.min(250, g)) * 10) / 10;
   });
+}
+
+/** the numbers a draw step carries that a loop moves: its uniforms and model matrix, flattened in a stable order */
+function stepNumbers(s: { op?: string; uniforms?: Record<string, unknown>; model?: number[] }): number[] {
+  const out: number[] = [];
+  if (s.op !== 'draw') return out;
+  for (const k of Object.keys(s.uniforms ?? {}).sort()) {
+    const v = s.uniforms?.[k];
+    if (typeof v === 'number') out.push(v);
+    else if (Array.isArray(v)) for (const x of v) if (typeof x === 'number') out.push(x);
+  }
+  if (Array.isArray(s.model)) out.push(...s.model);
+  return out;
+}
+
+/** how far apart two frames are: the summed absolute change of their draw steps' numbers (Infinity when the steps differ) */
+export function frameDistance(a: Array<{ op?: string }>, b: Array<{ op?: string }>): number {
+  if (a.length !== b.length) return Number.POSITIVE_INFINITY;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].op !== b[i].op) return Number.POSITIVE_INFINITY;
+    const x = stepNumbers(a[i]);
+    const y = stepNumbers(b[i]);
+    if (x.length !== y.length) return Number.POSITIVE_INFINITY;
+    for (let j = 0; j < x.length; j++) if (Number.isFinite(x[j]) && Number.isFinite(y[j])) d += Math.abs(x[j] - y[j]);
+  }
+  return d;
+}
+
+/**
+ * Round 49: whether a motion loop closes on itself: the step from the last frame back to the first is no bigger than 1.5x
+ * the median step between neighbouring frames (a looping animation recorded for a whole cycle). A loop cut out of a longer
+ * animation jumps there; live, that jump is shown as recorded instead of being smeared across a frame.
+ */
+export function loopClosed(frames: Array<{ steps: Array<{ op?: string }> }>): boolean {
+  if (frames.length < 3) return false;
+  const gaps: number[] = [];
+  for (let i = 0; i + 1 < frames.length; i++) gaps.push(frameDistance(frames[i].steps, frames[i + 1].steps));
+  const ok = gaps.filter((g) => Number.isFinite(g)).sort((x, y) => x - y);
+  if (!ok.length) return false;
+  const median = ok[Math.floor((ok.length - 1) / 2)];
+  const wrap = frameDistance(frames[frames.length - 1].steps, frames[0].steps);
+  return Number.isFinite(wrap) && wrap <= Math.max(1e-6, median * 1.5);
 }
 
 export function uvBucket(uv: number[], grid = TEX_GRID): number {
@@ -1714,7 +1762,9 @@ export function rebuildPipeline(
       programs: ps.programs,
     })),
     frames,
-    ...(doc.frames.length >= 3 ? { loop: { n: doc.frames.length, ms: loopTiming(doc.frames) } } : {}),
+    ...(doc.frames.length >= 3
+      ? { loop: { n: doc.frames.length, ms: loopTiming(doc.frames), ...(loopClosed(frames.slice(0, doc.frames.length)) ? { closed: true } : {}) } }
+      : {}),
     ...(doc.tape && doc.tapeFrames?.length
       ? {
           tape: {
