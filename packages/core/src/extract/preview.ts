@@ -315,6 +315,8 @@ export interface UiOverlay {
   h: number;
   /** Round 54: the panel root's element key, so the layout can leave out everything inside it */
   k?: string;
+  /** Round 55: the box was extended down the flat column the original screenshot shows below the panel */
+  column?: boolean;
 }
 
 /** Round 54: a layout without the debug panels' own text, shapes and graphics (a layout read before Round 54 still has them):
@@ -337,6 +339,65 @@ export function withoutUi<L extends { boxes?: unknown[]; shapes?: unknown[]; gra
   return { ...l, boxes: keep(l.boxes), shapes: keep(l.shapes), graphics: keep(l.graphics) };
 }
 
+/** Round 55: a debug panel's column as the original screenshot shows it. threejs.org's skinning example paints its lil-gui
+ * column solid black from y=607 to the bottom of the screen while no element (and no hit test) reaches below 607: below
+ * each panel, bands of 4 rows that are flat inside the panel's x-range and clearly different from the picture just beside
+ * it extend that panel's box, stopping at the first band that is not */
+export async function panelColumns(page: Page, png: string, overlays: UiOverlay[], vp: { width: number; height: number }): Promise<UiOverlay[]> {
+  if (!overlays.length) return overlays;
+  await page.evaluate(NAME_SHIM);
+  return page.evaluate(
+    async ([src, list, W, H]) => {
+      const im = await new Promise<HTMLImageElement>((res, rej) => {
+        const i = new Image();
+        i.onload = () => res(i);
+        i.onerror = () => rej(new Error('image did not load'));
+        i.src = src;
+      });
+      const c = document.createElement('canvas');
+      c.width = W;
+      c.height = H;
+      const ctx = c.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D;
+      ctx.drawImage(im, 0, 0, W, H);
+      const d = ctx.getImageData(0, 0, W, H).data;
+      const lum = (x: number, y: number) => {
+        const i = (y * W + x) * 4;
+        return 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      };
+      const stats = (x0: number, x1: number, y0: number, y1: number) => {
+        let n = 0;
+        let s = 0;
+        let s2 = 0;
+        for (let y = y0; y < y1; y++)
+          for (let x = Math.max(0, x0); x < Math.min(W, x1); x += 2) {
+            const v = lum(x, y);
+            n++;
+            s += v;
+            s2 += v * v;
+          }
+        const m = n ? s / n : 0;
+        return { n, m, sd: n ? Math.sqrt(Math.max(0, s2 / n - m * m)) : 0 };
+      };
+      return list.map((o) => {
+        const x0 = Math.round(o.x);
+        const x1 = Math.round(o.x + o.w);
+        let bottom = Math.round(o.y + o.h);
+        for (let y = bottom; y + 4 <= H; y += 4) {
+          const inside = stats(x0 + 2, x1 - 2, y, y + 4);
+          if (!inside.n || inside.sd > 6) break;
+          const left = stats(x0 - 8, x0 - 2, y, y + 4);
+          const right = stats(x1 + 2, x1 + 8, y, y + 4);
+          const beside = [left, right].filter((b) => b.n > 0);
+          if (!beside.length || !beside.some((b) => Math.abs(b.m - inside.m) > 24)) break;
+          bottom = y + 4;
+        }
+        return bottom > o.y + o.h + 4 ? { ...o, h: bottom - o.y, column: true } : o;
+      });
+    },
+    [png, overlays, vp.width, vp.height] as const,
+  );
+}
+
 /** Round 51: overlays as fractions of the viewport (the shape compareImages masks), dropping empty ones */
 export function overlayMask(
   overlays: UiOverlay[] | null | undefined,
@@ -348,7 +409,9 @@ export function overlayMask(
 /** Round 51: one line naming what was left out of the scores, or null when nothing was */
 export function overlayNote(overlays: UiOverlay[] | null | undefined): string | null {
   if (!overlays?.length) return null;
-  const list = overlays.map((o) => `${o.kind} ${Math.round(o.w)}x${Math.round(o.h)} at ${Math.round(o.x)},${Math.round(o.y)}`).join(', ');
+  const list = overlays
+    .map((o) => `${o.kind} ${Math.round(o.w)}x${Math.round(o.h)} at ${Math.round(o.x)},${Math.round(o.y)}${o.column ? ' (with its column below)' : ''}`)
+    .join(', ');
   return `debug UI left out of the page and canvas scores (not part of the design, never rebuilt): ${list}`;
 }
 

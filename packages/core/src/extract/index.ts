@@ -69,6 +69,7 @@ import {
   LAYOUT_READ,
   overlayMask,
   overlayNote,
+  panelColumns,
   placeholderPng,
   previewHtml,
   type RefEnv,
@@ -1013,7 +1014,13 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
       const original = ref.png;
       // Round 51: debug panels over the page (lil-gui, Stats.js, ...): masked in both pictures, so the scores measure the design
       // (layout.overlays, read with the layout; not in the layout's declared type, which the hero layout code narrows)
-      const uiOverlays = (ref.layout as { overlays?: UiOverlay[] } | null)?.overlays ?? [];
+      let uiOverlays = (ref.layout as { overlays?: UiOverlay[] } | null)?.overlays ?? [];
+      // Round 55: a panel's column as the screenshot shows it (painted below the last row no element reports)
+      if (uiOverlays.length) {
+        const pc = await browser.newPage();
+        uiOverlays = await panelColumns(pc, original, uiOverlays, vp).catch(() => uiOverlays);
+        await pc.close().catch(() => {});
+      }
       const uiMask = overlayMask(uiOverlays, vp);
       const uiNote = overlayNote(uiOverlays);
       if (uiNote) say(uiNote);
@@ -1336,14 +1343,30 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           const judge: Params = recDoc && replay ? { program: '__replay' } : {};
           let pick: HeroLayout | null = null;
           let pickScore = await render({ ...params, ...judge });
+          const headingScore = pickScore;
+          let best: HeroLayout | null = null;
+          let bestScore = -1;
           for (const l of layoutCandidates) {
             await put('preview/index.html', previewHtml(mods, threeVersion, heroHtml(l)));
             const sc = await render({ ...params, ...judge, background: rgbHex(l.background) ?? params.background });
+            if (sc > bestScore) {
+              bestScore = sc;
+              best = l;
+            }
             if (sc > pickScore) {
               pickScore = sc;
               pick = l;
             }
           }
+          // Round 55: the scores compare 96x60 pictures, where a 13 px line of text is about one pixel tall: a site layout
+          // within 0.2 points of the invented plain heading is a tie, and a tie goes to the site's own text
+          if (!pick && best && bestScore >= headingScore - 0.002) {
+            pick = best;
+            pickScore = bestScore;
+            say(
+              `the site's text layout ties the plain heading (${(bestScore * 100).toFixed(1)}% vs ${(headingScore * 100).toFixed(1)}%); keeping the site's own text`,
+            );
+          } else if (best) say(`text layout: the site's ${(bestScore * 100).toFixed(1)}% vs the plain heading ${(headingScore * 100).toFixed(1)}%`);
           layout = pick;
           if (layout && 'layoutScroll' in ref && ref.layoutScroll) {
             layout = withScroll(layout, ref.layoutScroll);

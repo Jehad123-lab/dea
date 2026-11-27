@@ -11,6 +11,13 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 55: debug panel columns read from the screenshot, and a text-layout tie goes to the site. On threejs.org's skinning
+  example the original shows the lil-gui column solid black from y=607 to the bottom, while no element or hit test reaches
+  below 607. `panelColumns` scans the original below each panel in 4-row bands: a band that is flat inside the panel's
+  x-range and clearly different from the picture beside it extends the panel's mask (logged as "with its column below").
+  The scores compare 96x60 pictures, where a 13 px line of text is about a pixel tall, so the site's one info line could
+  never beat the invented plain heading: a site layout within 0.2 points of the heading now counts as a tie and is kept,
+  and the log names both scores either way.
 - Round 54: debug panels left out of the text layout, and their full painted extent masked. On threejs.org's skinning
   example the layout read kept 40-odd lil-gui labels next to the one real info line, so the site's text layout lost to the
   plain heading. The layout read now keys each panel and drops every box, shape and graphic inside it (`withoutUi` does the
