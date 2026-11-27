@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "echo \"demo kits install their own dependencies in demo/build.mjs\"",
+  "buildCommand": "node demo/build.mjs",
+  "outputDirectory": "demo/dist"
+}

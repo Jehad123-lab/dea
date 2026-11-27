@@ -11,6 +11,10 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 44: live demo. vercel.json builds demo/ (the dea-framer-hero builds failed with no output directory): demo/build.mjs
+  builds every --own-assets kit in demo/kits/<slug> with Vite under /<slug>/ (a kit with public/replay/, the site's own
+  bytes, is never published) and writes a landing page with the scores from demo/demos.json. Generated kits load
+  rebuild/, replay/ and scene.glb from Vite's base, so a kit also runs under a sub-path.
 - Round 43: --own-assets stand-in cells also split by the colour-grid cell their UV falls in (8x8, the image repeats), so a cell
   that spans several islands of a texture atlas no longer averages its UVs into some other part of the atlas (aimed at three.js
   keyframes' material 5, normal #397, +7.9 points with real meshes). Same position grid: no more of the site's shape. The

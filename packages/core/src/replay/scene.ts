@@ -422,7 +422,7 @@ export async function mountRecoveredScene(el = document.body, o = {}) {
   renderer.setPixelRatio(o.pixelRatio || Math.min(devicePixelRatio, 2));
   renderer.setSize(w, h);
   el.appendChild(renderer.domElement);
-  const gltf = await new GLTFLoader().loadAsync(o.url || '/scene/scene.glb');
+  const gltf = await new GLTFLoader().loadAsync(o.url || \`\${import.meta.env?.BASE_URL ?? '/'}scene/scene.glb\`);
   const scene = new THREE.Scene();
   scene.add(gltf.scene);
   scene.add(new THREE.HemisphereLight(0xffffff, 0x202028, 1.4));

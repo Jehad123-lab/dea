@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/node_modules", "!**/.dea", "!**/dist", "!pnpm-lock.yaml", "!**/*.md", "!examples"]
+    "includes": ["**", "!**/node_modules", "!**/.dea", "!**/dist", "!pnpm-lock.yaml", "!**/*.md", "!examples", "!demo/kits"]
   },
   "formatter": {
     "enabled": true,
