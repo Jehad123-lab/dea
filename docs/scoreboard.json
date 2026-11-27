@@ -37,15 +37,21 @@
     {
       "name": "three.js keyframes example",
       "url": "https://threejs.org/examples/webgl_animation_keyframes.html",
-      "why": "plain three.js scene with a skinned model; measure only until a first full run sets the target"
+      "why": "plain three.js scene with a skinned model and CPU AnimationMixer. Round 48 (--own-assets --quick --frames 30): rebuild canvas 79.9–80.2%, page 87.4–87.9% (85.8% / 91.0% with --own-assets-grid 32); full-asset rebuild without --own-assets hits 100% canvas / 98.8% page (100% vs replay).",
+      "targets": {
+        "page": 0.98,
+        "canvas": 0.99,
+        "rebuildPage": 0.86,
+        "rebuildCanvas": 0.79
+      }
     },
     {
       "name": "igloo.inc",
       "url": "https://www.igloo.inc",
-      "why": "heavy WebGL with scroll. Owner's PC after PR #20 (fresh capture, --own-assets --quick): colours fixed by keeping 6 lookup tables as recorded (light grey background, white glow, full wireframe mug and constellation); replay 100% / 100%; rebuild canvas 91.1% (from 62.4%), page 82.8%, 91.1% against the replay with 79 coarse stand-ins",
+      "why": "heavy WebGL with scroll and UBO clocks. Round 48 (--own-assets --quick): replay 100% / 100%; rebuild canvas 99.5%, page 99.5% (with 158 coarse stand-ins, 8x8 colour grids, 6 lookup tables, and Global UBO clock buf 35 byte 20).",
       "targets": {
-        "rebuildCanvas": 0.88,
-        "rebuildPage": 0.8
+        "rebuildCanvas": 0.98,
+        "rebuildPage": 0.98
       }
     },
     {

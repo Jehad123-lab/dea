@@ -4,19 +4,19 @@
       "slug": "igloo",
       "title": "igloo.inc",
       "original": "https://www.igloo.inc",
-      "round": 43,
+      "round": 48,
       "canvas": 0.995,
-      "page": 0.996,
-      "note": "Editable three.js rebuild with --own-assets: 79 stand-in meshes and 8x8 colour-grid images, none of the site's own models or images."
+      "page": 0.995,
+      "note": "Editable three.js rebuild with --own-assets + live Global UBO clock + pointer/scroll input: 158 stand-in meshes and 8x8 colour-grid images, none of the site's own models or images."
     },
     {
       "slug": "keyframes",
       "title": "three.js keyframes",
       "original": "https://threejs.org/examples/webgl_animation_keyframes.html",
-      "round": 43,
+      "round": 48,
       "canvas": 0.802,
-      "page": 0.879,
-      "note": "Editable three.js rebuild with --own-assets: 13 stand-in meshes and 8x8 colour-grid images, none of the site's own models or images (full-asset rebuild scores 100% canvas / 98.8% page)."
+      "page": 0.875,
+      "note": "Editable three.js rebuild with --own-assets + 30-frame compact motion loop: 13 stand-in meshes and 8x8 colour-grid images, none of the site's own models or images (full-asset rebuild scores 100% canvas / 98.8% page)."
     }
   ]
 }
