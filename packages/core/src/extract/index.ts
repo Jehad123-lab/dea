@@ -115,6 +115,11 @@ export function costMaterials(list: StandInInfo[], max = 6): Array<{ material: n
   return [...by.values()].sort((a, b) => b.n - a.n || b.vertices - a.vertices).slice(0, max);
 }
 
+/** Round 46: the finer colour grids --own-assets-cost scores (never shipped): 16 and 32 cells per side, those finer than the shipped one */
+export function costGrids(shipped: number): number[] {
+  return [16, 32].filter((g) => g > shipped);
+}
+
 export function ownCostLine(shipped: number | null, cost: Array<{ what: string; canvas: number | null; page: number }>): string {
   const p = (x: number) => `${Math.round(x * 1000) / 10}%`;
   const parts = cost.map((c) => {
@@ -153,6 +158,12 @@ export interface ExtractOptions extends InspectOptions {
    * real meshes), so the report says what each placeholder kind costs (three.js keyframes: images ~11 points, shapes ~26)
    */
   ownAssetsCost?: boolean;
+  /**
+   * Round 46: cells per side of each image's colour grid with --own-assets (default TEX_GRID = 8, 2-64). A finer grid keeps more
+   * of the site's artwork (three.js keyframes bakes all its colour into one atlas, so 8x8 cells cost about 7 points): the
+   * user's call, never DEA's default.
+   */
+  ownAssetsGrid?: number;
   /** reuse earlier runs instead of opening the site again */
   from?: { design?: string; motion?: string; assets?: string; trace?: string };
   /** skip the live WebGL trace (uniform values and drivers) */
@@ -202,6 +213,8 @@ export interface ReplayInfo {
   scene: { meshes: number; camera: boolean; canvas: number | null; page: number | null } | null;
   errors: string[];
   placeholders?: number;
+  /** Round 46: cells per side of the images' colour grids (--own-assets-grid) */
+  texGrid?: number;
   /** --own-assets: data textures kept as recorded because they are lookup tables (LUTs, ramps, tiny tables) */
   lookups?: number;
   /** false with --own-assets: the capture replay was scored but its recorded bytes are not in the kit */
@@ -588,6 +601,9 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
   givenStages.length = 0;
   const target = opts.to ?? 'react';
   const say = (s: string) => opts.onProgress?.(s);
+  const texGrid = opts.ownAssetsGrid != null && Number.isFinite(opts.ownAssetsGrid) ? Math.max(2, Math.min(64, Math.round(opts.ownAssetsGrid))) : TEX_GRID;
+  if (opts.ownAssetsGrid != null && !opts.ownAssets) say('--own-assets-grid does nothing without --own-assets: ignored');
+  else if (opts.ownAssetsGrid != null && texGrid !== opts.ownAssetsGrid) say(`--own-assets-grid ${opts.ownAssetsGrid}: using ${texGrid} (2-64)`);
   if (opts.ownAssetsCost && !opts.ownAssets)
     say('--own-assets-cost does nothing without --own-assets (it scores what the --own-assets placeholders cost): ignored');
   setDragStep(false);
@@ -1046,9 +1062,14 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           if (opts.ownAssets) {
             rbDoc = structuredClone(recDoc);
             rbBin = new Uint8Array(binU8);
-            placeholders = placeholderTextures(rbDoc, rbBin, lookupInfo);
+            placeholders = placeholderTextures(rbDoc, rbBin, lookupInfo, texGrid);
           }
-          const rb = rebuildPipeline(rbDoc, rbBin, { data: opts.ownAssets ? 'data.bin' : '../replay/capture.bin', ownAssets: opts.ownAssets, sceneNodes });
+          const rb = rebuildPipeline(rbDoc, rbBin, {
+            data: opts.ownAssets ? 'data.bin' : '../replay/capture.bin',
+            ownAssets: opts.ownAssets,
+            sceneNodes,
+            texGrid,
+          });
           await put('public/rebuild/pipeline.json', JSON.stringify(rb.pipeline));
           for (const [f, s2] of Object.entries(rb.shaders)) await put(`public/rebuild/${f}`, s2);
           if (opts.ownAssets) await put('public/rebuild/data.bin', Buffer.from(rbBin.buffer, rbBin.byteOffset, rbBin.byteLength));
@@ -1056,13 +1077,15 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           rebuildDoc = { pipeline: rb.pipeline, stats: rb.stats };
           if (opts.ownAssets && opts.ownAssetsCost) {
             // built one at a time when scored (Round 40: up to 8 variants, each a full copy of the recording)
-            const variant = (images: boolean, meshes: boolean, realMaterials?: number[]) => (): RbFiles => {
-              const d = structuredClone(recDoc as CaptureDoc);
-              const b = new Uint8Array(binU8);
-              if (!images) placeholderTextures(d, b, { lookups: 0 });
-              const v = rebuildPipeline(d, b, { data: 'data.bin', ownAssets: true, standIns: !meshes, realMaterials, sceneNodes });
-              return { pipeline: JSON.stringify(v.pipeline), shaders: v.shaders, data: b };
-            };
+            const variant =
+              (images: boolean, meshes: boolean, realMaterials?: number[], grid = texGrid) =>
+              (): RbFiles => {
+                const d = structuredClone(recDoc as CaptureDoc);
+                const b = new Uint8Array(binU8);
+                if (!images) placeholderTextures(d, b, { lookups: 0 }, grid);
+                const v = rebuildPipeline(d, b, { data: 'data.bin', ownAssets: true, standIns: !meshes, realMaterials, sceneNodes, texGrid: grid });
+                return { pipeline: JSON.stringify(v.pipeline), shaders: v.shaders, data: b };
+              };
             ownCostVariants = [
               { what: "the site's real images, stand-in meshes", build: variant(true, false) },
               { what: "image colour grids, the site's real meshes", build: variant(false, true) },
@@ -1070,6 +1093,11 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
               ...costMaterials(rb.stats.standIns ?? []).map((m) => ({
                 what: `the site's meshes for material ${m.material} only (${m.program}, ${m.n} stand-in${m.n === 1 ? '' : 's'})`,
                 build: variant(false, false, [m.material]),
+              })),
+              // Round 46: what finer colour grids would buy (stand-in meshes, grids only), so the --own-assets-grid choice has numbers
+              ...costGrids(texGrid).map((g) => ({
+                what: `image colour grids of ${g}x${g} (--own-assets-grid ${g}), stand-in meshes`,
+                build: variant(false, false, undefined, g),
               })),
             ];
           }
@@ -1092,7 +1120,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
             scene: sc.meshes.length ? { meshes: sc.meshes.length, camera: Boolean(sc.camera), canvas: null, page: null } : null,
             errors: recDoc.errors.slice(0, 10),
             placeholders,
-            ...(opts.ownAssets ? { lookups: lookupInfo.lookups } : {}),
+            ...(opts.ownAssets ? { lookups: lookupInfo.lookups, texGrid } : {}),
             shipped: !opts.ownAssets,
             inputs: (recDoc.inputs ?? []).filter((m) => m.kind !== 'clock'),
             clocks: new Set((recDoc.animate ?? []).map((a) => `${a.frame}|${a.cmd}`)).size
@@ -2179,7 +2207,7 @@ function renderExtractMd(o: {
         : ['- No mesh draws in the recorded frame (full-screen passes and points only), so no scene.glb.']),
       ...(o.ownAssets && r.placeholders != null
         ? [
-            `- ≈ --own-assets: ${r.placeholders} uploaded texture(s) in the replay are an ${TEX_GRID}×${TEX_GRID} grid of their own average colours at the same size (tones, no detail)${r.lookups ? `; ${r.lookups} lookup table(s) (colour LUTs, ramps, tiny data textures: the site's code tables, not artwork) are kept as recorded` : ''}; render targets and geometry are the frames' own.`,
+            `- ≈ --own-assets: ${r.placeholders} uploaded texture(s) in the replay are an ${r.texGrid ?? TEX_GRID}×${r.texGrid ?? TEX_GRID} grid of their own average colours at the same size (tones, no detail)${r.lookups ? `; ${r.lookups} lookup table(s) (colour LUTs, ramps, tiny data textures: the site's code tables, not artwork) are kept as recorded` : ''}; render targets and geometry are the frames' own.`,
           ]
         : []),
       ...(r.errors.length ? [`- Recording notes: ${r.errors.slice(0, 5).join('; ')}`] : []),

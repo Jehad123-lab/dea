@@ -916,10 +916,17 @@ const fromHalf = (h: number): number => {
  * was a grey checker; a coarse grid keeps an image's tones (a dark sky stays dark, a warm matcap stays warm) and none of
  * its detail, as the mesh stand-ins keep a shape and none of the model.
  */
-export function coarseTones(w: number, h: number, ch: number, get: (p: number, c: number) => number, set: (p: number, c: number, v: number) => void): void {
+export function coarseTones(
+  w: number,
+  h: number,
+  ch: number,
+  get: (p: number, c: number) => number,
+  set: (p: number, c: number, v: number) => void,
+  grid = TEX_GRID,
+): void {
   if (!(w > 0 && h > 0 && ch > 0)) return;
-  const gx = Math.min(TEX_GRID, w);
-  const gy = Math.min(TEX_GRID, h);
+  const gx = Math.min(grid, w);
+  const gy = Math.min(grid, h);
   const sum = new Float64Array(gx * gy * ch);
   const cnt = new Float64Array(gx * gy);
   const cellOf = (x: number, y: number) => Math.min(gy - 1, Math.floor((y * gy) / h)) * gx + Math.min(gx - 1, Math.floor((x * gx) / w));
@@ -955,7 +962,11 @@ export function isLookupTable(w: number, h: number, d = 1): boolean {
   return d > 1 || h <= 4 || w <= 4 || w * h <= 4096;
 }
 
-export function placeholderTextures(doc: CaptureDoc, bin: Uint8Array, info?: { lookups: number }): number {
+/**
+ * Round 46: `grid` is the cells per side of each image's colour grid (--own-assets-grid, default TEX_GRID). A finer grid keeps
+ * more of the site's artwork, so it is the user's choice, never DEA's default.
+ */
+export function placeholderTextures(doc: CaptureDoc, bin: Uint8Array, info?: { lookups: number }, grid = TEX_GRID): number {
   const written = new Set<number>();
   for (const f of doc.snap.framebuffers) for (const a of f.atts) if (a.tex) written.add(a.tex);
   let n = 0;
@@ -993,6 +1004,7 @@ export function placeholderTextures(doc: CaptureDoc, bin: Uint8Array, info?: { l
               else if (t === 0x140b) dv.setUint16(at(p, c), toHalf(v), true);
               else dv.setUint8(at(p, c), Math.max(0, Math.min(255, Math.round(v))));
             },
+            grid,
           );
         } else {
           // integer formats other than bytes (packed, int32...): a flat mid value, as before
@@ -1017,6 +1029,7 @@ export function placeholderTextures(doc: CaptureDoc, bin: Uint8Array, info?: { l
               (p, c, v) => {
                 if (p * 4 + c < u8.length) u8[p * 4 + c] = Math.max(0, Math.min(255, Math.round(v)));
               },
+              grid,
             );
             return;
           }
