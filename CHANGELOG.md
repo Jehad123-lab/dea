@@ -11,6 +11,14 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 56: where a stand-in's corners go, measured. On three.js keyframes the site's real meshes are worth 8.6 canvas
+  points, mostly material 5 (normal #397, +5.4) and material 1 (outline #379, +3.6). Each stand-in cell's one corner is the
+  average of its vertices, which lies inside a curved patch, so stand-ins shrink, and an outline shell and the body it
+  wraps shrink by different amounts. `surfacePoint` places a corner where the site's triangle planes touching the cell meet
+  (Lindstrom's quadric placement, lightly pulled toward the average, kept within a cell's reach), and `StandInPlace` adds
+  'surface' and 'blend' (halfway) next to the default 'average'. On a unit sphere the average sits inside and the plane fit
+  outside, and the blend cuts the radius error to under a third at 4, 8 and 16 cells. Same cells and triangles, so no more
+  of the site's shape is kept. Not the default yet: --own-assets-cost scores both against the shipped average first.
 - Round 55: debug panel columns read from the screenshot, and a text-layout tie goes to the site. On threejs.org's skinning
   example the original shows the lil-gui column solid black from y=607 to the bottom, while no element or hit test reaches
   below 607. `panelColumns` scans the original below each panel in 4-row bands: a band that is flat inside the panel's

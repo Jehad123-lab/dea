@@ -20,7 +20,7 @@ import { REPLAY_CAPTURE_SCRIPT } from '../replay/capture.ts';
 import { animateEntries, buildGraph, type CaptureDoc, compactCapture, fitCapture, placeholderTextures, renderGraphMd, TEX_GRID } from '../replay/graph.ts';
 import { fitInputs, type InputMap, inferInputs, inputsSummary, type ProbeData, type ProbeReport } from '../replay/inputs.ts';
 import { REPLAY_PLAYER } from '../replay/player.ts';
-import { compactFrames, type RebuildStats, rebuildMd, rebuildPipeline, type StandInInfo, standinSummary } from '../replay/rebuild.ts';
+import { compactFrames, type RebuildStats, rebuildMd, rebuildPipeline, type StandInInfo, type StandInPlace, standinSummary } from '../replay/rebuild.ts';
 import { REBUILD_RUNNER } from '../replay/runner.ts';
 import { recoverScene, sceneGlb, sceneMd, sceneModule } from '../replay/scene.ts';
 import { buildPageMap, fitScrollTape, pageMapMd, type ScrollTapeFit, tapeMoved } from '../replay/scrolltape.ts';
@@ -1188,12 +1188,20 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           if (opts.ownAssets && (opts.ownAssetsCost || costOnly)) {
             // built one at a time when scored (Round 40: up to 8 variants, each a full copy of the recording)
             const variant =
-              (images: boolean, meshes: boolean, realMaterials?: number[], grid = texGrid) =>
+              (images: boolean, meshes: boolean, realMaterials?: number[], grid = texGrid, standInPlace?: StandInPlace) =>
               (): RbFiles => {
                 const d = structuredClone(recDoc as CaptureDoc);
                 const b = new Uint8Array(binU8);
                 if (!images) placeholderTextures(d, b, { lookups: 0 }, grid);
-                const v = rebuildPipeline(d, b, { data: 'data.bin', ownAssets: true, standIns: !meshes, realMaterials, sceneNodes, texGrid: grid });
+                const v = rebuildPipeline(d, b, {
+                  data: 'data.bin',
+                  ownAssets: true,
+                  standIns: !meshes,
+                  realMaterials,
+                  sceneNodes,
+                  texGrid: grid,
+                  standInPlace,
+                });
                 return { pipeline: JSON.stringify(compactFrames(v.pipeline)), shaders: v.shaders, data: b };
               };
             ownCostVariants = [
@@ -1208,6 +1216,9 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
                     : `the site's meshes for materials ${g.materials.join(', ')} (they share vertex buffers; ${g.n} stand-ins)`,
                 build: variant(false, false, g.materials),
               })),
+              // Round 56: stand-in corners on the site's surface instead of their cell's average (same cells, same shape kept)
+              { what: 'stand-in corners halfway to the surface (blend), image colour grids', build: variant(false, false, undefined, texGrid, 'blend') },
+              { what: 'stand-in corners on the surface (plane fit), image colour grids', build: variant(false, false, undefined, texGrid, 'surface') },
               // Round 46: what finer colour grids would buy (stand-in meshes, grids only), so the --own-assets-grid choice has numbers
               ...costGrids(texGrid).map((g) => ({
                 what: `image colour grids of ${g}x${g} (--own-assets-grid ${g}), stand-in meshes`,

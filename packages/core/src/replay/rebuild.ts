@@ -784,6 +784,36 @@ export function normalBucket(n: number[]): number {
   return 1 + k * 2 + (x < 0 ? 1 : 0);
 }
 
+/** Round 56: where a stand-in cell's one corner goes: the average of its vertices (the default), the point that best fits
+ * the site's triangle planes touching the cell, or halfway between the two */
+export type StandInPlace = 'average' | 'surface' | 'blend';
+
+/**
+ * Round 56: the point that best fits the planes summed in a quadric q = [a11 a12 a13 a22 a23 a33 b1 b2 b3 w] (area-weighted
+ * unit normals n and offsets d, so A = sum w n n^T and b = sum w d n), pulled lightly toward m (the cell's average) so a
+ * direction the planes leave free stays at m: x = (A + l I)^-1 (b + l m), l = 2% of the weight. Null when the system is
+ * singular or the point lands farther than `reach` from m (a sliver of planes meeting far away).
+ */
+export function surfacePoint(q: ArrayLike<number>, m: number[], reach: number): number[] | null {
+  const l = 0.02 * q[9];
+  const a = q[0] + l,
+    b = q[1],
+    c = q[2],
+    e = q[3] + l,
+    f = q[4],
+    i = q[5] + l;
+  const r = [q[6] + l * m[0], q[7] + l * m[1], q[8] + l * m[2]];
+  const det = a * (e * i - f * f) - b * (b * i - f * c) + c * (b * f - e * c);
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-18) return null;
+  const x = [
+    (r[0] * (e * i - f * f) - b * (r[1] * i - f * r[2]) + c * (r[1] * f - e * r[2])) / det,
+    (a * (r[1] * i - f * r[2]) - r[0] * (b * i - f * c) + c * (b * r[2] - r[1] * c)) / det,
+    (a * (e * r[2] - r[1] * f) - b * (b * r[2] - r[1] * c) + r[0] * (b * f - e * c)) / det,
+  ];
+  if (!x.every(Number.isFinite)) return null;
+  return Math.hypot(x[0] - m[0], x[1] - m[1], x[2] - m[2]) <= reach ? x : null;
+}
+
 /**
  * A coarse stand-in for a mesh (vertex clustering): its bounding box is cut into at most `grid` cells per side, every
  * vertex moves to the average of its cell, and triangles that collapse are dropped. What is left keeps the outline and
@@ -797,7 +827,7 @@ export function proxyMesh(
   max: number[],
   grid = PROXY_GRID,
   extra: Array<{ name: string; size: number; read: (v: number) => number[]; pick?: boolean }> = [],
-  opts: { texGrid?: number } = {},
+  opts: { texGrid?: number; place?: StandInPlace } = {},
 ): {
   pos: number[];
   idx: number[];
@@ -805,6 +835,8 @@ export function proxyMesh(
   flipped?: number;
   bothSides?: number;
   pushedOut?: number;
+  /** Round 56: corners placed on the site's surface (the rest kept their cell's average) */
+  placed?: number;
 } | null {
   const ext = [0, 1, 2].map((k) => Math.max(max[k] - min[k], 1e-9));
   const big = Math.max(...ext);
@@ -876,7 +908,66 @@ export function proxyMesh(
     facing.push(triNormal(posOf(tris[i]), posOf(tris[i + 1]), posOf(tris[i + 2])));
   }
   const pos: number[] = [];
-  for (const s of sums) for (let k = 0; k < 3; k++) pos.push(Math.round((s[k] / s[3]) * 1e4) / 1e4);
+  // Round 56: each cell's corner is placed on the site's surface, not at the plain average of its vertices (Lindstrom's
+  // quadric placement for vertex clustering). The average of a curved or creased patch lies inside the mesh, so every
+  // stand-in shrank and an outline shell (three.js keyframes' material 1) and the body it wraps (material 5) shrank by
+  // different amounts and cut through each other. The planes of the site's triangles touching a cell pull its one corner
+  // back onto the surface; a light pull toward the average keeps it steady where the planes leave a direction free, and a
+  // corner that would leave its neighbourhood keeps the average. Still one vertex per cell: no more of the site's shape.
+  // Not the default yet: --own-assets-cost scores 'surface' and 'blend' so the PC numbers decide.
+  const place = opts.place ?? 'average';
+  const Q = place !== 'average' ? sums.map(() => [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) : null;
+  if (Q) {
+    for (let i = 0; i + 2 < tris.length; i += 3) {
+      const p0 = posOf(tris[i]);
+      const p1 = posOf(tris[i + 1]);
+      const p2 = posOf(tris[i + 2]);
+      const ux = p1[0] - p0[0],
+        uy = p1[1] - p0[1],
+        uz = p1[2] - p0[2];
+      const vx = p2[0] - p0[0],
+        vy = p2[1] - p0[1],
+        vz = p2[2] - p0[2];
+      let nx = uy * vz - uz * vy,
+        ny = uz * vx - ux * vz,
+        nz = ux * vy - uy * vx;
+      const len = Math.hypot(nx, ny, nz);
+      if (!(len > 0) || !Number.isFinite(len)) continue;
+      const area = len / 2;
+      nx /= len;
+      ny /= len;
+      nz /= len;
+      const d = nx * p0[0] + ny * p0[1] + nz * p0[2];
+      const ids = new Set([vertCell.get(tris[i]), vertCell.get(tris[i + 1]), vertCell.get(tris[i + 2])]);
+      for (const id of ids) {
+        if (id == null) continue;
+        const q = Q[id];
+        q[0] += area * nx * nx;
+        q[1] += area * nx * ny;
+        q[2] += area * nx * nz;
+        q[3] += area * ny * ny;
+        q[4] += area * ny * nz;
+        q[5] += area * nz * nz;
+        q[6] += area * d * nx;
+        q[7] += area * d * ny;
+        q[8] += area * d * nz;
+        q[9] += area;
+      }
+    }
+  }
+  const cellSize = ext.map((e, k) => e / cells[k]);
+  const reach = Math.hypot(cellSize[0], cellSize[1], cellSize[2]);
+  let placed = 0;
+  sums.forEach((s, id) => {
+    const m = [s[0] / s[3], s[1] / s[3], s[2] / s[3]];
+    const q = Q?.[id];
+    const sp = q && q[9] > 0 ? surfacePoint(q, m, reach) : null;
+    // 'blend': halfway between the average (inside a curved patch) and the plane fit (outside it, where the tangent planes
+    // meet); on a sphere at 4, 8 and 16 cells the radius error falls from 1.9%, 0.4%, 0.09% to about a tenth of that
+    const x = sp && place === 'blend' ? [(sp[0] + m[0]) / 2, (sp[1] + m[1]) / 2, (sp[2] + m[2]) / 2] : sp;
+    if (x) placed++;
+    for (let k = 0; k < 3; k++) pos.push(Math.round((x ?? m)[k] * 1e4) / 1e4);
+  });
   // Round 46: Round 45 pushed the corners of an outline shell (a culled mesh whose visible faces point inward) out to the
   // farthest site vertex of their cell. On three.js keyframes the shipped canvas stayed at 80.2% while the uv1 split alone
   // closed 0.6 points of material 5's gap, tones fell 0.6 and material 1's gap grew (+3.4 to +3.7): the bigger black shells
@@ -915,7 +1006,7 @@ export function proxyMesh(
     const [a, b, c] = k.split(',');
     if (seen.has(`${a},${c},${b}`)) bothSides++;
   }
-  if (!extra.length) return { pos, idx, flipped, bothSides, pushedOut };
+  if (!extra.length) return { pos, idx, flipped, bothSides, pushedOut, placed };
   const attrs: Record<string, { size: number; data: number[] }> = {};
   extra.forEach((e, j) => {
     const X = xsums[j];
@@ -931,7 +1022,7 @@ export function proxyMesh(
       }
     attrs[e.name] = { size: e.size, data };
   });
-  return { pos, idx, attrs, flipped, bothSides, pushedOut };
+  return { pos, idx, attrs, flipped, bothSides, pushedOut, placed };
 }
 
 /**
@@ -950,6 +1041,8 @@ export function rebuildPipeline(
     realMaterials?: number[];
     /** Round 46: cells per side of the images' colour grids (--own-assets-grid), so stand-in cells split on the same grid */
     texGrid?: number;
+    /** Round 56: where stand-in corners go (--own-assets-cost measures 'surface' and 'blend' against the default 'average') */
+    standInPlace?: StandInPlace;
     sceneNodes?: Map<string, string>;
   } = { data: 'data.bin' },
 ): { pipeline: PipelineDoc; shaders: Record<string, string>; stats: RebuildStats } {
@@ -1698,6 +1791,7 @@ export function rebuildPipeline(
       info.dropped = info.dropped.filter((n) => !info.kept.includes(n));
       const px = proxyMesh(tris, (v) => [at(v, 0), at(v, 1), Math.min(3, pos.size) > 2 ? at(v, 2) : 0], min, max, PROXY_GRID, extra, {
         texGrid: opts.texGrid,
+        place: opts.standInPlace,
       });
       if (px) {
         step.proxy = px;
