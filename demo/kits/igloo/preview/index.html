@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>DEA rebuild preview</title>
+<link rel="stylesheet" href="../tokens/tokens.css" />
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js", "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/" } }</script>
+<style>html, body { margin: 0; height: 100%; overflow: hidden; } #scene { position: fixed; inset: 0; } .dea-hero { position: relative; z-index: 1; } h1 { position: relative; margin: 30vh 8vw 0; font-weight: 500; line-height: 1.05; }</style>
+</head>
+<body>
+<div id="scene"></div>
+<style>
+html, body { background: rgb(160, 165, 177); }
+</style>
+<section class="dea-hero" style="position: relative; width: 100vw; height: 100vh; overflow: hidden">
+
+</section>
+<script type="module">
+const P = JSON.parse(decodeURIComponent(location.hash.slice(1) || '{}'));
+document.body.style.background = P.background || '';
+document.body.style.color = P.text || '';
+const h = document.getElementById('h');
+if (h) {
+  h.textContent = P.heading || '';
+  if (P.font) h.style.fontFamily = P.font;
+  if (P.size) h.style.fontSize = P.size + 'px';
+}
+const mods = {
+  "MousePosProgressProgress2Shader": () => import('../shaders/MousePosProgressProgress2Shader.js'),
+  "ProgressProgress2Color1Shader": () => import('../shaders/ProgressProgress2Color1Shader.js'),
+  "ProgressProgress2NoiseShader": () => import('../shaders/ProgressProgress2NoiseShader.js'),
+  "ProgressProgress2NoiseShader2": () => import('../shaders/ProgressProgress2NoiseShader2.js'),
+  "MapBlocksColorShader": () => import('../shaders/MapBlocksColorShader.js'),
+  "MapColorShowShader": () => import('../shaders/MapColorShowShader.js'),
+  "Show1Show2MapShader": () => import('../shaders/Show1Show2MapShader.js'),
+  "Show1Show2MapShader2": () => import('../shaders/Show1Show2MapShader2.js'),
+  "Show1Show2MapShader3": () => import('../shaders/Show1Show2MapShader3.js'),
+  "Color1Color2IntroColorShader": () => import('../shaders/Color1Color2IntroColorShader.js'),
+  "NoiseNumbersProgressShader": () => import('../shaders/NoiseNumbersProgressShader.js'),
+  "SizeNumsColorShader": () => import('../shaders/SizeNumsColorShader.js'),
+};
+window.__deaReady = false;
+try {
+  if (P.program === '__replay') {
+    // the site's own recorded frames, replayed call for call (replay/replay.js)
+    const { loadCapture, createReplay } = await import('../replay/replay.js');
+    const d = await loadCapture('../public/replay/');
+    const b = d.doc.canvas;
+    const c = document.createElement('canvas');
+    c.style.cssText = 'position:fixed;pointer-events:none;left:' + b.x + 'px;top:' + b.y + 'px;width:' + b.cssW + 'px;height:' + b.cssH + 'px';
+    const el = document.getElementById('scene');
+    el.style.opacity = String(P.opacity ?? 1);
+    el.appendChild(c);
+    const r = createReplay(c, d, { animate: !!P.live, steady: P.steady !== false, preserveDrawingBuffer: true });
+    r.renderFrames();
+    if (P.live) { r.start(); window.__deaKit = r; }
+    window.__deaReplayErrors = r.errors;
+  } else if (P.program === '__rebuild') {
+    // the editable rebuild: the recorded render graph as three.js objects (rebuild/rebuild.js, public/rebuild/)
+    const THREE = await import('https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js');
+    const { loadPipeline, createRebuild } = await import('../rebuild/rebuild.js');
+    // Round 38: --own-assets-cost scores never-shipped variants from their own folders (one URL per variant: no stale cache)
+    const d = await loadPipeline(P.rebuildBase || '../public/rebuild/');
+    const b = d.pipeline.canvas;
+    const c = document.createElement('canvas');
+    c.style.cssText = 'position:fixed;pointer-events:none;left:' + b.x + 'px;top:' + b.y + 'px;width:' + b.cssW + 'px;height:' + b.cssH + 'px';
+    const el = document.getElementById('scene');
+    el.style.opacity = String(P.opacity ?? 1);
+    el.appendChild(c);
+    const r = createRebuild(c, d, { THREE, animate: !!P.live, steady: P.steady !== false, preserveDrawingBuffer: true });
+    r.renderFrames();
+    if (P.live) { r.start(); window.__deaKit = r; }
+    window.__deaReplayErrors = r.errors;
+  } else if (P.program === '__scene') {
+    // the 3D scene recovered from the recording (scene/scene.glb): geometry, transforms, camera; a plain material
+    const { mountRecoveredScene } = await import('../scene/scene.js');
+    const el = document.getElementById('scene');
+    await mountRecoveredScene(el, { url: '../public/scene/scene.glb', once: true });
+  } else if (P.program === '__pipeline') {
+    const THREE = await import('three');
+    const { createPipeline } = await import('../pipeline.js');
+    const el = document.getElementById('scene');
+    el.style.opacity = String(P.opacity ?? 1);
+    const renderer = new THREE.WebGLRenderer({ alpha: true, preserveDrawingBuffer: true });
+    renderer.setSize(innerWidth, innerHeight);
+    el.appendChild(renderer.domElement);
+    const pipe = createPipeline(renderer);
+    for (let i = 0; i < 4; i++) { pipe.render(2.0 + i / 60); await new Promise((r) => setTimeout(r, 50)); }
+  } else if (P.program && mods[P.program]) {
+    const THREE = await import('three');
+    const { createMaterial, meta } = await mods[P.program]();
+    const el = document.getElementById('scene');
+    el.style.opacity = String(P.opacity ?? 1);
+    const renderer = new THREE.WebGLRenderer({ alpha: true, preserveDrawingBuffer: true });
+    renderer.setSize(innerWidth, innerHeight);
+    el.appendChild(renderer.domElement);
+    const scene = new THREE.Scene();
+    const camera = meta.fullscreen ? new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1) : new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 100);
+    camera.position.z = meta.fullscreen ? 0 : 3;
+    const material = createMaterial();
+    scene.add(meta.points ? new THREE.Points(new THREE.PlaneGeometry(2, 2, 127, 127), material) : new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+    for (const [k, u] of Object.entries(material.uniforms)) {
+      if (/time/i.test(k) && typeof u.value === 'number') u.value = 2.0;
+      if (/res(olution)?$/i.test(k) && u.value && u.value.isVector2) u.value.set(innerWidth, innerHeight);
+    }
+    renderer.render(scene, camera);
+    await new Promise((r) => setTimeout(r, 300));
+    renderer.render(scene, camera);
+  }
+  if (P.standin === 'particles') {
+    // ≈ a technique stand-in (not the site's code): a soft cloud of points where the site draws its particle simulation
+    const THREE = await import('three');
+    const { createParticles } = await import('../standins/particles.js');
+    const el = document.createElement('div');
+    el.style.cssText = 'position:fixed;inset:0;pointer-events:none';
+    document.body.insertBefore(el, document.body.firstChild.nextSibling);
+    const renderer = new THREE.WebGLRenderer({ alpha: true, preserveDrawingBuffer: true });
+    renderer.setSize(innerWidth, innerHeight);
+    el.appendChild(renderer.domElement);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 100);
+    camera.position.z = 3;
+    scene.add(createParticles(THREE, { spread: P.spread, x: P.standinX, y: P.standinY, color: P.standinColor || P.text }));
+    renderer.render(scene, camera);
+  }
+} catch (e) { window.__deaError = String(e && e.message || e); }
+window.__deaReady = true;
+</script>
+</body>
+</html>

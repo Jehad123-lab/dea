@@ -1,0 +1,364 @@
+{
+  "schema": "dea.evidence/1",
+  "url": "https://threejs.org/examples/webgl_animation_keyframes.html",
+  "runId": "20261127-112511-threejs-org-9f009804",
+  "madeAt": "2026-11-27T11:27:18.322Z",
+  "mode": "quick",
+  "machine": "linux · 2 CPUs · 4 GB",
+  "counts": {
+    "Verified": 4,
+    "Inferred": 0,
+    "Unknown": 1,
+    "total": 5
+  },
+  "findings": [
+    {
+      "id": "run.reference",
+      "area": "run",
+      "claim": "The reference screenshot is the settled site (no loader visible).",
+      "label": "Verified",
+      "measurement": "no loader element was visible at the reference (76 s after load)",
+      "coverage": "complete",
+      "limitations": [
+        "a loader that does not use a recognisable element would not be seen"
+      ]
+    },
+    {
+      "id": "scene.replay",
+      "area": "scene",
+      "claim": "The capture replay draws the recorded frame the site drew.",
+      "label": "Verified",
+      "measurement": "canvas 100%, page 98.8% against the reference; 1 recorded frame(s), 1 passes, 79 draws, 14 programs, 47.2 MB",
+      "coverage": "partial",
+      "limitations": [
+        "a replay of one held frame scores near 100% by construction: it shows the recording plays back, not that motion or input is understood",
+        "scored, but the recorded bytes are not in the kit (--own-assets)"
+      ],
+      "data": {
+        "canvas": 0.9999584661787496,
+        "page": 0.9880863957849643,
+        "frames": 1,
+        "passes": 1,
+        "draws": 79,
+        "programs": 14
+      }
+    },
+    {
+      "id": "scene.rebuild",
+      "area": "scene",
+      "claim": "The editable three.js rebuild draws the same picture as the capture replay.",
+      "label": "Verified",
+      "measurement": "canvas 80.2%, page 87.9% against the reference; 80.2% against the replay",
+      "coverage": "partial",
+      "limitations": [
+        "one frame: the same caveat as the replay",
+        "--own-assets: images are placeholders and big meshes are coarse stand-ins (or boxes), so this score is lower by design"
+      ],
+      "data": {
+        "canvas": 0.8024681711476129,
+        "page": 0.8790114895886625,
+        "vsReplay": 0.8024463995482098
+      }
+    },
+    {
+      "id": "input.response",
+      "area": "input",
+      "claim": "Whether the kit reproduces the site's response to pointer and scroll is not known.",
+      "label": "Unknown",
+      "measurement": "the interaction check did not run (quick mode, or it failed)",
+      "coverage": "not-exercised",
+      "limitations": [],
+      "nextProbe": "dea extract <url> (full mode)"
+    },
+    {
+      "id": "boot.timeline",
+      "area": "boot",
+      "claim": "No shader was being linked just before the reference.",
+      "label": "Verified",
+      "measurement": "first canvas 1686 ms, first draw 1743 ms, last link 5952 ms, 17 programs",
+      "coverage": "complete",
+      "limitations": [
+        "timings are from a machine with a software renderer; their order is real, their size is not a desktop's"
+      ],
+      "data": {
+        "firstCanvasMs": 1686,
+        "firstDrawMs": 1743,
+        "lastLinkMs": 5952,
+        "programs": 17,
+        "linkingNearReference": 0
+      }
+    }
+  ],
+  "unknowns": [
+    {
+      "id": "unknown.1",
+      "topic": "No live GSAP timelines were captured",
+      "missing": "Either the site animates without GSAP, or its intro tweens had finished before DEA read the GSAP instance.",
+      "follows": [
+        "input.response"
+      ],
+      "next": [
+        {
+          "why": "record motion from the first frame and fit curves",
+          "command": "dea motion https://threejs.org/examples/webgl_animation_keyframes.html"
+        },
+        {
+          "why": "read the gsap.to/timeline calls in the code itself",
+          "command": "dea code https://threejs.org/examples/webgl_animation_keyframes.html"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "tokens/tokens.json",
+      "bytes": 618,
+      "sha256": "0f85eaf018e4ed223efade02afcd4f32df57a2d1ebd4a620bec7358e78a38e08"
+    },
+    {
+      "path": "tokens/tokens.css",
+      "bytes": 417,
+      "sha256": "ca89ad60a4498fa03c374e01e99edd2497cf5c509fb02caa8068fa63ce526af1"
+    },
+    {
+      "path": "tokens/tailwind.preset.js",
+      "bytes": 718,
+      "sha256": "d8169ac7c677b8593ed6d07a61d90e7cb441026fcc8763bb16829e798a7952ee"
+    },
+    {
+      "path": "motion/keyframes.css",
+      "bytes": 105,
+      "sha256": "051cb8b365682385b57b9de0544282b474519626d4275153aef938e5f4595e44"
+    },
+    {
+      "path": "src/Scene.jsx",
+      "bytes": 1079,
+      "sha256": "86032979fbc774472e1a11a393840c4c170574f58d9437288c0451a8034439bf"
+    },
+    {
+      "path": "src/App.jsx",
+      "bytes": 264,
+      "sha256": "16067afb63462a412e3958de154b01f5775364e8164111ed15575179066b8ff0"
+    },
+    {
+      "path": "src/main.jsx",
+      "bytes": 138,
+      "sha256": "80ee52efe216f3e9fa32095b42b62ebb832b2495765124d0c13b6cb5f38f8814"
+    },
+    {
+      "path": "index.html",
+      "bytes": 351,
+      "sha256": "39550da0d3b6ada4750880e6062aaf7f67e8fdb5b4bebd01c2eff50f270d07c7"
+    },
+    {
+      "path": "vite.config.js",
+      "bytes": 133,
+      "sha256": "072ef0422d3e4033ae783e213ca275349c652e81cc13ee65a67162de40c3cfd9"
+    },
+    {
+      "path": "package.json",
+      "bytes": 379,
+      "sha256": "fead9ec14c4eb21b3d124e3863624efd1faabb3ea443526512c21dc4a74af15e"
+    },
+    {
+      "path": "preview/index.html",
+      "bytes": 7002,
+      "sha256": "86cd35d3cf4351d0510b5f85337fe7c171241e00398d803cf754c122e2344d27"
+    },
+    {
+      "path": "pipeline.js",
+      "bytes": 1786,
+      "sha256": "253f8094fad5cc5afd220c2d5effb8125486c9e9078101b1f4b78f16e40b815b"
+    },
+    {
+      "path": "render-graph.md",
+      "bytes": 6064,
+      "sha256": "0b989ed51dc706a9e00b81d7301b28c207d2a8bed03fbffd3dae47350bd40e99"
+    },
+    {
+      "path": "public/rebuild/pipeline.json",
+      "bytes": 2040408,
+      "sha256": "46598bb7efb1ca50caed1ff2fc013270654de6926af44215528447682e84cb08"
+    },
+    {
+      "path": "public/rebuild/shaders/SkyShader-378.vert",
+      "bytes": 3914,
+      "sha256": "39dbc5a107acc4fae831f87a3403faa044a3ef708ad3799b5438b1775c9a67cb"
+    },
+    {
+      "path": "public/rebuild/shaders/SkyShader-378.frag",
+      "bytes": 12501,
+      "sha256": "b2c87268a5c022db527027d8a357a1f4024df9da2d0f9c90e3124909ac3a32c6"
+    },
+    {
+      "path": "public/rebuild/shaders/outline-379.vert",
+      "bytes": 19760,
+      "sha256": "570be26b15e40de1267f454b247d269b9a3a8ee748b8e32d6ad1fd8b3ae0b133"
+    },
+    {
+      "path": "public/rebuild/shaders/outline-379.frag",
+      "bytes": 81840,
+      "sha256": "c5616d4ecda3cfac817de4a8321fb6c79e9ef55323fb33a65c414eaa1aed7b83"
+    },
+    {
+      "path": "public/rebuild/shaders/interiors-384.vert",
+      "bytes": 19867,
+      "sha256": "6dfec2c0f3f37b9e6c19ebe8c69df995613f22bded9ba50a350093d0bf43d22d"
+    },
+    {
+      "path": "public/rebuild/shaders/interiors-384.frag",
+      "bytes": 81903,
+      "sha256": "a52f8a272418f3f22385dae23af40e3aa44d0f4c0d4edac07f65aaee45eaeb30"
+    },
+    {
+      "path": "public/rebuild/shaders/alpha-0-387.vert",
+      "bytes": 19815,
+      "sha256": "da14d869b693f6af23739c69505ac7d4afc9f620f26622cab300b859540f1b99"
+    },
+    {
+      "path": "public/rebuild/shaders/alpha-0-387.frag",
+      "bytes": 81899,
+      "sha256": "e9085ce76cb510acfdebd26862f4216fd05942d102a09355e42735c9935d3640"
+    },
+    {
+      "path": "public/rebuild/shaders/alpha-393.vert",
+      "bytes": 19868,
+      "sha256": "31cb879e2440abc38f1561b4feb09d950ca880b8d82565666d30e5a148200631"
+    },
+    {
+      "path": "public/rebuild/shaders/alpha-393.frag",
+      "bytes": 81931,
+      "sha256": "90ec402d117c451d627a5fe1f82f86ac684ce47cef71f097a572283422a73843"
+    },
+    {
+      "path": "public/rebuild/shaders/normal-397.vert",
+      "bytes": 19869,
+      "sha256": "cdef395d70ab55e6721e21df13ea9e57538a59962d67b1cdf6df9c57c5f1e0ff"
+    },
+    {
+      "path": "public/rebuild/shaders/normal-397.frag",
+      "bytes": 81910,
+      "sha256": "8846dfef7a670ab32dbb24e2cd09f00ed55b5c32c47b904446c130d03419a088"
+    },
+    {
+      "path": "public/rebuild/shaders/normal-427.vert",
+      "bytes": 19890,
+      "sha256": "f69284721062bbaef4814f2e960b5ed55071341ecac47d3821f0ba098b7e4775"
+    },
+    {
+      "path": "public/rebuild/shaders/normal-427.frag",
+      "bytes": 81910,
+      "sha256": "8846dfef7a670ab32dbb24e2cd09f00ed55b5c32c47b904446c130d03419a088"
+    },
+    {
+      "path": "public/rebuild/shaders/Material-5511-454.vert",
+      "bytes": 19821,
+      "sha256": "c96a39977aaa9b1d778ac3aae88bb5722e7f20cdc8511bbdfb5d45dc18b79829"
+    },
+    {
+      "path": "public/rebuild/shaders/Material-5511-454.frag",
+      "bytes": 81883,
+      "sha256": "5ce9f9bb8e521659792447c49b05515dc8dd84e71752cc003c514c7063bbeabd"
+    },
+    {
+      "path": "public/rebuild/shaders/glass-transp-456.vert",
+      "bytes": 19822,
+      "sha256": "5428eed11db3b42135e7968d6d5afdd18a2bf229e4b4d90c69490910d5a8b131"
+    },
+    {
+      "path": "public/rebuild/shaders/glass-transp-456.frag",
+      "bytes": 81867,
+      "sha256": "0f33e2229015947a741df4675a26af3be9e5999d7d1160eac2627c083da05fc2"
+    },
+    {
+      "path": "public/rebuild/shaders/glass-transp-458.vert",
+      "bytes": 19803,
+      "sha256": "6cb91403f1d1c65d15d4e1b896fd9b31550d0d6c8a49bf4193afd03029e78430"
+    },
+    {
+      "path": "public/rebuild/shaders/glass-transp-458.frag",
+      "bytes": 81848,
+      "sha256": "050e6ff6154b26c139267e01094349f5b879dd515b9c221410d44e9cd2707719"
+    },
+    {
+      "path": "public/rebuild/shaders/alpha-glass-459.vert",
+      "bytes": 19872,
+      "sha256": "806e5bf8b4359db93bbcb4ea753bfd4fbc04cd6e4a460e74c10e9bec77c939d5"
+    },
+    {
+      "path": "public/rebuild/shaders/alpha-glass-459.frag",
+      "bytes": 81898,
+      "sha256": "1ef71edbbcb8cfa49d5635a0f320e7a1d0b96f04f992c203be52126efa471eeb"
+    },
+    {
+      "path": "public/rebuild/shaders/alpha-glass-461.vert",
+      "bytes": 19853,
+      "sha256": "a1ace6b87e0c388c00e3148b792947b74e635d8f06a6b0ff825725601f064783"
+    },
+    {
+      "path": "public/rebuild/shaders/alpha-glass-461.frag",
+      "bytes": 81879,
+      "sha256": "60dfb8f15eb549861134da1d27aa3cebf4149b7c1dddc19d1880852aad559af4"
+    },
+    {
+      "path": "public/rebuild/shaders/Material-5518-463.vert",
+      "bytes": 19819,
+      "sha256": "4aefe943fb423a0aacfbcc8941183511831f0e4118c14cf2c5bebd0e3e4b6c0b"
+    },
+    {
+      "path": "public/rebuild/shaders/Material-5518-463.frag",
+      "bytes": 81866,
+      "sha256": "178d1b17eb613bbc8e075dd8456981fdf56a6aa21228d0bf56c7c2f9804b4b09"
+    },
+    {
+      "path": "public/rebuild/shaders/Material-5518-465.vert",
+      "bytes": 19800,
+      "sha256": "b700ea77f80d7524c65a0d334f80978fec1a5c564bd6256b807c42855cb1d588"
+    },
+    {
+      "path": "public/rebuild/shaders/Material-5518-465.frag",
+      "bytes": 81847,
+      "sha256": "1616062b816e1e94c481a22251000f577cdf260ef407e6f98a0c7ad705ee0380"
+    },
+    {
+      "path": "public/rebuild/data.bin",
+      "bytes": 47159580,
+      "sha256": "551405123244b9338f13a47ea065d983d09f8093a1ad45239e3df98a84c0a82c"
+    },
+    {
+      "path": "rebuild/rebuild.js",
+      "bytes": 59067,
+      "sha256": "a63b01377ea4c51079368f12c92e2b143d7e8dde32982424f6069d3430d012ea"
+    },
+    {
+      "path": "public/scene/scene.glb",
+      "bytes": 65464,
+      "sha256": "9d8777940d998d791c72d0934e2007c7deb35cc5febefd71d39c1ade7ee9e4de"
+    },
+    {
+      "path": "scene/scene.js",
+      "bytes": 2220,
+      "sha256": "8bed7421813a15e9a7fc94d3568e15953d1fbc2a4b548ee193c881cc30750baa"
+    },
+    {
+      "path": "scene/scene.md",
+      "bytes": 8078,
+      "sha256": "f13000ab54cc863caa3e2069b1e18804886bd864c0be9c5b7b5f84ac23a23c76"
+    },
+    {
+      "path": "layout.json",
+      "bytes": 1066,
+      "sha256": "7684d64fdb5a6d8e16cd40588aefc88e476ba1119b74e25a2d8c8d63ce71fd56"
+    },
+    {
+      "path": "src/Hero.jsx",
+      "bytes": 2264,
+      "sha256": "9aec2de0c4a146ccdf79711e491f147ad994a93571c3a94380b7e2a01c72e1b7"
+    },
+    {
+      "path": "rebuild.md",
+      "bytes": 3236,
+      "sha256": "8d785dc367a901bc6619ec04f49c82a6ddf93b90036d59b2c6b429202c270b71"
+    }
+  ]
+}

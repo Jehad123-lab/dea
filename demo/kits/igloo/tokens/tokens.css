@@ -1,0 +1,12 @@
+/* Design tokens extracted by DEA. Values were read from the rendered page (Verified); names are DEA's. */
+:root {
+  --color-background: #a0a5b1;
+  --color-neutral-1: #a0a5b1;
+  --duration-5000ms: 5000ms;
+}
+
+body {
+  background: var(--color-background);
+  
+  
+}

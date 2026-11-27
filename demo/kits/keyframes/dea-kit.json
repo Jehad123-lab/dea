@@ -1,0 +1,22 @@
+{
+  "url": "https://threejs.org/examples/webgl_animation_keyframes.html",
+  "extractedAt": "2026-11-27T11:27:18.319Z",
+  "target": "react",
+  "title": "three.js webgl - animation - keyframes",
+  "score": 0.8790114895886625,
+  "canvasScore": 0.8024681711476129,
+  "shaders": [],
+  "eases": [],
+  "colors": [
+    "#e2e0e0",
+    "#000000",
+    "#e2e0e0",
+    "#000000"
+  ],
+  "fonts": [
+    "monospace"
+  ],
+  "techniques": [],
+  "ownAssets": true,
+  "provenance": "Extracted from https://threejs.org/examples/webgl_animation_keyframes.html on 2026-11-27 by DEA. Third-party code, shaders, fonts and assets belong to their owners."
+}

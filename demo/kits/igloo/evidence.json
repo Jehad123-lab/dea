@@ -1,0 +1,590 @@
+{
+  "schema": "dea.evidence/1",
+  "url": "https://www.igloo.inc",
+  "runId": "20261127-112319-igloo-inc-fec19f73",
+  "madeAt": "2026-11-27T11:25:02.574Z",
+  "mode": "quick",
+  "machine": "linux · 2 CPUs · 4 GB",
+  "counts": {
+    "Verified": 4,
+    "Inferred": 0,
+    "Unknown": 1,
+    "total": 5
+  },
+  "findings": [
+    {
+      "id": "run.reference",
+      "area": "run",
+      "claim": "The reference screenshot is the settled site (no loader visible).",
+      "label": "Verified",
+      "measurement": "no loader element was visible at the reference (96 s after load)",
+      "coverage": "complete",
+      "limitations": [
+        "a loader that does not use a recognisable element would not be seen"
+      ]
+    },
+    {
+      "id": "scene.replay",
+      "area": "scene",
+      "claim": "The capture replay draws the recorded frame the site drew.",
+      "label": "Verified",
+      "measurement": "canvas 100%, page 100% against the reference; 1 recorded frame(s), 21 passes, 47 draws, 28 programs, 45.8 MB",
+      "coverage": "partial",
+      "limitations": [
+        "a replay of one held frame scores near 100% by construction: it shows the recording plays back, not that motion or input is understood",
+        "scored, but the recorded bytes are not in the kit (--own-assets)"
+      ],
+      "data": {
+        "canvas": 1,
+        "page": 0.9999999999999999,
+        "frames": 1,
+        "passes": 21,
+        "draws": 47,
+        "programs": 28
+      }
+    },
+    {
+      "id": "scene.rebuild",
+      "area": "scene",
+      "claim": "The editable three.js rebuild draws the same picture as the capture replay.",
+      "label": "Verified",
+      "measurement": "canvas 99.5%, page 99.6% against the reference; 99.5% against the replay",
+      "coverage": "partial",
+      "limitations": [
+        "one frame: the same caveat as the replay",
+        "--own-assets: images are placeholders and big meshes are coarse stand-ins (or boxes), so this score is lower by design"
+      ],
+      "data": {
+        "canvas": 0.9948223142527273,
+        "page": 0.9955218128804135,
+        "vsReplay": 0.9948223142527273
+      }
+    },
+    {
+      "id": "input.response",
+      "area": "input",
+      "claim": "Whether the kit reproduces the site's response to pointer and scroll is not known.",
+      "label": "Unknown",
+      "measurement": "the interaction check did not run (quick mode, or it failed)",
+      "coverage": "not-exercised",
+      "limitations": [],
+      "nextProbe": "dea extract <url> (full mode)"
+    },
+    {
+      "id": "boot.timeline",
+      "area": "boot",
+      "claim": "No shader was being linked just before the reference.",
+      "label": "Verified",
+      "measurement": "first canvas 886 ms, first draw 910 ms, last link 4784 ms, 90 programs",
+      "coverage": "complete",
+      "limitations": [
+        "timings are from a machine with a software renderer; their order is real, their size is not a desktop's"
+      ],
+      "data": {
+        "firstCanvasMs": 886,
+        "firstDrawMs": 910,
+        "lastLinkMs": 4784,
+        "programs": 90,
+        "linkingNearReference": 0
+      }
+    }
+  ],
+  "unknowns": [
+    {
+      "id": "unknown.1",
+      "topic": "46 uniform starting value(s) are guesses",
+      "missing": "No live trace was run.",
+      "follows": [],
+      "next": [
+        {
+          "why": "watch longer and scroll the whole page so every program draws",
+          "command": "dea trace https://www.igloo.inc --ms 30000"
+        },
+        {
+          "why": "pause where one is set and read the caller variables",
+          "command": "dea trace https://www.igloo.inc --break uniform:uMousePos"
+        }
+      ]
+    },
+    {
+      "id": "unknown.2",
+      "topic": "No live GSAP timelines were captured",
+      "missing": "Either the site animates without GSAP, or its intro tweens had finished before DEA read the GSAP instance.",
+      "follows": [
+        "input.response"
+      ],
+      "next": [
+        {
+          "why": "record motion from the first frame and fit curves",
+          "command": "dea motion https://www.igloo.inc"
+        },
+        {
+          "why": "read the gsap.to/timeline calls in the code itself",
+          "command": "dea code https://www.igloo.inc"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "tokens/tokens.json",
+      "bytes": 363,
+      "sha256": "acf8333a6b862add5b4c08cc36a7610ea48f7f471fa7d6cc7ca2efaa4a09c3b8"
+    },
+    {
+      "path": "tokens/tokens.css",
+      "bytes": 262,
+      "sha256": "0c8cd34c85d479540365b41dde588146bf08220900cb2385bdeee1386770c149"
+    },
+    {
+      "path": "tokens/tailwind.preset.js",
+      "bytes": 598,
+      "sha256": "12f7df325a963484c41340f11eddc4852821761b580c64c021821ba42e5a8239"
+    },
+    {
+      "path": "motion/keyframes.css",
+      "bytes": 105,
+      "sha256": "051cb8b365682385b57b9de0544282b474519626d4275153aef938e5f4595e44"
+    },
+    {
+      "path": "shaders/MousePosProgressProgress2Shader.js",
+      "bytes": 13771,
+      "sha256": "3b641dbf5811fa33b2453782d264cceb1c06078f0d75b583a5c0e3de518af778"
+    },
+    {
+      "path": "shaders/ProgressProgress2Color1Shader.js",
+      "bytes": 13811,
+      "sha256": "bf969c6a67a82bdcd09e07080dc3f53adfb6ac76efa73699e6f885fbcdab85a2"
+    },
+    {
+      "path": "shaders/ProgressProgress2NoiseShader.js",
+      "bytes": 13220,
+      "sha256": "324aa684296bbe73c43ff5f06a6fdf01e8d9369c486f47104915b71b0ee4efa5"
+    },
+    {
+      "path": "shaders/ProgressProgress2NoiseShader2.js",
+      "bytes": 12675,
+      "sha256": "cab646fdec89aff88303b0563d5e34a57e934d0eafa6047516099b2ca48960e9"
+    },
+    {
+      "path": "shaders/MapBlocksColorShader.js",
+      "bytes": 12064,
+      "sha256": "6bebda545500c891d7dfa3b467c8be5749fb4978c153713aa937e5a737c88250"
+    },
+    {
+      "path": "shaders/MapColorShowShader.js",
+      "bytes": 10959,
+      "sha256": "dc55e0ff0537abbb84bcc28ba1dab37f4b0681748f2c6eeddb7b5b3767f371fa"
+    },
+    {
+      "path": "shaders/Show1Show2MapShader.js",
+      "bytes": 14587,
+      "sha256": "742e651e1cdbbd7b0e90c2acf754224d65222f7ec5383650e897323bb3559aeb"
+    },
+    {
+      "path": "shaders/Show1Show2MapShader2.js",
+      "bytes": 14524,
+      "sha256": "fd8d5aca762dd53ad1e718941a281ef4a7b5b2f7d76078c0ff8b2d2ed779eba8"
+    },
+    {
+      "path": "shaders/Show1Show2MapShader3.js",
+      "bytes": 14394,
+      "sha256": "29cc5efb2fa8652e2c0cd6e77581148187c4bf0de6a74c4e6a9540bfea59d076"
+    },
+    {
+      "path": "shaders/Color1Color2IntroColorShader.js",
+      "bytes": 7783,
+      "sha256": "428b0df07c1f5ce45fbbd1391b30f1b2e31d6541b074c4c7b0b32a7b7fab3dea"
+    },
+    {
+      "path": "shaders/NoiseNumbersProgressShader.js",
+      "bytes": 9696,
+      "sha256": "f747d67d6333884d4e204eba0e7c3a1eff5605f47a423dfb5acfaa931c4acd7b"
+    },
+    {
+      "path": "shaders/SizeNumsColorShader.js",
+      "bytes": 14474,
+      "sha256": "3a9e9711053d7cf764c63c5eda9da36497c9718265b085f07b699383cc5d78f9"
+    },
+    {
+      "path": "src/Scene.jsx",
+      "bytes": 1079,
+      "sha256": "86032979fbc774472e1a11a393840c4c170574f58d9437288c0451a8034439bf"
+    },
+    {
+      "path": "src/App.jsx",
+      "bytes": 264,
+      "sha256": "16067afb63462a412e3958de154b01f5775364e8164111ed15575179066b8ff0"
+    },
+    {
+      "path": "src/main.jsx",
+      "bytes": 138,
+      "sha256": "80ee52efe216f3e9fa32095b42b62ebb832b2495765124d0c13b6cb5f38f8814"
+    },
+    {
+      "path": "index.html",
+      "bytes": 323,
+      "sha256": "259a43bf8fa3baa2720659337bfd0260e83bc4d5339a39a54a19059910fcb144"
+    },
+    {
+      "path": "vite.config.js",
+      "bytes": 133,
+      "sha256": "072ef0422d3e4033ae783e213ca275349c652e81cc13ee65a67162de40c3cfd9"
+    },
+    {
+      "path": "package.json",
+      "bytes": 379,
+      "sha256": "95415224a86e5877fd9a38833ead52938c3931edcb256d45415cf7a43c72f00e"
+    },
+    {
+      "path": "preview/index.html",
+      "bytes": 7451,
+      "sha256": "a805813b9b38f8bc08d7164921f1d03e5f7b6f5dc36d2add8ae09e4cab61de1f"
+    },
+    {
+      "path": "pipeline.js",
+      "bytes": 9548,
+      "sha256": "510bec2386aa08ce8ba8e64e411cdb09056c9dae219f44454292b9049959c624"
+    },
+    {
+      "path": "render-graph.md",
+      "bytes": 14001,
+      "sha256": "5611a7d02802fd9b02dce70b95180185b03b0569eca600d3b5e01d4f8a9e84a5"
+    },
+    {
+      "path": "public/rebuild/pipeline.json",
+      "bytes": 1488403,
+      "sha256": "87ef42468dec3ef835ff074f0ffe285fa6b61965925f97ebd01087335f37f3ea"
+    },
+    {
+      "path": "public/rebuild/shaders/program-258.vert",
+      "bytes": 1994,
+      "sha256": "f550817468dfa69be346f3d894755d8d805207493638e6a467537482dddd060f"
+    },
+    {
+      "path": "public/rebuild/shaders/program-258.frag",
+      "bytes": 3222,
+      "sha256": "51a1dc4711571840c1d1a57029e09352414e7979736ea6440b4a3ebc88b17aef"
+    },
+    {
+      "path": "public/rebuild/shaders/program-260.vert",
+      "bytes": 3797,
+      "sha256": "0099a079ac1d0872c7a462f87a62129468ac6028dfc86d4af501595b1a7b7bdf"
+    },
+    {
+      "path": "public/rebuild/shaders/program-260.frag",
+      "bytes": 6396,
+      "sha256": "f15d1414fc4130ab5f31e0137e18fbf42cf83ddc2030f0b122317827ee9183e1"
+    },
+    {
+      "path": "public/rebuild/shaders/program-264.vert",
+      "bytes": 2216,
+      "sha256": "60ea0bc2ea910adc38d797cbfc4c9e00cec41af5851407b5aa481eae971b9a27"
+    },
+    {
+      "path": "public/rebuild/shaders/program-264.frag",
+      "bytes": 7674,
+      "sha256": "3ecf1b3778a277e32874a5c7b1e30bacdcd92e19e216bbb3313befde15c154d4"
+    },
+    {
+      "path": "public/rebuild/shaders/program-266.vert",
+      "bytes": 2607,
+      "sha256": "51be4af545b01376105e2db40cc2fcaec39d8689804fad0a3f1ce10847c5a16d"
+    },
+    {
+      "path": "public/rebuild/shaders/program-266.frag",
+      "bytes": 8324,
+      "sha256": "5317c1414e2714cd229e7adbd4531f5660abe2402aa2602d3f953c9670c49081"
+    },
+    {
+      "path": "public/rebuild/shaders/program-268.vert",
+      "bytes": 2753,
+      "sha256": "b9bbaf50f530fab99e4e89d4fe9dc1762297d323e3831bedf7597a0f695ef93e"
+    },
+    {
+      "path": "public/rebuild/shaders/program-268.frag",
+      "bytes": 7683,
+      "sha256": "406f8fce3cccc9b4b9b3b5d01ff7ecd7c812408a156a7c85fb7f2d7531901b3a"
+    },
+    {
+      "path": "public/rebuild/shaders/program-270.vert",
+      "bytes": 2083,
+      "sha256": "20a58687c37c2329d3265f1bdb04066c9ad8eaaf24f58fab7aa24cff876069be"
+    },
+    {
+      "path": "public/rebuild/shaders/program-270.frag",
+      "bytes": 3565,
+      "sha256": "1e0bf4de92cd5a0de570310108b8cc109f704b66fa214bc4dd3c34c6b71b3b74"
+    },
+    {
+      "path": "public/rebuild/shaders/program-272.vert",
+      "bytes": 2677,
+      "sha256": "a35c77b3f7ef4d5293ebe66ca8d28549e91df009e26df09b4238f5f19ea9afdd"
+    },
+    {
+      "path": "public/rebuild/shaders/program-272.frag",
+      "bytes": 8142,
+      "sha256": "c30a31d9e77fa39b6aa40fbee2d702b89eaaa438f461a4a5af8affedd79b2060"
+    },
+    {
+      "path": "public/rebuild/shaders/program-273.vert",
+      "bytes": 1722,
+      "sha256": "c842cc1a17632e1b898ce9416a3438d44b8acc9e5f097c5692f1b8fe672ba7b9"
+    },
+    {
+      "path": "public/rebuild/shaders/program-273.frag",
+      "bytes": 5493,
+      "sha256": "47dc18beddb22a299d10b1f87970064d89200331d4790397c339b9eeccb9eca1"
+    },
+    {
+      "path": "public/rebuild/shaders/program-274.vert",
+      "bytes": 4479,
+      "sha256": "f453c0cf7fffca9ef6313d06219ae277d28da63a051a52770d24774cd6cf8fe5"
+    },
+    {
+      "path": "public/rebuild/shaders/program-274.frag",
+      "bytes": 6233,
+      "sha256": "a4dba55d868a60eaf05f215348637c72d43aa414513f2be5cc55e45fa3c7f4a6"
+    },
+    {
+      "path": "public/rebuild/shaders/program-282.vert",
+      "bytes": 6009,
+      "sha256": "fae4dad1c3a3a15d92d19712c17c9de3a150a1b35dcd472279609d1bd7cfe4de"
+    },
+    {
+      "path": "public/rebuild/shaders/program-282.frag",
+      "bytes": 5779,
+      "sha256": "be274ffa2a29d063ff05bd9324448bfdbceaa466a681e44a6f0ad7ae7fbfe53e"
+    },
+    {
+      "path": "public/rebuild/shaders/program-277.vert",
+      "bytes": 6009,
+      "sha256": "fae4dad1c3a3a15d92d19712c17c9de3a150a1b35dcd472279609d1bd7cfe4de"
+    },
+    {
+      "path": "public/rebuild/shaders/program-277.frag",
+      "bytes": 5843,
+      "sha256": "97fccf4014f4781885983fe774c9fba8c34ac7c806585868943f44ab7ccd7640"
+    },
+    {
+      "path": "public/rebuild/shaders/program-279.vert",
+      "bytes": 6009,
+      "sha256": "fae4dad1c3a3a15d92d19712c17c9de3a150a1b35dcd472279609d1bd7cfe4de"
+    },
+    {
+      "path": "public/rebuild/shaders/program-279.frag",
+      "bytes": 5779,
+      "sha256": "41d73530a3c803ae807097599cf08f159ea02bebc5ef8e3c8c3f8daf41259541"
+    },
+    {
+      "path": "public/rebuild/shaders/program-284.vert",
+      "bytes": 17494,
+      "sha256": "cb32a8e052af4078198d024ec5808bd15cace4cb79b13ca4eaf97cb7226e1406"
+    },
+    {
+      "path": "public/rebuild/shaders/program-284.frag",
+      "bytes": 16234,
+      "sha256": "8d3f3c2093bea59fa8cc5de4ae60a590282cbccd3165ea1740da559849be7f9f"
+    },
+    {
+      "path": "public/rebuild/shaders/program-286.vert",
+      "bytes": 17497,
+      "sha256": "7af6078f642098c830537ea6c618f1adff89ac0585a68cf92f61bac7b806df12"
+    },
+    {
+      "path": "public/rebuild/shaders/program-286.frag",
+      "bytes": 16555,
+      "sha256": "0aee83b867c38b56b359b4b98f00a842dcb02571fe6821bf1f301dd3892daef3"
+    },
+    {
+      "path": "public/rebuild/shaders/program-287.vert",
+      "bytes": 5085,
+      "sha256": "03ed1b6268ac3f0cef87183a880961f64ca39d98f8e6f739d060dcc9603e46df"
+    },
+    {
+      "path": "public/rebuild/shaders/program-287.frag",
+      "bytes": 3682,
+      "sha256": "8f5a48269845206893f6b1c2164de2b3877e98efff56e2b3e25c47804a09ac48"
+    },
+    {
+      "path": "public/rebuild/shaders/program-288.vert",
+      "bytes": 2057,
+      "sha256": "73f2defcf06bcbae6be8dc73069c7471faddac65aa3b8eb91adfaef8ff7a819b"
+    },
+    {
+      "path": "public/rebuild/shaders/program-288.frag",
+      "bytes": 5125,
+      "sha256": "a467879400dc2e0a19b25b9d0ac5cb89a184d0f9d27636e46ce2822097968d27"
+    },
+    {
+      "path": "public/rebuild/shaders/program-289.vert",
+      "bytes": 8133,
+      "sha256": "4043056b7957e2078c223e9bc1c71ebf05befc6b21dfa15282c012dc0fe22252"
+    },
+    {
+      "path": "public/rebuild/shaders/program-289.frag",
+      "bytes": 3726,
+      "sha256": "1e3d6c6ec397595fb7b3947649026a115ac0e481c221f5a6b0c4890812b9b510"
+    },
+    {
+      "path": "public/rebuild/shaders/program-501.vert",
+      "bytes": 1805,
+      "sha256": "c1dd73c9c6de60f44fcb47a0554b4278bda80b09eaa14b3364b2e6a3aa30f4de"
+    },
+    {
+      "path": "public/rebuild/shaders/program-501.frag",
+      "bytes": 5920,
+      "sha256": "b808e33908ac5b626d818f090e9dfd75dbea194dc2346dde27fa8de599a7020e"
+    },
+    {
+      "path": "public/rebuild/shaders/program-39.vert",
+      "bytes": 1723,
+      "sha256": "3558adf9a8d998ba9a14f6c9ad13be60cea88f27d5f95bafddb0cce9a6ff6a1b"
+    },
+    {
+      "path": "public/rebuild/shaders/program-39.frag",
+      "bytes": 2878,
+      "sha256": "1a1971f0433e80bfd3bf3ce976385a334b85950f7343c8db6f9f8e72320add18"
+    },
+    {
+      "path": "public/rebuild/shaders/program-85.vert",
+      "bytes": 4197,
+      "sha256": "db1ad7072fc5a691b290cdc71ddb21fd5bfbf59d1893bde6316db9b740ce4c99"
+    },
+    {
+      "path": "public/rebuild/shaders/program-85.frag",
+      "bytes": 4854,
+      "sha256": "61c6b25e531c9a65dbd7de9f8b378371624fb657fabeb80826f68e3e83637310"
+    },
+    {
+      "path": "public/rebuild/shaders/program-89.vert",
+      "bytes": 6009,
+      "sha256": "fae4dad1c3a3a15d92d19712c17c9de3a150a1b35dcd472279609d1bd7cfe4de"
+    },
+    {
+      "path": "public/rebuild/shaders/program-89.frag",
+      "bytes": 5705,
+      "sha256": "e6ee8ab022cd57c3a59ecec823b522566955f86446c1052261a2b6e45de96a76"
+    },
+    {
+      "path": "public/rebuild/shaders/program-94.vert",
+      "bytes": 4197,
+      "sha256": "db1ad7072fc5a691b290cdc71ddb21fd5bfbf59d1893bde6316db9b740ce4c99"
+    },
+    {
+      "path": "public/rebuild/shaders/program-94.frag",
+      "bytes": 4038,
+      "sha256": "4bdc5a9e5ed8d3d9257c4f388a5b2783e749b22ac7d3636965dbce997b0a1b24"
+    },
+    {
+      "path": "public/rebuild/shaders/LuminanceMaterial-529.vert",
+      "bytes": 1726,
+      "sha256": "aab29196035fc388229fd34b318724ab82423c6aaeb2fe79826e7276eac606cc"
+    },
+    {
+      "path": "public/rebuild/shaders/LuminanceMaterial-529.frag",
+      "bytes": 5625,
+      "sha256": "3dd1b75b00cda6c8224ed285f686c4f22c9360bb1a25da12ff60b116fec541a9"
+    },
+    {
+      "path": "public/rebuild/shaders/DownsamplingMaterial-531.vert",
+      "bytes": 2335,
+      "sha256": "14e184229aa30296e56320f0ad96ba1fa74fa2f7ba22645cc97c0e529507fac9"
+    },
+    {
+      "path": "public/rebuild/shaders/DownsamplingMaterial-531.frag",
+      "bytes": 3710,
+      "sha256": "831850f23799ed7e2a746953f42da9e68cb7f6ed7dff91b0c708f289ff3f8f9e"
+    },
+    {
+      "path": "public/rebuild/shaders/UpsamplingMaterial-538.vert",
+      "bytes": 2101,
+      "sha256": "b1c5e2d8891588bb7c249efff2e0268f958b167279b6b68caed4e15a207d588b"
+    },
+    {
+      "path": "public/rebuild/shaders/UpsamplingMaterial-538.frag",
+      "bytes": 3174,
+      "sha256": "70a68e35964eaf5580635caf3965c4545f3e48ffc37329f6d4fa3ebb5765b14a"
+    },
+    {
+      "path": "public/rebuild/shaders/EffectMaterial-545.vert",
+      "bytes": 1864,
+      "sha256": "fef7da8f8f2ccd4a56b28b8b4b9c834e11b49aa5b710ce84d986f5edc78a4c47"
+    },
+    {
+      "path": "public/rebuild/shaders/EffectMaterial-545.frag",
+      "bytes": 9805,
+      "sha256": "4b876cdfc0667192f0dfdebf9a0bfd86dbc9ef432f5fa8089e1c26e0bbd6c4b2"
+    },
+    {
+      "path": "public/rebuild/shaders/EdgeDetectionMaterial-547.vert",
+      "bytes": 2358,
+      "sha256": "cb3520119c47c3e9a4f39293f84a3bdad327c0ff41f3869d04af66eba4467f7d"
+    },
+    {
+      "path": "public/rebuild/shaders/EdgeDetectionMaterial-547.frag",
+      "bytes": 8741,
+      "sha256": "7dd2ad48476a9836214ee93a9c01f8eb7d83e9f55d0d0317893b49c7801fdd51"
+    },
+    {
+      "path": "public/rebuild/shaders/SMAAWeightsMaterial-549.vert",
+      "bytes": 2452,
+      "sha256": "0ce0e314adc7394ba556290e6fdbb06ff4a4f1f842b32ee805b47ab31e8107aa"
+    },
+    {
+      "path": "public/rebuild/shaders/SMAAWeightsMaterial-549.frag",
+      "bytes": 10456,
+      "sha256": "2330a3f2340f81d4a5a011ad6d2df5d14bf6b7f9dd7e9b95324811260db017d2"
+    },
+    {
+      "path": "public/rebuild/shaders/EffectMaterial-552.vert",
+      "bytes": 2072,
+      "sha256": "92c5aee5b4cc17c2a00db69ff927a38435c11dc4aaa3a42f2a80051d0dc59c8b"
+    },
+    {
+      "path": "public/rebuild/shaders/EffectMaterial-552.frag",
+      "bytes": 10560,
+      "sha256": "3e4e29975bf67ad11499e540e82a11dd920494f85cf731d41adf325b10083635"
+    },
+    {
+      "path": "public/rebuild/data.bin",
+      "bytes": 45755976,
+      "sha256": "60881139a62716012f5dee010274a1de034ee69a810daad50760eb5ac165112a"
+    },
+    {
+      "path": "rebuild/rebuild.js",
+      "bytes": 59067,
+      "sha256": "a63b01377ea4c51079368f12c92e2b143d7e8dde32982424f6069d3430d012ea"
+    },
+    {
+      "path": "public/scene/scene.glb",
+      "bytes": 15892,
+      "sha256": "99150eb64f308507dcdf65b4519abb81d2ddeaeae9afc8a87d98a2269f23f63d"
+    },
+    {
+      "path": "scene/scene.js",
+      "bytes": 2220,
+      "sha256": "8bed7421813a15e9a7fc94d3568e15953d1fbc2a4b548ee193c881cc30750baa"
+    },
+    {
+      "path": "scene/scene.md",
+      "bytes": 1873,
+      "sha256": "d9378351a85f3e6d3cc3effaf55bb417a0b03e2f7e933c9ad548d4adf5811641"
+    },
+    {
+      "path": "layout.json",
+      "bytes": 240,
+      "sha256": "b0a7405dc450d95a101cb0d07a99a02205b24f167cce3c2debe094da1c58216a"
+    },
+    {
+      "path": "src/Hero.jsx",
+      "bytes": 1381,
+      "sha256": "b6c10e5fa5f9168c251d07799227dbd4643d685297c9520a6e7f3dbc8b773a35"
+    },
+    {
+      "path": "rebuild.md",
+      "bytes": 8768,
+      "sha256": "f860e9e908f271f5929d37763634f3a36b0b684f966169794670711970447304"
+    }
+  ]
+}

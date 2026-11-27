@@ -1,0 +1,180 @@
+{
+  "url": "https://www.igloo.inc",
+  "extractedAt": "2026-11-27T11:25:02.571Z",
+  "target": "react",
+  "title": "Igloo Inc.",
+  "score": 0.9955218128804135,
+  "canvasScore": 0.9948223142527273,
+  "shaders": [
+    {
+      "name": "MousePosProgressProgress2Shader",
+      "uniforms": [
+        "morphTexture",
+        "uMousePos",
+        "uProgress",
+        "uProgress2",
+        "tNoise",
+        "tMap",
+        "tWind",
+        "tGroundGlow",
+        "tTriangles",
+        "uTriangleAlpha",
+        "uAlpha"
+      ],
+      "drivers": {}
+    },
+    {
+      "name": "ProgressProgress2Color1Shader",
+      "uniforms": [
+        "morphTexture",
+        "uProgress",
+        "uProgress2",
+        "uColor1",
+        "uColor2",
+        "tMap",
+        "tTriangles",
+        "tNoise",
+        "uTriangleAlpha",
+        "uAlpha"
+      ],
+      "drivers": {}
+    },
+    {
+      "name": "ProgressProgress2NoiseShader",
+      "uniforms": [
+        "morphTexture",
+        "uProgress",
+        "uProgress2",
+        "tNoise",
+        "tMap",
+        "tWind",
+        "tTriangles",
+        "uTriangleAlpha",
+        "uAlpha"
+      ],
+      "drivers": {}
+    },
+    {
+      "name": "ProgressProgress2NoiseShader2",
+      "uniforms": [
+        "morphTexture",
+        "uProgress",
+        "uProgress2",
+        "tNoise",
+        "tMap",
+        "tWind",
+        "tTriangles",
+        "uTriangleAlpha",
+        "uAlpha"
+      ],
+      "drivers": {}
+    },
+    {
+      "name": "MapBlocksColorShader",
+      "uniforms": [
+        "morphTexture",
+        "tMap",
+        "tBlocks",
+        "uColor",
+        "uColor2",
+        "uShow",
+        "uRand"
+      ],
+      "drivers": {}
+    },
+    {
+      "name": "MapColorShowShader",
+      "uniforms": [
+        "morphTexture",
+        "tMap",
+        "uColor",
+        "uShow",
+        "uRand",
+        "uActive"
+      ],
+      "drivers": {}
+    },
+    {
+      "name": "Show1Show2MapShader",
+      "uniforms": [
+        "morphTexture",
+        "uShow1",
+        "uShow2",
+        "tMap",
+        "uColor",
+        "uBlink"
+      ],
+      "drivers": {}
+    },
+    {
+      "name": "Show1Show2MapShader2",
+      "uniforms": [
+        "morphTexture",
+        "uShow1",
+        "uShow2",
+        "tMap",
+        "uColor",
+        "uBlink"
+      ],
+      "drivers": {}
+    },
+    {
+      "name": "Show1Show2MapShader3",
+      "uniforms": [
+        "morphTexture",
+        "uShow1",
+        "uShow2",
+        "tMap",
+        "uColor"
+      ],
+      "drivers": {}
+    },
+    {
+      "name": "Color1Color2IntroColorShader",
+      "uniforms": [
+        "morphTexture",
+        "uColor1",
+        "uColor2",
+        "uIntroColor",
+        "uProgress"
+      ],
+      "drivers": {}
+    },
+    {
+      "name": "NoiseNumbersProgressShader",
+      "uniforms": [
+        "morphTexture",
+        "tNoise",
+        "tNumbers",
+        "uProgress",
+        "uAlpha"
+      ],
+      "drivers": {}
+    },
+    {
+      "name": "SizeNumsColorShader",
+      "uniforms": [
+        "morphTexture",
+        "uSize",
+        "tNums",
+        "uColor"
+      ],
+      "drivers": {}
+    }
+  ],
+  "eases": [],
+  "colors": [
+    "#a0a5b1",
+    "#a0a5b1"
+  ],
+  "fonts": [],
+  "techniques": [
+    "Mipmap blur bloom (a chain of downsample and upsample passes)",
+    "SMAA anti-aliasing",
+    "Blue-noise dithering",
+    "Dissolve / disintegration effect",
+    "Shader-sized point sprites"
+  ],
+  "ownAssets": true,
+  "provenance": "Extracted from https://www.igloo.inc on 2026-11-27 by DEA. Third-party code, shaders, fonts and assets belong to their owners."
+}
