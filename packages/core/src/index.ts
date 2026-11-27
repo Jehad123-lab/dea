@@ -166,6 +166,18 @@ export {
 } from './evidence/run.ts';
 export { isSecretHeader, isSecretParam, redactBody, redactText, redactUrl, stripHar } from './evidence/secrets.ts';
 export {
+  type ArchitectureReport,
+  analyzeArchitecture,
+  classifyPassRole,
+  type OrderedPass,
+  type PassRole,
+  renderArchitectureMd,
+  researchArchitecture,
+  type ScrollArchitecture,
+  type ShaderGroup,
+  type TechniqueSignal,
+} from './extract/architecture.ts';
+export {
   type FramerControl,
   type FramerExport,
   type FramerWriteResult,
@@ -222,6 +234,7 @@ export {
   libraryUse,
   scoreEntry,
 } from './extract/library.ts';
+export { fluidClamp, groupLayoutSections, type LayoutSection, nextjsFiles, type ResponsiveItem } from './extract/nextjs.ts';
 export { mergeStops, type PageLayer, pageIsWorthKeeping } from './extract/pagelayer.ts';
 export {
   analyse,

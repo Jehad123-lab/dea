@@ -5,9 +5,10 @@
 import { declaredUniforms } from '../code/uniforms.ts';
 import type { Driver } from '../debug/trace.ts';
 import { parseShader, THREE_BUILTIN_UNIFORMS } from '../design/shaders.ts';
+import { nextjsFiles } from './nextjs.ts';
 import { type PageLayer, pageAsLayout, pageIsWorthKeeping } from './pagelayer.ts';
 
-export type Target = 'react' | 'vanilla' | 'framer';
+export type Target = 'react' | 'next' | 'vanilla' | 'framer';
 
 export interface ProgramSource {
   id: string;
@@ -1052,6 +1053,56 @@ export function projectFiles(
       `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="utf-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1" />\n    <title>${o.title} (rebuilt with DEA)</title>\n    <style>html, body { margin: 0; } #scene { position: fixed; inset: 0; z-index: -1; } h1 { font-size: var(--dea-hero-size, 64px); margin: 30vh 8vw 0; }</style>\n  </head>\n  <body>\n    <div id="scene"></div>\n    ${o.layout ? heroHtml(o.layout).replace(/\n/g, '\n    ') : `<h1>${o.heading}</h1>`}\n    <script type="module" src="./main.js"></script>\n  </body>\n</html>\n`;
     files['package.json'] =
       `${JSON.stringify({ name: 'dea-extract', private: true, type: 'module', scripts: { dev: 'vite', build: 'vite build' }, dependencies: { three, gsap: '^3.12.5' }, devDependencies: { vite: '^6.0.0' } }, null, 2)}\n`;
+  } else if (target === 'next') {
+    const r3fScene = `// The site's main shader program in react-three-fiber (Next.js App Router).
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { useEffect, useMemo } from 'react';
+${m ? `import { createMaterial, update } from '../${m.file}';` : ''}
+
+const pointer = { x: 0, y: 0 };
+
+function ShaderMesh() {
+  const material = useMemo(() => ${m ? 'createMaterial()' : 'null'}, []);
+  const size = useThree((s) => s.size);
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => { pointer.x = e.clientX; pointer.y = e.clientY; };
+    window.addEventListener('pointermove', onMove, { passive: true });
+    return () => window.removeEventListener('pointermove', onMove);
+  }, []);
+  useFrame(({ clock }) => {
+    if (!material) return;
+    ${m ? 'update(material, { time: clock.getElapsedTime(), scrollY: window.scrollY, pointer, width: size.width, height: size.height });' : ''}
+  });
+  if (!material) return null;
+  return ${m?.points ? '<points material={material}><planeGeometry args={[2, 2, 127, 127]} /></points>' : '<mesh material={material}><planeGeometry args={[2, 2]} /></mesh>'};
+}
+
+export default function Scene() {
+  return (
+    <Canvas ${m?.fullscreen ? 'orthographic camera={{ left: -1, right: 1, top: 1, bottom: -1, near: 0, far: 1 }}' : 'camera={{ position: [0, 0, 3], fov: 45 }}'} className="dea-scene" style={{ position: 'fixed', inset: 0, zIndex: 0 }}>
+      <ShaderMesh />
+    </Canvas>
+  );
+}
+`;
+    const sceneClientSource = o.rebuild
+      ? `'use client';\nimport { useEffect, useRef } from 'react';\nimport { mountRebuild } from '../rebuild/rebuild.js';\n\nexport default function Scene() {\n  const ref = useRef<HTMLDivElement>(null);\n  useEffect(() => {\n    if (!ref.current) return;\n    let rb: any = null;\n    let dead = false;\n    mountRebuild(ref.current, { base: '/rebuild/' }).then((r) => {\n      rb = r;\n      if (dead) r.stop();\n    });\n    return () => {\n      dead = true;\n      if (rb) {\n        rb.stop();\n        rb.renderer.dispose();\n        rb.renderer.domElement.remove();\n      }\n    };\n  }, []);\n  return <div ref={ref} className="dea-scene" style={{ position: 'fixed', inset: 0, zIndex: 0 }} />;\n}\n`
+      : o.replay
+        ? `'use client';\nimport { useEffect, useRef } from 'react';\nimport { mountReplay } from '../replay/replay.js';\n\nexport default function Scene() {\n  const ref = useRef<HTMLDivElement>(null);\n  useEffect(() => {\n    if (!ref.current) return;\n    let stop: any = null;\n    let dead = false;\n    mountReplay(ref.current, { base: '/replay/' }).then((s) => {\n      if (dead) s();\n      else stop = s;\n    });\n    return () => { dead = true; if (stop) stop(); };\n  }, []);\n  return <div ref={ref} className="dea-scene" style={{ position: 'fixed', inset: 0, zIndex: 0 }} />;\n}\n`
+        : r3fScene;
+    Object.assign(
+      files,
+      nextjsFiles({
+        title: o.title,
+        heading: o.heading,
+        three,
+        hasMotion: o.hasMotion,
+        hasShader: Boolean(m),
+        shaderImportFile: m?.file,
+        layout: o.layout,
+        sceneClientSource,
+      }),
+    );
   } else if (target === 'react') {
     files['src/Scene.jsx'] =
       `// The site's main shader program in react-three-fiber.\nimport { Canvas, useFrame, useThree } from '@react-three/fiber';\nimport { useMemo } from 'react';\n${m ? `import { createMaterial, update } from '../${m.file}';` : ''}\n\nconst pointer = { x: 0, y: 0 };\nif (typeof window !== 'undefined') window.addEventListener('pointermove', (e) => { pointer.x = e.clientX; pointer.y = e.clientY; });\n\nfunction ShaderMesh() {\n  const material = useMemo(() => ${m ? 'createMaterial()' : 'null'}, []);\n  const size = useThree((s) => s.size);\n  useFrame(({ clock }) => {\n    if (!material) return;\n    // the drivers DEA saw on the site: clock, scroll, pointer, viewport\n    ${m ? 'update(material, { time: clock.getElapsedTime(), scrollY: window.scrollY, pointer, width: size.width, height: size.height });' : ''}\n  });\n  if (!material) return null;\n  return ${m?.points ? '<points material={material}><planeGeometry args={[2, 2, 127, 127]} /></points>' : '<mesh material={material}><planeGeometry args={[2, 2]} /></mesh>'};\n}\n\n${o.standin ? `import * as THREE from 'three';\nimport { createParticles } from '../standins/particles.js';\n\n// ≈ technique stand-in (not the site's code)\nfunction Particles() {\n  const points = useMemo(() => createParticles(THREE, ${JSON.stringify({ spread: o.standin.spread, x: o.standin.x, y: o.standin.y, color: o.standin.color })}), []);\n  return <primitive object={points} />;\n}\n\n` : ''}export default function Scene() {\n  return (\n    <Canvas ${m?.fullscreen ? 'orthographic camera={{ left: -1, right: 1, top: 1, bottom: -1, near: 0, far: 1 }}' : 'camera={{ position: [0, 0, 3], fov: 45 }}'} className="dea-scene" style={{ position: 'fixed', inset: 0, zIndex: 0 }}>\n      <ShaderMesh />\n${o.standin ? '      <Particles />\n' : ''}    </Canvas>\n  );\n}\n`;
