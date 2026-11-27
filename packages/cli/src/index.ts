@@ -304,6 +304,10 @@ common(
       '--own-assets-cost',
       'with --own-assets: also score real images + stand-in meshes and image grids + real meshes (never shipped), to show what each placeholder costs',
     )
+    .option(
+      '--own-assets-grid <n>',
+      "with --own-assets: cells per side of each image's colour grid (default 8, 2-64). Finer keeps more of the site's artwork: your call",
+    )
     .option('--from <runs>', 'reuse runs: design=<id>,motion=<id>,assets=<id>,trace=<id>')
     .option('--no-diff', 'skip the visual diff and research loop')
     .option('--rounds <n>', 'research rounds when the rebuild does not match', '3')
@@ -338,6 +342,7 @@ common(
       section?: string;
       ownAssets?: boolean;
       ownAssetsCost?: boolean;
+      ownAssetsGrid?: string;
       from?: string;
       diff: boolean;
       rounds: string;
@@ -412,6 +417,7 @@ common(
                 section: flags.section,
                 ownAssets: flags.ownAssets,
                 ownAssetsCost: flags.ownAssetsCost,
+                ownAssetsGrid: flags.ownAssetsGrid != null ? Number(flags.ownAssetsGrid) : undefined,
                 from: urls.length === 1 ? from : undefined,
                 noDiff: !flags.diff,
                 rounds: Number(flags.rounds),

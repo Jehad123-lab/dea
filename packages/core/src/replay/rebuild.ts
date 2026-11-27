@@ -179,6 +179,8 @@ export interface RebuildStats {
   placeholders: number;
   /** of those, how many are drawn as a coarse stand-in of their shape rather than a box */
   proxies: number;
+  /** Round 46: cells per side of the images' colour grids with --own-assets (--own-assets-grid; default TEX_GRID) */
+  texGrid?: number;
   /** why each of the rest is still a box (e.g. "mode 0", "index buffer unreadable", "too few triangles left after clustering") */
   boxReasons: Record<string, number>;
   skipped: Record<string, number>;
@@ -208,19 +210,6 @@ export interface StandInInfo {
   flipped?: number;
   /** Round 43: stand-in triangles kept in both windings (the two sides of a thin shell, Round 42) */
   bothSides?: number;
-  /** Round 45: an outline shell (culled, its visible faces point inward): stand-in corners pushed out to the outer edge of their cells */
-  shellPushed?: number;
-}
-
-/**
- * Round 45: which way a culled material's visible faces are wound: 'ccw' when the faces wound counter-clockwise on screen
- * show (back faces culled, the default), 'cw' for three.js BackSide (the clockwise ones show); null when nothing is culled
- * (double-sided) or everything is.
- */
-export function visibleWinding(cull: { face: number; front: number } | null | undefined): 'ccw' | 'cw' | null {
-  if (!cull || (cull.face !== 0x0405 && cull.face !== 0x0404)) return null;
-  const ccwFront = cull.front !== 0x0900;
-  return (cull.face === 0x0405) === ccwFront ? 'ccw' : 'cw';
 }
 
 /**
@@ -551,12 +540,6 @@ export function standInTable(list: StandInInfo[], max = 40): string[] {
     "- triangles turned back: stand-in triangles that turned over when their corners moved to the cell average and were turned back to face the way the site's did; kept both sides: triangles kept in both windings, the two sides of a thin shell",
     ...(rows.length > max ? [`- all ${list.length} stand-ins: extract.json, replay.rebuild.stats.standIns`] : []),
   );
-  const shells = list.filter((r) => r.shellPushed != null);
-  if (shells.length)
-    L.push(
-      '',
-      `- outline shells (culled, visible faces point inward): ${shells.length} stand-in(s), ${shells.reduce((a, r) => a + (r.shellPushed ?? 0), 0)} corner(s) pushed out to the outer edge of their cells so the shell stays outside the model, as on the site`,
-    );
   const lost = new Map<string, number>();
   for (const r of list) for (const d of r.dropped) lost.set(d, (lost.get(d) ?? 0) + 1);
   if (lost.size)
@@ -607,7 +590,7 @@ export function proxyMesh(
   max: number[],
   grid = PROXY_GRID,
   extra: Array<{ name: string; size: number; read: (v: number) => number[]; pick?: boolean }> = [],
-  opts: { visible?: 'ccw' | 'cw' | null } = {},
+  opts: { texGrid?: number } = {},
 ): {
   pos: number[];
   idx: number[];
@@ -647,7 +630,7 @@ export function proxyMesh(
     }
     if (splitByNormal) key = key * 7 + normalBucket(extra[nrm].read(v));
     let sub = '';
-    for (const j of uvs) sub += `,${uvBucket(extra[j].read(v))}`;
+    for (const j of uvs) sub += `,${uvBucket(extra[j].read(v), opts.texGrid ?? TEX_GRID)}`;
     const ck = sub ? `${key}${sub}` : key;
     let id = cellOf.get(ck);
     if (id == null) {
@@ -687,54 +670,11 @@ export function proxyMesh(
   }
   const pos: number[] = [];
   for (const s of sums) for (let k = 0; k < 3; k++) pos.push(Math.round((s[k] / s[3]) * 1e4) / 1e4);
-  // Round 45: an outline shell. Littlest Tokyo draws its black outlines as copies of the model pushed out a little and wound
-  // inside out (the outline_0 meshes: their triangles face inward and back faces are culled, so only the far inside of the
-  // shell shows, as a rim around each part). Its stand-in covers the whole scene, so its cells are much larger than those of
-  // the parts it wraps, and a cell's average sits inside the curved surface it came from: the shell sank into the parts'
-  // finer stand-ins and the outlines were gone. A culled mesh whose visible faces point inward (its signed volume, from the
-  // site's triangles) is a shell: each corner goes out to the farthest of the site's vertices it stands for, along the cell's
-  // outward direction. A bigger shell can only show more rim, never cover the model (its outside faces are culled). Same
-  // corners and triangles: no more of the site's shape is shipped.
-  let pushedOut = 0;
-  if (opts.visible) {
-    let vol = 0;
-    for (let i = 0; i + 2 < tris.length; i += 3) {
-      const p = posOf(tris[i]);
-      const q = posOf(tris[i + 1]);
-      const r = posOf(tris[i + 2]);
-      vol += p[0] * (q[1] * r[2] - q[2] * r[1]) - p[1] * (q[0] * r[2] - q[2] * r[0]) + p[2] * (q[0] * r[1] - q[1] * r[0]);
-    }
-    // faces wound counter-clockwise point outward when the volume is positive; the visible faces point inward when the
-    // visible winding and the volume disagree
-    const inward = opts.visible === 'ccw' ? vol < 0 : vol > 0;
-    if (inward) {
-      const sign = vol < 0 ? -1 : 1;
-      const dirSum = sums.map(() => [0, 0, 0]);
-      for (let t = 0; t < facing.length; t++) {
-        const f = facing[t];
-        const l = Math.hypot(f[0], f[1], f[2]) || 1;
-        for (let c = 0; c < 3; c++) for (let k = 0; k < 3; k++) dirSum[tri[t * 3 + c]][k] += (sign * f[k]) / l;
-      }
-      const dir = dirSum.map((d) => {
-        const l = Math.hypot(d[0], d[1], d[2]);
-        return l > 1e-9 ? d.map((x) => x / l) : null;
-      });
-      const out = new Float64Array(sums.length);
-      for (const [v, id] of vertCell) {
-        const d = dir[id];
-        if (!d) continue;
-        const p = posOf(v);
-        const t = (p[0] - pos[id * 3]) * d[0] + (p[1] - pos[id * 3 + 1]) * d[1] + (p[2] - pos[id * 3 + 2]) * d[2];
-        if (t > out[id]) out[id] = t;
-      }
-      out.forEach((t, id) => {
-        const d = dir[id];
-        if (!d || !(t > 0)) return;
-        pushedOut++;
-        for (let k = 0; k < 3; k++) pos[id * 3 + k] = Math.round((pos[id * 3 + k] + d[k] * t) * 1e4) / 1e4;
-      });
-    }
-  }
+  // Round 46: Round 45 pushed the corners of an outline shell (a culled mesh whose visible faces point inward) out to the
+  // farthest site vertex of their cell. On three.js keyframes the shipped canvas stayed at 80.2% while the uv1 split alone
+  // closed 0.6 points of material 5's gap, tones fell 0.6 and material 1's gap grew (+3.4 to +3.7): the bigger black shells
+  // darkened the picture and did not bring the thin outlines back (they are smaller than a cell and collapse). Removed.
+  const pushedOut = 0;
   const P = (v: number) => [pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]];
   // Round 42: moving corners to their cell's average can turn a small triangle over; with back-face culling it then
   // disappears (igloo.inc's dome panels drew dark and hollow). A triangle that faces away from the site's is turned back.
@@ -801,6 +741,8 @@ export function rebuildPipeline(
     standIns?: boolean;
     /** --own-assets-cost only: these materials keep the site's meshes (what one material's stand-ins cost) */
     realMaterials?: number[];
+    /** Round 46: cells per side of the images' colour grids (--own-assets-grid), so stand-in cells split on the same grid */
+    texGrid?: number;
     sceneNodes?: Map<string, string>;
   } = { data: 'data.bin' },
 ): { pipeline: PipelineDoc; shaders: Record<string, string>; stats: RebuildStats } {
@@ -824,6 +766,8 @@ export function rebuildPipeline(
     skipped: {},
     standIns: [],
   };
+  if (opts.ownAssets) stats.texGrid = opts.texGrid ?? TEX_GRID;
+
   const skip = (n: string) => {
     stats.skipped[n] = (stats.skipped[n] ?? 0) + 1;
   };
@@ -1534,15 +1478,15 @@ export function rebuildPipeline(
         });
       info.kept = extra.map((e) => e.name);
       info.dropped = info.dropped.filter((n) => !info.kept.includes(n));
-      const visible = visibleWinding(materials[step.material]?.state?.cull);
-      const px = proxyMesh(tris, (v) => [at(v, 0), at(v, 1), Math.min(3, pos.size) > 2 ? at(v, 2) : 0], min, max, PROXY_GRID, extra, { visible });
+      const px = proxyMesh(tris, (v) => [at(v, 0), at(v, 1), Math.min(3, pos.size) > 2 ? at(v, 2) : 0], min, max, PROXY_GRID, extra, {
+        texGrid: opts.texGrid,
+      });
       if (px) {
         step.proxy = px;
         stats.proxies++;
         info.standInVertices = px.pos.length / 3;
         info.flipped = px.flipped ?? 0;
         info.bothSides = px.bothSides ?? 0;
-        if (px.pushedOut) info.shellPushed = px.pushedOut;
       } else {
         info.box = 'too few triangles left after clustering';
         boxBecause(info.box);
@@ -1683,7 +1627,7 @@ export function rebuildMd(p: PipelineDoc, stats: RebuildStats, score: { canvas: 
   L.push(`- recorded: ${stats.recordedTextures} textures, ${mb(stats.recordedTextureBytes)} (image pixels and the starting state of simulation targets)`);
   if (ownAssets)
     L.push(
-      `- --own-assets: the site's images are an ${TEX_GRID}×${TEX_GRID} grid of their own average colours (lookup tables stay as recorded) and ${stats.placeholders} large mesh(es) are stand-ins: ${stats.proxies} coarse shape(s) of at most ${PROXY_GRID} cells per side, ${stats.placeholders - stats.proxies} box(es); their bytes are not in the kit`,
+      `- --own-assets: the site's images are an ${stats.texGrid ?? TEX_GRID}×${stats.texGrid ?? TEX_GRID} grid of their own average colours (lookup tables stay as recorded) and ${stats.placeholders} large mesh(es) are stand-ins: ${stats.proxies} coarse shape(s) of at most ${PROXY_GRID} cells per side, ${stats.placeholders - stats.proxies} box(es); their bytes are not in the kit`,
     );
   // why a mesh is still a box, so the next fix is visible (lusion.co: 50 boxes before strips, fans and instanced draws counted)
   const why = Object.entries(stats.boxReasons ?? {}).sort((a, b) => b[1] - a[1]);

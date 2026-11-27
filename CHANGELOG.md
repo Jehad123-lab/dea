@@ -11,6 +11,12 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 46: Round 45's outline-shell push removed. On three.js keyframes the shipped canvas stayed at 80.2% while the uv1
+  split alone closed 0.6 points of material 5's gap; tones fell 0.6 and material 1's gap grew (+3.4 to +3.7): bigger black
+  shells darkened the picture, and the thin outlines (smaller than a cell) did not come back. The UV-set split stays.
+  --own-assets-grid <n> (default 8, 2-64): cells per side of each image's colour grid, for images and the stand-ins' UV split
+  alike. A finer grid keeps more of the site's artwork, so it is the user's choice and never the default. --own-assets-cost also
+  scores 16x16 and 32x32 grids (never shipped), so the choice has numbers. rebuild.md and the report name the grid used.
 - Round 45: --own-assets stand-ins for three.js keyframes (Littlest Tokyo). Outline shells: a culled mesh whose visible faces
   point inward (its signed volume from the site's triangles disagrees with the visible winding; the outline_0 meshes, material 1
   outline #379) is an outline shell, and each stand-in corner moves out to the farthest of the site's vertices it stands for,
