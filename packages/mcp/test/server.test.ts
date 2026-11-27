@@ -152,7 +152,7 @@ describe('dea MCP server', () => {
   });
 
   it.skipIf(!process.env.DEA_E2E)('detect_stack opens a real site', async () => {
-    const r = await client.callTool({ name: 'detect_stack', arguments: { url: 'https://gsap.com' } });
-    expect(JSON.stringify(r.content)).toContain('GSAP');
+    const r = await client.callTool({ name: 'detect_stack', arguments: { url: 'https://threejs.org/examples/webgl_animation_keyframes.html' } });
+    expect(JSON.stringify(r.content)).toContain('three.js');
   });
 });
