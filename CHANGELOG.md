@@ -11,6 +11,14 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 47: motion that plays. The live demos stood still: --quick recorded one frame, and one frame has no clocks (uTime
+  needs two to get a rate). Two frames are now recorded by default, in --quick too (no pointer or scroll tape there, so
+  SwiftShader boxes stay fast). --frames <n> (2-120, extract and record) records a motion loop: with 3 or more frames
+  pipeline.json gets loop { n, ms } (loopTiming: each frame's gap to the next timestamp, the last takes the lower median,
+  4-250 ms) and the rebuild plays the frames in order at that timing and loops, instead of holding the last one, so a CPU
+  animation (three.js AnimationMixer: model matrices and bone-texture uploads set each frame, three.js keyframes' train,
+  fan and character) moves. Each frame's uploads run in order, so ping-pong simulations keep their read/write order;
+  options.loop false holds the old way. rebuild.md names the loop. The (a) capture replay is unchanged.
 - Round 46: Round 45's outline-shell push removed. On three.js keyframes the shipped canvas stayed at 80.2% while the uv1
   split alone closed 0.6 points of material 5's gap; tones fell 0.6 and material 1's gap grew (+3.4 to +3.7): bigger black
   shells darkened the picture, and the thin outlines (smaller than a cell) did not come back. The UV-set split stays.

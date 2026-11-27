@@ -751,7 +751,11 @@ export function createRebuild(canvas, data, options = {}) {
   // two (a camera mid-move, an intro fading in) would flip back and forth every frame and the picture would shake. Live,
   // every frame takes those values from the last recorded frame (the one DEA scored); clocks still follow real time and
   // the simulation passes still run forward on the live render targets.
-  if (options.animate !== false && options.steady !== false && RF > 1) {
+  // Round 47: a motion loop (--frames 3 or more: pipeline.json "loop") plays its frames in order at the recorded timing, so a CPU
+  // animation (three.js AnimationMixer: model matrices and bone textures set each frame) moves; options.loop false holds it
+  const looping = Boolean(p.loop && options.loop !== false && options.animate !== false && RF === p.loop.n && RF > 2);
+  let loopNext = 0; // when the frame on screen gives way to the next one (performance.now ms)
+  if (!looping && options.animate !== false && options.steady !== false && RF > 1) {
     const last = p.frames[RF - 1].steps;
     const keyed = (steps) => { const seen = new Map(); return steps.map((s) => { if (s.op !== 'draw') return null; const k = s.material + '#' + (seen.get(s.material) || 0); seen.set(s.material, (seen.get(s.material) || 0) + 1); return k; }); };
     const lastKeys = keyed(last);
@@ -904,7 +908,16 @@ export function createRebuild(canvas, data, options = {}) {
         runFrame(f, false, blend);
         bl = null;
         lastAbs = f;
-        frame = f >= SB ? frame : (f + 1) % RF;
+        if (looping && f < RF) {
+          // the next frame once this one has been up as long as it was on the site (a slow display skips none: each frame's
+          // uploads run in order); a fast one shows it again meanwhile
+          const now = performance.now();
+          if (!loopNext) loopNext = now + p.loop.ms[f];
+          if (now >= loopNext) {
+            frame = (f + 1) % RF;
+            loopNext = Math.max(loopNext + p.loop.ms[frame], now);
+          }
+        } else frame = f >= SB ? frame : (f + 1) % RF;
       }
     },
     tape,
