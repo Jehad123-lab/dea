@@ -233,7 +233,7 @@ export interface StandInInfo {
   /** Round 43: stand-in triangles kept in both windings (the two sides of a thin shell, Round 42) */
   bothSides?: number;
   /** Round 57: an outline shell rebuilt from this material's stand-in (the body it wraps), pushed out by this much */
-  shellOf?: { material: number; offset: number };
+  shellOf?: { material: number; offset: number; program?: string; vertices?: number; sameCount?: boolean };
   /** Round 58: an outline shell that found no body: the closest candidate and the rule it broke */
   shellMiss?: string;
 }
@@ -798,37 +798,79 @@ export interface ShellCandidate {
   info: Pick<StandInInfo, 'material' | 'program'> & { vertices?: number; shellOf?: StandInInfo['shellOf']; shellMiss?: string };
   min: number[];
   max: number[];
+  /** Round 59: the 1st and 99th percentile of the site's vertices per axis (one stray vertex does not move them) */
+  rmin?: number[];
+  rmax?: number[];
+}
+
+/**
+ * Round 59: per-axis 1st and 99th percentile of the vertices a draw uses (up to 60000 of them, evenly sampled); min/max when
+ * fewer than 100. keyframes' 3206-vertex outline shell agreed with its body to +0.40..+0.50 on five sides and +55.8 on the
+ * sixth: one stray vertex, not a real size gap.
+ */
+export function robustBounds(ids: ArrayLike<number>, posOf: (v: number) => number[], lo = 0.01, hi = 0.99): { min: number[]; max: number[] } {
+  const uniq = [...new Set(Array.from(ids))];
+  const step = Math.max(1, Math.ceil(uniq.length / 60000));
+  const axes: number[][] = [[], [], []];
+  for (let i = 0; i < uniq.length; i += step) {
+    const p = posOf(uniq[i]);
+    for (let k = 0; k < 3; k++) if (Number.isFinite(p[k])) axes[k].push(p[k]);
+  }
+  const min: number[] = [];
+  const max: number[] = [];
+  for (const a of axes) {
+    a.sort((x, y) => x - y);
+    const n = a.length;
+    if (!n) {
+      min.push(Number.NaN);
+      max.push(Number.NaN);
+      continue;
+    }
+    const few = n < 100;
+    min.push(few ? a[0] : a[Math.floor(lo * (n - 1))]);
+    max.push(few ? a[n - 1] : a[Math.ceil(hi * (n - 1))]);
+  }
+  return { min, max };
 }
 
 /** a material that draws an outline shell (an inverted hull: the same shape pushed out a little, its back faces drawn dark) */
 export const isOutlineProgram = (name: string) => /outline|silhouette|inverted.?hull|contour/i.test(name);
 
 /**
- * Round 57: the body an outline shell wraps: a stand-in of another (non-outline) material whose site bounds sit inside the
- * shell's by about the same gap on all six sides (Round 58), one with the same vertex count first, then the closest fit;
- * with the shell's offset (the median gap). Null when none fits.
+ * Round 57: the body an outline shell wraps: a stand-in of another (non-outline) material whose bounds (Round 59: 1st-99th
+ * percentile) sit inside the shell's, every gap under 5% of its size, the thinnest first; failing that, the same mesh again
+ * (same vertex count) with the six gaps in agreement (Round 58). The offset is the median gap. Null when none fits.
  */
 export function bodyOfShell(shell: ShellCandidate, list: ShellCandidate[]): { body: ShellCandidate; offset: number } | null {
-  const size = Math.max(...[0, 1, 2].map((k) => shell.max[k] - shell.min[k]));
+  const sMin = shell.rmin ?? shell.min;
+  const sMax = shell.rmax ?? shell.max;
+  const size = Math.max(...[0, 1, 2].map((k) => sMax[k] - sMin[k]));
   if (!(size > 0)) return null;
-  let best: { body: ShellCandidate; offset: number; err: number } | null = null;
+  // Round 59: Round 57's per-side rule first (every gap between -1% and 5% of the size), the thinnest passing body; only
+  // when none passes, Round 58's agreement rule, and then only for the twin (the same vertex count): Round 58 let it pick
+  // any body and keyframes' 11027-vertex shells wrapped material 7 at offset 37.8 (a floating shard over the base)
+  let tight: { body: ShellCandidate; offset: number; key: number } | null = null;
+  let loose: { body: ShellCandidate; offset: number } | null = null;
   for (const b of list) {
     if (b === shell || !b.step.proxy || isOutlineProgram(b.info.program)) continue;
+    const bMin = b.rmin ?? b.min;
+    const bMax = b.rmax ?? b.max;
     const gaps: number[] = [];
-    for (let k = 0; k < 3; k++) gaps.push(b.min[k] - shell.min[k], shell.max[k] - b.max[k]);
+    for (let k = 0; k < 3; k++) gaps.push(bMin[k] - sMin[k], sMax[k] - bMax[k]);
     gaps.sort((x, y) => x - y);
     const offset = Math.max(0, (gaps[2] + gaps[3]) / 2);
-    // Round 58: a shell is pushed out by one distance in world units, so on a small object the gap is a large share of its
-    // size (keyframes: offset 0.75; the 11027- and 3206-vertex shells missed Round 57's 5%-of-size rule). What makes a body is
-    // that the six gaps agree: none clearly negative, their spread within 5% of the size plus half the offset, the offset
-    // under a quarter of the size
-    if (gaps[0] < -0.02 * size || gaps[5] - gaps[0] > 0.05 * size + 0.5 * offset || offset > 0.25 * size) continue;
-    // Round 58: an inverted hull is usually the same mesh again: a body with the shell's vertex count comes first
     const same = shell.info.vertices != null && shell.info.vertices === b.info.vertices;
-    const err = (gaps[5] - gaps[0]) / size + (same ? 0 : 1);
-    if (!best || err < best.err) best = { body: b, offset, err };
+    if (gaps[0] >= -0.01 * size && gaps[5] <= 0.05 * size) {
+      // the thinnest passing body; on a tie (within 0.1% of the size) the same mesh again
+      const key = offset - (same ? 0.001 * size : 0);
+      if (!tight || key < tight.key) tight = { body: b, offset, key };
+      continue;
+    }
+    if (!same) continue;
+    if (gaps[0] < -0.02 * size || gaps[5] - gaps[0] > 0.05 * size + 0.5 * offset || offset > 0.25 * size) continue;
+    if (!loose || offset < loose.offset) loose = { body: b, offset };
   }
-  return best ? { body: best.body, offset: best.offset } : null;
+  return tight ? { body: tight.body, offset: tight.offset } : loose;
 }
 
 const SIDES = ['left', 'right', 'bottom', 'top', 'back', 'front'];
@@ -838,12 +880,14 @@ const SIDES = ['left', 'right', 'bottom', 'top', 'back', 'front'];
  * to the shell's sides, the same vertex count first) and which of bodyOfShell's rules it broke, with the six gaps.
  */
 export function shellNearMiss(shell: ShellCandidate, list: ShellCandidate[]): string {
-  const size = Math.max(...[0, 1, 2].map((k) => shell.max[k] - shell.min[k]));
+  const sMin = shell.rmin ?? shell.min;
+  const sMax = shell.rmax ?? shell.max;
+  const size = Math.max(...[0, 1, 2].map((k) => sMax[k] - sMin[k]));
   let best: { b: ShellCandidate; gaps: number[]; err: number } | null = null;
   for (const b of list) {
     if (b === shell || isOutlineProgram(b.info.program)) continue;
     const gaps: number[] = [];
-    for (let k = 0; k < 3; k++) gaps.push(b.min[k] - shell.min[k], shell.max[k] - b.max[k]);
+    for (let k = 0; k < 3; k++) gaps.push((b.rmin ?? b.min)[k] - sMin[k], sMax[k] - (b.rmax ?? b.max)[k]);
     const same = shell.info.vertices != null && shell.info.vertices === b.info.vertices;
     const err = (Math.max(...gaps) - Math.min(...gaps) + Math.abs(Math.min(0, ...gaps)) * 4) / (size || 1) + (same ? 0 : 1);
     if (!best || err < best.err) best = { b, gaps, err };
@@ -863,8 +907,11 @@ export function shellNearMiss(shell: ShellCandidate, list: ShellCandidate[]): st
     );
   }
   if (offset > 0.25 * size) why.push(`gap ${r(offset)} over a quarter of the shell's size ${r(size)}`);
+  const twin = shell.info.vertices != null && shell.info.vertices === b.info.vertices;
+  if (!why.length && !twin && !(sorted[0] >= -0.01 * size && sorted[5] <= 0.05 * size))
+    why.push(`a gap over 5% of the shell's size ${r(size)} needs a body with the same vertex count`);
   const same = shell.info.vertices != null && shell.info.vertices === b.info.vertices;
-  const verts = b.info.vertices != null ? `, ${b.info.vertices} vertices${same ? ', same count' : ''}` : '';
+  const verts = b.info.vertices != null ? `, ${b.info.vertices} vertices, ${same ? 'same count' : 'different count'}` : '';
   return `closest: material ${b.info.material} (${b.info.program}${verts}): ${why.join('; ') || 'fits now'}; gaps ${gaps.map((g, i) => `${SIDES[i]} ${g >= 0 ? '+' : ''}${r(g)}`).join(', ')}`;
 }
 
@@ -939,7 +986,14 @@ export function shellsFromBodies(list: ShellCandidate[], seen?: { shells: number
       continue;
     }
     s.step.proxy = { ...s.step.proxy, ...shellFromBody(s.step.proxy, bp, m.offset) };
-    s.info.shellOf = { material: m.body.info.material, offset: Math.round(m.offset * 1e4) / 1e4 };
+    s.info.shellOf = {
+      material: m.body.info.material,
+      offset: Math.round(m.offset * 1e4) / 1e4,
+      // Round 59: which body, for the log
+      program: m.body.info.program,
+      vertices: m.body.info.vertices,
+      sameCount: s.info.vertices != null && s.info.vertices === m.body.info.vertices,
+    };
     done++;
   }
   return done;
@@ -1959,7 +2013,9 @@ export function rebuildPipeline(
       });
       if (px) {
         step.proxy = px;
-        made.push({ step, info, min, max });
+        // Round 59: percentile bounds for matching outline shells to bodies (only outline-relevant work: cheap sort per axis)
+        const rbx = robustBounds(tris, (v) => [at(v, 0), at(v, 1), Math.min(3, pos.size) > 2 ? at(v, 2) : 0]);
+        made.push({ step, info, min, max, rmin: rbx.min, rmax: rbx.max });
         stats.proxies++;
         info.standInVertices = px.pos.length / 3;
         info.flipped = px.flipped ?? 0;

@@ -49,7 +49,7 @@ describe('Round 57: outline shells from their body', () => {
     const lone = cand('outline', 1, 4);
     const loneProxy = lone.step.proxy;
     expect(shellsFromBodies([body, shell, lone])).toBe(1);
-    expect(shell.info.shellOf).toEqual({ material: 5, offset: 0.02 });
+    expect(shell.info.shellOf).toMatchObject({ material: 5, offset: 0.02 });
     expect(lone.step.proxy).toBe(loneProxy);
     expect(body.info.shellOf).toBeUndefined();
   });
