@@ -297,7 +297,7 @@ common(
       'decode a site and write what you can USE: design tokens (CSS, Tailwind, W3C), motion as GSAP and CSS, shaders as three.js modules with a scene for React, vanilla or Framer; then a visual diff with research-and-retry',
     )
     .argument('[url]', 'site to extract')
-    .option('--to <target>', 'react, vanilla or framer', 'react')
+    .option('--to <target>', 'react, next, vanilla or framer', 'react')
     .option('--section <selector>', 'keep only motion that touches this CSS selector')
     .option('--own-assets', "placeholders instead of the site's images and large meshes; the kit carries none of the site's recorded bytes")
     .option(
@@ -380,7 +380,7 @@ common(
     },
   ) =>
     run(async () => {
-      if (!['react', 'vanilla', 'framer'].includes(flags.to)) throw new Error('--to must be react, vanilla or framer');
+      if (!['react', 'next', 'vanilla', 'framer'].includes(flags.to)) throw new Error('--to must be react, next, vanilla or framer');
       const from = Object.fromEntries(
         (flags.from ?? '')
           .split(',')
@@ -425,7 +425,7 @@ common(
               }
               const r = await extract(u, {
                 ...options(flags),
-                to: flags.to as 'react' | 'vanilla' | 'framer',
+                to: flags.to as 'react' | 'next' | 'vanilla' | 'framer',
                 section: flags.section,
                 ownAssets: flags.ownAssets,
                 ownAssetsCost: flags.ownAssetsCost,

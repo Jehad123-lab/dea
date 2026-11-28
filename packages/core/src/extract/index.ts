@@ -27,6 +27,7 @@ import { buildPageMap, fitScrollTape, pageMapMd, type ScrollTapeFit, tapeMoved }
 import { fitTape } from '../replay/tape.ts';
 import type { InspectOptions } from '../see/inspect.ts';
 import { currentTimings, overBudget, type StageTiming, Timings, type TimingsDoc, timed, withTimings } from '../timings.ts';
+import { analyzeArchitecture, renderArchitectureMd, researchArchitecture } from './architecture.ts';
 import { type FullPageResult, type PageStopsResult, pageStopsMd, readFullPage, scorePageStops, stopsSheet } from './fullpage.ts';
 import {
   type HeroLayout,
@@ -1828,6 +1829,22 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           }
         }
       } finally {
+        const stackHints = [
+          ...(threeVersion ? [`three.js ${threeVersion}`] : []),
+          ...(hasMotion ? ['GSAP / CSS Motion'] : []),
+          ...(layout?.page?.wheelRatio ? ['Virtual / Smooth Scroll'] : []),
+        ];
+        const rawArch = analyzeArchitecture({
+          site: url,
+          stack: stackHints,
+          passes,
+          programs,
+          mods,
+          pageLayer: layout?.page ?? null,
+        });
+        const arch = !opts.noResearch && rawArch.techniques.length ? await researchArchitecture(rawArch, { maxTechniques: 2 }).catch(() => rawArch) : rawArch;
+        await put('architecture.json', `${JSON.stringify(arch, null, 2)}\n`);
+        await put('architecture.md', renderArchitectureMd(arch));
         doneScore();
         currentTimings()?.note(`${renders} preview renders`);
         await cmp.close();
