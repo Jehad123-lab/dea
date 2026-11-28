@@ -1195,7 +1195,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           for (const si of (rb.stats.standIns ?? []).filter((x) => x.shellOf).slice(0, 8)) {
             const o = si.shellOf as NonNullable<StandInInfo['shellOf']>;
             say(
-              `  outline shell, material ${si.material} (${si.vertices} vertices): follows material ${o.material} (${o.program ?? '?'}, ${o.vertices ?? '?'} vertices${o.sameCount ? ', same count' : ''}) at offset ${o.offset}`,
+              `  outline shell, material ${si.material} (${si.vertices} vertices): follows material ${o.material} (${o.program ?? '?'}, ${o.vertices ?? '?'} vertices${o.sameCount ? ', same count' : ''}) at offset ${o.offset}${o.open ? ` (five sides; the ${o.open} reaches further)` : ''}`,
             );
           }
           // Round 58: each shell that found no body, with its closest candidate and the rule it broke

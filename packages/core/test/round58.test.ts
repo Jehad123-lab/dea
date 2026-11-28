@@ -22,9 +22,9 @@ describe('Round 58: outline shells on small objects', () => {
     expect(m?.body).toBe(body);
     expect(m?.offset).toBeCloseTo(0.75, 6);
   });
-  it('uneven gaps are not a shell of that body', () => {
+  it('uneven gaps are not a shell of that body (Round 60: on two sides; one wider side is the five-side rule)', () => {
     const body = cand('normal', 5, [0, 0, 0], [2, 2, 2]);
-    const shell = cand('outline', 1, [-0.1, -0.1, -0.1], [3.5, 2.1, 2.1]);
+    const shell = cand('outline', 1, [-0.1, -0.1, -0.1], [3.5, 2.6, 2.1]);
     expect(bodyOfShell(shell, [body])).toBeNull();
   });
   it('a body poking out of the shell, or a gap over a quarter of the size, is not one', () => {
