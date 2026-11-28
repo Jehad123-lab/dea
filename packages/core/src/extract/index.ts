@@ -171,6 +171,41 @@ export function recordFrameCount(n?: number): number {
   return n != null && Number.isFinite(n) ? Math.max(2, Math.min(120, Math.round(n))) : 2;
 }
 
+/**
+ * Round 61: the meshes of the material whose stand-ins hold the most of the site's vertices (outline shells and boxes
+ * aside), one cost variant per vertex buffer, the biggest first. three.js keyframes' material 5 (normal #397) costs +3.9
+ * canvas points as a whole across five meshes (46938, 23062, 19672, 12782 and 1792 vertices, each drawn twice): which one
+ * holds the points decides where a better stand-in pays. Empty when that material has one mesh.
+ */
+export function costMeshSplit(
+  list: StandInInfo[],
+  max = 3,
+): Array<{ buf: number; material: number; program: string; vertices: number; standInVertices: number; flipped: number; n: number }> {
+  const ok = list.filter((s) => s.buf != null && !s.box && !/outline|silhouette|inverted.?hull|contour/i.test(s.program));
+  const byMat = new Map<number, number>();
+  for (const s of ok) byMat.set(s.material, (byMat.get(s.material) ?? 0) + s.vertices);
+  const top = [...byMat].sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (top == null) return [];
+  const byBuf = new Map<number, { buf: number; material: number; program: string; vertices: number; standInVertices: number; flipped: number; n: number }>();
+  for (const s of ok) {
+    if (s.material !== top || s.buf == null) continue;
+    const g = byBuf.get(s.buf);
+    if (g) g.n++;
+    else
+      byBuf.set(s.buf, {
+        buf: s.buf,
+        material: s.material,
+        program: s.program,
+        vertices: s.vertices,
+        standInVertices: s.standInVertices,
+        flipped: s.flipped ?? 0,
+        n: 1,
+      });
+  }
+  if (byBuf.size < 2) return [];
+  return [...byBuf.values()].sort((a, b) => b.vertices - a.vertices).slice(0, max);
+}
+
 export function costGrids(shipped: number): number[] {
   return [16, 32].filter((g) => g > shipped);
 }
@@ -1204,7 +1239,15 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           if (opts.ownAssets && (opts.ownAssetsCost || costOnly)) {
             // built one at a time when scored (Round 40: up to 8 variants, each a full copy of the recording)
             const variant =
-              (images: boolean, meshes: boolean, realMaterials?: number[], grid = texGrid, standInPlace?: StandInPlace, shellsFromBody = true) =>
+              (
+                images: boolean,
+                meshes: boolean,
+                realMaterials?: number[],
+                grid = texGrid,
+                standInPlace?: StandInPlace,
+                shellsFromBody = true,
+                more: { realBuffers?: number[]; folds?: 'flip' | 'drop' } = {},
+              ) =>
               (): RbFiles => {
                 const d = structuredClone(recDoc as CaptureDoc);
                 const b = new Uint8Array(binU8);
@@ -1218,6 +1261,7 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
                   texGrid: grid,
                   standInPlace,
                   shellsFromBody,
+                  ...more,
                 });
                 return { pipeline: JSON.stringify(compactFrames(v.pipeline)), shaders: v.shaders, data: b };
               };
@@ -1242,9 +1286,17 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
                     },
                   ]
                 : []),
-              // Round 56: stand-in corners on the site's surface instead of their cell's average (same cells, same shape kept)
-              { what: 'stand-in corners halfway to the surface (blend), image colour grids', build: variant(false, false, undefined, texGrid, 'blend') },
-              { what: 'stand-in corners on the surface (plane fit), image colour grids', build: variant(false, false, undefined, texGrid, 'surface') },
+              // Round 61: the biggest material's meshes one at a time (which mesh holds its points), and folded stand-in triangles
+              // left out instead of turned back. Round 56's corner placements (blend, plane fit) are no longer scored: on keyframes
+              // they never beat the average in four rounds (Round 60: -0.2 and -0.6) and the 120 s budget is better spent here
+              ...costMeshSplit(rb.stats.standIns ?? []).map((m) => ({
+                what: `the site's mesh for material ${m.material}'s ${m.vertices}-vertex draws only (${m.program}, ${m.n} draw${m.n === 1 ? '' : 's'}, stand-in ${m.standInVertices} vertices, ${m.flipped} folded)`,
+                build: variant(false, false, undefined, texGrid, undefined, true, { realBuffers: [m.buf] }),
+              })),
+              {
+                what: 'folded stand-in triangles left out (not turned back), image colour grids',
+                build: variant(false, false, undefined, texGrid, undefined, true, { folds: 'drop' }),
+              },
               // Round 46: what finer colour grids would buy (stand-in meshes, grids only), so the --own-assets-grid choice has numbers
               ...costGrids(texGrid).map((g) => ({
                 what: `image colour grids of ${g}x${g} (--own-assets-grid ${g}), stand-in meshes`,

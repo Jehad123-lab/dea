@@ -1079,7 +1079,7 @@ export function proxyMesh(
   max: number[],
   grid = PROXY_GRID,
   extra: Array<{ name: string; size: number; read: (v: number) => number[]; pick?: boolean }> = [],
-  opts: { texGrid?: number; place?: StandInPlace } = {},
+  opts: { texGrid?: number; place?: StandInPlace; folds?: 'flip' | 'drop' } = {},
 ): {
   pos: number[];
   idx: number[];
@@ -1241,8 +1241,12 @@ export function proxyMesh(
     const n = triNormal(P(a), P(b), P(c));
     const f = facing[t];
     if (n[0] * f[0] + n[1] * f[1] + n[2] * f[2] < 0) {
-      [b, c] = [c, b];
       flipped++;
+      // Round 61: a folded triangle (its corners moved so far it faces away) turned back lies over its neighbours; three.js
+      // keyframes' 46938-vertex body turned back 3363 of them (31%, the other bodies 2-9%). 'drop' leaves them out, so
+      // --own-assets-cost can measure which is closer to the site
+      if (opts.folds === 'drop') continue;
+      [b, c] = [c, b];
     }
     // one key per winding: rotate so the smallest corner leads (a b c, b c a, c a b are the same triangle)
     while (a > b || a > c) [a, b, c] = [b, c, a];
@@ -1297,6 +1301,10 @@ export function rebuildPipeline(
     standInPlace?: StandInPlace;
     /** Round 57: outline shells built from the stand-in of the body they wrap (default true; false clusters them on their own) */
     shellsFromBody?: boolean;
+    /** Round 61, --own-assets-cost only: draws reading these vertex buffers keep the site's mesh (what one mesh's stand-in costs) */
+    realBuffers?: number[];
+    /** Round 61: stand-in triangles that fold over: turned back (default) or left out */
+    folds?: 'flip' | 'drop';
     sceneNodes?: Map<string, string>;
   } = { data: 'data.bin' },
 ): { pipeline: PipelineDoc; shaders: Record<string, string>; stats: RebuildStats } {
@@ -1972,6 +1980,7 @@ export function rebuildPipeline(
     const realBufs = new Set<number>();
     const made: ShellCandidate[] = [];
     for (const { step, pos } of meshDraws) if (realMats.has(step.material)) realBufs.add(pos.buf);
+    for (const b of opts.realBuffers ?? []) realBufs.add(b);
     for (const { step, pos } of meshDraws) {
       if (realMats.has(step.material) || realBufs.has(pos.buf)) {
         for (const at of step.attrs) realBufs.add(at.buf);
@@ -2047,6 +2056,7 @@ export function rebuildPipeline(
       const px = proxyMesh(tris, (v) => [at(v, 0), at(v, 1), Math.min(3, pos.size) > 2 ? at(v, 2) : 0], min, max, PROXY_GRID, extra, {
         texGrid: opts.texGrid,
         place: opts.standInPlace,
+        folds: opts.folds,
       });
       if (px) {
         step.proxy = px;
