@@ -11,6 +11,13 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 58: outline shells on small objects find their body, and the ones that do not say why. On three.js keyframes
+  only 2 of 6 outline stand-ins followed a body (the 55921-vertex pair, offset 0.75); the 11027- and 3206-vertex shells
+  missed Round 57's rule that every side gap be under 5% of the shell's size. A shell is pushed out by one distance in
+  world units, so on a small object that gap is a large share of its size. `bodyOfShell` now asks that the six gaps agree:
+  none clearly negative, their spread within 5% of the size plus half the offset, the offset under a quarter of the size;
+  a body with the shell's vertex count comes first. The log prints "outline shells: N of M follow their body's stand-in"
+  and, for each shell that found none, `shellNearMiss`: the closest candidate, the rule it broke and the six gaps.
 - Round 57: outline shells follow their body's stand-in. On three.js keyframes material 1 (outline #379, 6 stand-ins) is
   worth 3.6 canvas points with the site's meshes, and Round 56's corner placement bought only +0.7 (blend). An outline
   shell is the body pushed out a little and drawn inside out; clustered on its own, a shell thinner than a cell landed
