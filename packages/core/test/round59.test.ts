@@ -51,8 +51,8 @@ describe('Round 59: a large gap needs the twin body', () => {
     // under 100 vertices: plain min and max
     expect(robustBounds([0, 400], (v) => P[v]).max[2]).toBe(56);
   });
-  it('a stray vertex no longer hides the body, and the thinnest tight body wins', () => {
-    const body = cand('normal', 5, [0, 0, 0], [10, 10, 10], 1792);
+  it('a stray vertex no longer hides the twin, and the thinnest tight body wins (Round 60: percentiles only for the twin)', () => {
+    const body = cand('normal', 5, [0, 0, 0], [10, 10, 10], 3206);
     const thick = cand('normal', 6, [0.4, 0.4, 0.4], [9.6, 9.6, 9.6], 900);
     const shell = cand('outline', 1, [-0.45, -0.45, -0.45], [10.45, 10.45, 65.8], 3206);
     shell.rmax = [10.45, 10.45, 10.45];
