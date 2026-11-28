@@ -204,6 +204,8 @@ export interface RebuildStats {
   standIns?: StandInInfo[];
   /** Round 57: outline shells rebuilt from their body's stand-in */
   shellsFromBody?: number;
+  /** Round 58: outline-material stand-ins in all (so the log can say how many found no body) */
+  outlineShells?: number;
 }
 
 /** one --own-assets stand-in: which material, how it is drawn, how much of it is left, which vertex inputs it kept */
@@ -232,6 +234,8 @@ export interface StandInInfo {
   bothSides?: number;
   /** Round 57: an outline shell rebuilt from this material's stand-in (the body it wraps), pushed out by this much */
   shellOf?: { material: number; offset: number };
+  /** Round 58: an outline shell that found no body: the closest candidate and the rule it broke */
+  shellMiss?: string;
 }
 
 /**
@@ -791,7 +795,7 @@ export function normalBucket(n: number[]): number {
 /** Round 57: a stand-in made this run, with the bounds of the site's mesh it stands in for */
 export interface ShellCandidate {
   step: { proxy?: { pos: number[]; idx: number[]; attrs?: Record<string, { size: number; data: number[] }> } };
-  info: Pick<StandInInfo, 'material' | 'program'> & { shellOf?: StandInInfo['shellOf'] };
+  info: Pick<StandInInfo, 'material' | 'program'> & { vertices?: number; shellOf?: StandInInfo['shellOf']; shellMiss?: string };
   min: number[];
   max: number[];
 }
@@ -801,31 +805,67 @@ export const isOutlineProgram = (name: string) => /outline|silhouette|inverted.?
 
 /**
  * Round 57: the body an outline shell wraps: a stand-in of another (non-outline) material whose site bounds sit inside the
- * shell's, each side within 5% of the shell's size, the closest fit first; with the shell's offset (the median gap of the six
- * sides). Null when none fits.
+ * shell's by about the same gap on all six sides (Round 58), one with the same vertex count first, then the closest fit;
+ * with the shell's offset (the median gap). Null when none fits.
  */
 export function bodyOfShell(shell: ShellCandidate, list: ShellCandidate[]): { body: ShellCandidate; offset: number } | null {
   const size = Math.max(...[0, 1, 2].map((k) => shell.max[k] - shell.min[k]));
   if (!(size > 0)) return null;
-  const tol = size * 0.05;
   let best: { body: ShellCandidate; offset: number; err: number } | null = null;
   for (const b of list) {
     if (b === shell || !b.step.proxy || isOutlineProgram(b.info.program)) continue;
     const gaps: number[] = [];
-    let ok = true;
-    for (let k = 0; k < 3 && ok; k++) {
-      const lo = b.min[k] - shell.min[k];
-      const hi = shell.max[k] - b.max[k];
-      if (lo < -tol * 0.2 || hi < -tol * 0.2 || lo > tol || hi > tol) ok = false;
-      gaps.push(lo, hi);
-    }
-    if (!ok) continue;
+    for (let k = 0; k < 3; k++) gaps.push(b.min[k] - shell.min[k], shell.max[k] - b.max[k]);
     gaps.sort((x, y) => x - y);
     const offset = Math.max(0, (gaps[2] + gaps[3]) / 2);
-    const err = gaps.reduce((n, g) => n + Math.abs(g - offset), 0);
+    // Round 58: a shell is pushed out by one distance in world units, so on a small object the gap is a large share of its
+    // size (keyframes: offset 0.75; the 11027- and 3206-vertex shells missed Round 57's 5%-of-size rule). What makes a body is
+    // that the six gaps agree: none clearly negative, their spread within 5% of the size plus half the offset, the offset
+    // under a quarter of the size
+    if (gaps[0] < -0.02 * size || gaps[5] - gaps[0] > 0.05 * size + 0.5 * offset || offset > 0.25 * size) continue;
+    // Round 58: an inverted hull is usually the same mesh again: a body with the shell's vertex count comes first
+    const same = shell.info.vertices != null && shell.info.vertices === b.info.vertices;
+    const err = (gaps[5] - gaps[0]) / size + (same ? 0 : 1);
     if (!best || err < best.err) best = { body: b, offset, err };
   }
   return best ? { body: best.body, offset: best.offset } : null;
+}
+
+const SIDES = ['left', 'right', 'bottom', 'top', 'back', 'front'];
+
+/**
+ * Round 58: why an outline shell found no body, for the log: the closest other stand-in (the smallest spread of its six gaps
+ * to the shell's sides, the same vertex count first) and which of bodyOfShell's rules it broke, with the six gaps.
+ */
+export function shellNearMiss(shell: ShellCandidate, list: ShellCandidate[]): string {
+  const size = Math.max(...[0, 1, 2].map((k) => shell.max[k] - shell.min[k]));
+  let best: { b: ShellCandidate; gaps: number[]; err: number } | null = null;
+  for (const b of list) {
+    if (b === shell || isOutlineProgram(b.info.program)) continue;
+    const gaps: number[] = [];
+    for (let k = 0; k < 3; k++) gaps.push(b.min[k] - shell.min[k], shell.max[k] - b.max[k]);
+    const same = shell.info.vertices != null && shell.info.vertices === b.info.vertices;
+    const err = (Math.max(...gaps) - Math.min(...gaps) + Math.abs(Math.min(0, ...gaps)) * 4) / (size || 1) + (same ? 0 : 1);
+    if (!best || err < best.err) best = { b, gaps, err };
+  }
+  if (!best) return 'no other stand-in to wrap';
+  const { b, gaps } = best;
+  const sorted = [...gaps].sort((x, y) => x - y);
+  const offset = Math.max(0, (sorted[2] + sorted[3]) / 2);
+  const r = (x: number) => Math.round(x * 1000) / 1000;
+  const why: string[] = [];
+  if (!b.step.proxy) why.push('it has no stand-in shape (a box)');
+  if (sorted[0] < -0.02 * size) why.push(`it pokes out of the shell (${SIDES[gaps.indexOf(sorted[0])]} ${r(sorted[0])})`);
+  if (sorted[5] - sorted[0] > 0.05 * size + 0.5 * offset) {
+    const far = gaps.reduce((k, g, i) => (Math.abs(g - offset) > Math.abs(gaps[k] - offset) ? i : k), 0);
+    why.push(
+      `gaps uneven (spread ${r(sorted[5] - sorted[0])} over ${r(0.05 * size + 0.5 * offset)}; worst ${SIDES[far]} ${gaps[far] >= 0 ? '+' : ''}${r(gaps[far])})`,
+    );
+  }
+  if (offset > 0.25 * size) why.push(`gap ${r(offset)} over a quarter of the shell's size ${r(size)}`);
+  const same = shell.info.vertices != null && shell.info.vertices === b.info.vertices;
+  const verts = b.info.vertices != null ? `, ${b.info.vertices} vertices${same ? ', same count' : ''}` : '';
+  return `closest: material ${b.info.material} (${b.info.program}${verts}): ${why.join('; ') || 'fits now'}; gaps ${gaps.map((g, i) => `${SIDES[i]} ${g >= 0 ? '+' : ''}${r(g)}`).join(', ')}`;
 }
 
 /**
@@ -887,13 +927,17 @@ export function shellFromBody(
 }
 
 /** Round 57: every outline shell with a body that fits gets its stand-in from that body's; how many did */
-export function shellsFromBodies(list: ShellCandidate[]): number {
+export function shellsFromBodies(list: ShellCandidate[], seen?: { shells: number }): number {
   let done = 0;
   for (const s of list) {
     if (!s.step.proxy || !isOutlineProgram(s.info.program)) continue;
+    if (seen) seen.shells++;
     const m = bodyOfShell(s, list);
     const bp = m?.body.step.proxy;
-    if (!m || !bp) continue;
+    if (!m || !bp) {
+      s.info.shellMiss = shellNearMiss(s, list);
+      continue;
+    }
     s.step.proxy = { ...s.step.proxy, ...shellFromBody(s.step.proxy, bp, m.offset) };
     s.info.shellOf = { material: m.body.info.material, offset: Math.round(m.offset * 1e4) / 1e4 };
     done++;
@@ -1926,7 +1970,11 @@ export function rebuildPipeline(
       }
     }
     // Round 57: outline shells follow their body's stand-in
-    if (opts.shellsFromBody !== false) stats.shellsFromBody = shellsFromBodies(made);
+    if (opts.shellsFromBody !== false) {
+      const seen = { shells: 0 };
+      stats.shellsFromBody = shellsFromBodies(made, seen);
+      stats.outlineShells = seen.shells;
+    }
     for (const { step } of meshDraws) {
       if (!step.placeholder) continue;
       for (const at of step.attrs) {

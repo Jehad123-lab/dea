@@ -1186,6 +1186,14 @@ async function extractRun(url: string, opts: ExtractOptions): Promise<ExtractRes
           if (opts.ownAssets) await put('public/rebuild/data.bin', Buffer.from(rbBin.buffer, rbBin.byteOffset, rbBin.byteLength));
           await put('rebuild/rebuild.js', REBUILD_RUNNER);
           rebuildDoc = { pipeline: rb.pipeline, stats: rb.stats };
+          // Round 58: how many outline shells found the body they wrap (the count was only in extract.json before)
+          if (rb.stats.outlineShells)
+            say(
+              `outline shells: ${rb.stats.shellsFromBody ?? 0} of ${rb.stats.outlineShells} follow their body's stand-in${(rb.stats.shellsFromBody ?? 0) < rb.stats.outlineShells ? '; the rest are clustered on their own (no body inside them with an even gap)' : ''}`,
+            );
+          // Round 58: each shell that found no body, with its closest candidate and the rule it broke
+          for (const si of (rb.stats.standIns ?? []).filter((x) => x.shellMiss).slice(0, 8))
+            say(`  outline shell, material ${si.material} (${si.vertices} vertices): ${si.shellMiss}`);
           if (opts.ownAssets && (opts.ownAssetsCost || costOnly)) {
             // built one at a time when scored (Round 40: up to 8 variants, each a full copy of the recording)
             const variant =
