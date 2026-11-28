@@ -11,6 +11,14 @@ package of that name published and withdrew 0.1.0 in 2014 and npm never reuses a
 
 ### Added
 
+- Round 59: outline shells matched on percentile bounds, thinnest body first. On three.js keyframes Round 58 let 4 of 6
+  shells follow a body, but the wrong ones: the 11027-vertex pair wrapped material 7 at offset 37.8 (a floating shard over
+  the base), the 55921-vertex pair moved from offset 0.75 to 2.68, and the shipped canvas fell from 81.7% to 79.8% (in one
+  run the old own clustering scored 0.5 above it). The 3206-vertex shell agreed with its body to +0.40..+0.50 on five
+  sides and +55.8 on the sixth: one stray vertex. Matching now uses each mesh's 1st-99th percentile per axis
+  (`robustBounds`), takes the thinnest body that passes Round 57's per-side rule (every gap under 5% of the size), and
+  falls back to Round 58's agreement rule only for the same mesh again (same vertex count). The log names the body each
+  shell follows (material, program, vertex count, offset); a near miss says "same count" or "different count".
 - Round 58: outline shells on small objects find their body, and the ones that do not say why. On three.js keyframes
   only 2 of 6 outline stand-ins followed a body (the 55921-vertex pair, offset 0.75); the 11027- and 3206-vertex shells
   missed Round 57's rule that every side gap be under 5% of the shell's size. A shell is pushed out by one distance in

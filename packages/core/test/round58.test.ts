@@ -15,8 +15,9 @@ const cand = (program: string, material: number, lo: number[], hi: number[], ver
 describe('Round 58: outline shells on small objects', () => {
   it('a world-unit offset bigger than 5% of a small object still finds its body', () => {
     // a 2-unit object with a 0.75 shell (keyframes: offset 0.7502): Round 57 needed every gap under 5% of 3.5
-    const body = cand('normal', 5, [0, 0, 0], [2, 2, 2]);
-    const shell = cand('outline', 1, [-0.75, -0.75, -0.75], [2.75, 2.75, 2.75]);
+    // Round 59: a gap that large needs the twin (the same vertex count)
+    const body = cand('normal', 5, [0, 0, 0], [2, 2, 2], 11027);
+    const shell = cand('outline', 1, [-0.75, -0.75, -0.75], [2.75, 2.75, 2.75], 11027);
     const m = bodyOfShell(shell, [body, shell]);
     expect(m?.body).toBe(body);
     expect(m?.offset).toBeCloseTo(0.75, 6);
@@ -39,8 +40,8 @@ describe('Round 58: outline shells on small objects', () => {
   });
   it('counts every outline shell it looked at', () => {
     const seen = { shells: 0 };
-    const body = cand('normal', 5, [0, 0, 0], [2, 2, 2]);
-    const a = cand('outline', 1, [-0.75, -0.75, -0.75], [2.75, 2.75, 2.75]);
+    const body = cand('normal', 5, [0, 0, 0], [2, 2, 2], 900);
+    const a = cand('outline', 1, [-0.75, -0.75, -0.75], [2.75, 2.75, 2.75], 900);
     const b = cand('outline', 1, [10, 10, 10], [11, 11, 11]);
     expect(shellsFromBodies([body, a, b], seen)).toBe(1);
     expect(seen.shells).toBe(2);
